@@ -1,3 +1,4 @@
+-- keep-migration-version: already recorded on production schema_migrations
 -- Keep payment-sourced concessions (lump-sum Year-1 5%, student-portal
 -- one-time waiver) on fee_ledger.concession. sync_fee_ledger_concessions
 -- previously reset every row to manual concessions + offer waivers only,
