@@ -23,6 +23,20 @@ describe("startCloudCall", () => {
     expect(invokeEdge).toHaveBeenCalledWith("manual-call", { body: { lead_id: "lead-1" } });
   });
 
+  it("sends contact_id for bulk-imported call-list members with no lead", async () => {
+    invokeEdge.mockResolvedValue({
+      data: { call_id: "call-2", message: "Calling your phone..." },
+      error: null,
+    });
+
+    await expect(startCloudCall({ contactId: "contact-1" })).resolves.toEqual({
+      ok: true,
+      callId: "call-2",
+      message: "Calling your phone...",
+    });
+    expect(invokeEdge).toHaveBeenCalledWith("manual-call", { body: { contact_id: "contact-1" } });
+  });
+
   it("returns the call id on success", async () => {
     invokeEdge.mockResolvedValue({
       data: { call_id: "call-1", message: "Calling your phone..." },

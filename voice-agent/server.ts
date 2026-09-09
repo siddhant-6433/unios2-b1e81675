@@ -87,6 +87,7 @@ function firstPlivoCallerIdFromEnv(): string {
 // In-memory store for active call contexts (call_id → context)
 interface ActiveCall extends CallContext {
   leadId?: string;
+  contactId?: string;
   callLogId?: string;
   bridgeCallerId?: string;
   callerTranscript: string[];
@@ -3281,7 +3282,8 @@ Deno.serve({ port: PORT }, async (req) => {
     const ctx = await req.json();
     activeCallContexts.set(callId, {
       direction: "outbound",
-      leadId: ctx.leadId,
+      leadId: ctx.leadId || undefined,
+      contactId: ctx.contactId || undefined,
       leadName: ctx.leadName,
       courseName: ctx.courseName,
       campusName: ctx.campusName,
@@ -3482,17 +3484,17 @@ Deno.serve({ port: PORT }, async (req) => {
 
     // Context missing (server restart cleared in-memory map). Recover from DB so
     // call_logs and ai_call_records are still written and the client poll unblocks.
-    if (!callCtx?.leadId && SUPABASE_URL) {
+    if (!callCtx?.leadId && !callCtx?.contactId && SUPABASE_URL) {
       console.warn(`[BRIDGE-HANGUP ${callId}] Context missing — recovering from DB`);
       const recovDbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
       try {
         const recRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}&call_type=eq.manual&select=id,lead_id,caller_user_id&limit=1`,
+          `${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}&call_type=eq.manual&select=id,lead_id,contact_id,caller_user_id&limit=1`,
           { headers: recovDbH }
         );
         const recs = await recRes.json().catch(() => []);
         const rec = Array.isArray(recs) && recs.length > 0 ? recs[0] : null;
-        if (rec?.lead_id) {
+        if (rec?.lead_id || rec?.contact_id) {
           const dispMap: Record<string, string> = { cancel: "cancelled", busy: "busy", "no-answer": "not_answered", failed: "not_answered" };
           // Unknown status during recovery: default to not_answered, not cancelled.
           // Recovery only runs when context was lost — almost always means the
@@ -3507,7 +3509,8 @@ Deno.serve({ port: PORT }, async (req) => {
             method: "POST", headers: { ...recovDbH, Prefer: "return=minimal" },
             body: JSON.stringify({
               p_call_uuid: callId,
-              p_lead_id: rec.lead_id,
+              p_lead_id: rec.contact_id ? null : rec.lead_id,
+              p_contact_id: rec.contact_id || null,
               p_user_id: rec.caller_user_id || null,
               p_disposition: recDisp,
               p_duration: recDur,
@@ -3517,7 +3520,7 @@ Deno.serve({ port: PORT }, async (req) => {
               p_call_source: "cloud_dialer",
             }),
           }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] recovery call_log:`, e));
-          console.log(`[BRIDGE-HANGUP ${callId}] Recovery complete: lead=${rec.lead_id} disp=${recDisp}`);
+          console.log(`[BRIDGE-HANGUP ${callId}] Recovery complete: lead=${rec.lead_id || ""} contact=${rec.contact_id || ""} disp=${recDisp}`);
         }
       } catch (e) {
         console.error(`[BRIDGE-HANGUP ${callId}] Recovery failed:`, e);
@@ -3525,12 +3528,13 @@ Deno.serve({ port: PORT }, async (req) => {
       return new Response("OK");
     }
 
-    if (!callCtx?.leadId || !SUPABASE_URL) {
+    if ((!callCtx?.leadId && !callCtx?.contactId) || !SUPABASE_URL) {
       if (callCtx) activeCallContexts.delete(callId);
       return new Response("OK");
     }
 
     const leadId = callCtx.leadId;
+    const contactId = callCtx.contactId;
     const counsellorUserId = callCtx.toolCallsMade?.[0]?.args?.counsellorUserId || null;
     const counsellorName = callCtx.toolCallsMade?.[0]?.args?.counsellorName || "Counsellor";
     const statusRan = !!(callCtx as any)._statusRan;
@@ -3600,7 +3604,8 @@ Deno.serve({ port: PORT }, async (req) => {
       method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
       body: JSON.stringify({
         p_call_uuid:     callId,
-        p_lead_id:       leadId,
+        p_lead_id:       contactId ? null : leadId,
+        p_contact_id:    contactId || null,
         p_user_id:       counsellorUserId,
         p_disposition:   disposition || (isConnected ? null : callStatus),
         p_duration:      totalDuration,
@@ -3626,6 +3631,9 @@ Deno.serve({ port: PORT }, async (req) => {
       }),
     }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] ai_call_records:`, e.message));
 
+    // 3-5. Lead-backed side effects. Cold-list contacts have no lead row yet;
+    // retry / promotion is owned by cold_call_disposition on the dialer.
+    if (leadId && !contactId) {
     // 3. lead_activity
     await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
       method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
@@ -3679,6 +3687,7 @@ Deno.serve({ port: PORT }, async (req) => {
         await fetch(`${SUPABASE_URL}/rest/v1/lead_followups`, { method: "POST", headers: { ...dbH, Prefer: "return=minimal" }, body: JSON.stringify({ lead_id: leadId, scheduled_at: sched, type: "call", notes: `Auto: ${disposition?.replace("_"," ")} attempt ${att}. Next in ${gap}h.`, status: "pending" }) });
         await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, { method: "POST", headers: { ...dbH, Prefer: "return=minimal" }, body: JSON.stringify({ lead_id: leadId, content: `📞 ${disposition?.replace("_"," ").toUpperCase()} — followup in ${gap}h (${att}/4)` }) });
       }
+    }
     }
 
     activeCallContexts.delete(callId);

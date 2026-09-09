@@ -22,7 +22,7 @@ import { DialerQueuePane } from "@/components/dialer/DialerQueuePane";
 import { DialerLeadHeader } from "@/components/dialer/DialerLeadHeader";
 import { DialerActionRow, type DialerAction } from "@/components/dialer/DialerActionRow";
 import { DialerContextRail, type RailTab } from "@/components/dialer/DialerContextRail";
-import { type QueueLead } from "@/lib/dialerQueue";
+import { type QueueLead, isContactQueueLead } from "@/lib/dialerQueue";
 import { getCourseScript, getCourseHighlights, getCourseNudges } from "@/lib/dialerScript";
 import { ACTION_BADGE_POLL_MS, fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
 import {
@@ -43,7 +43,7 @@ import { isBptOrBmritCourseName } from "@/lib/cahet";
 import { isLeadCallDisposition, resolveCallDispositionTransition, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import { loadWhatsAppTemplateCatalog } from "@/lib/whatsappTemplateCatalog";
-import { startCloudCall } from "@/lib/startCloudCall";
+import { startCloudCall, cloudCallTarget } from "@/lib/startCloudCall";
 
 const CourseInfoPanel = lazy(() =>
   import("@/components/leads/CourseInfoPanel").then((m) => ({ default: m.CourseInfoPanel })));
@@ -483,6 +483,8 @@ export default function CloudDialer() {
       campus_name: r.campus_name || "—",
       bucket: "Call List",
       attempt_count: r.attempt_count || 0,
+      kind: r.kind === "contact" ? "contact" : "lead",
+      member_id: r.member_id || undefined,
       course_fee: (r.course_id && curatedFeeByCourse.get(r.course_id))
         || (r.course_fee_per_year
           ? `₹${Number(r.course_fee_per_year).toLocaleString("en-IN")}/year`
@@ -552,13 +554,15 @@ export default function CloudDialer() {
   // ── Fetch call history when current lead changes ─────────────────────────
   useEffect(() => {
     if (!currentLead) { setCallHistory([]); return; }
-    supabase.from("call_logs" as any)
+    const q = supabase.from("call_logs" as any)
       .select("id, disposition, notes, called_at, duration_seconds, direction")
-      .eq("lead_id", currentLead.id)
       .order("called_at", { ascending: false })
-      .limit(10)
-      .then(({ data }) => setCallHistory(data || []));
-  }, [currentLead?.id]);
+      .limit(10);
+    (isContactQueueLead(currentLead)
+      ? q.eq("contact_id", currentLead.id)
+      : q.eq("lead_id", currentLead.id)
+    ).then(({ data }) => setCallHistory(data || []));
+  }, [currentLead?.id, currentLead?.kind]);
 
   // ── Incoming call phone lookup ──────────────────────────────────────────
   const lookupByPhone = async () => {
@@ -732,6 +736,18 @@ export default function CloudDialer() {
 
   const saveLeadEdit = async (field: "name" | "course", value: string) => {
     if (!currentLead) return;
+    if (isContactQueueLead(currentLead)) {
+      if (field === "name") {
+        await supabase.from("marketing_contacts" as any).update({ name: value }).eq("id", currentLead.id);
+        setQueue(prev => prev.map((l, i) => i === currentIdx ? { ...l, name: value } : l));
+      } else if (field === "course") {
+        const course = courseOptions.find(c => c.id === value);
+        setQueue(prev => prev.map((l, i) => i === currentIdx ? { ...l, course_id: value || null, course_name: course?.name || "—", campus_name: course?.campus || "—" } : l));
+      }
+      setEditing(null);
+      toast({ title: "Updated", description: field === "name" ? "Contact name updated." : "Course saved for this call." });
+      return;
+    }
     if (field === "name") {
       await supabase.from("leads").update({ name: value } as any).eq("id", currentLead.id);
       setQueue(prev => prev.map((l, i) => i === currentIdx ? { ...l, name: value } : l));
@@ -834,6 +850,7 @@ export default function CloudDialer() {
       campus_name: row.campus_name || "—",
       bucket: "Dialled",
       attempt_count: 0,
+      kind: "lead",
     };
     setDialPhone("");
     setDialNewName("");
@@ -901,7 +918,7 @@ export default function CloudDialer() {
     setCallState({ status: "calling", startTime: Date.now(), elapsed: 0, disposition: null, autoDisposition: false });
 
     try {
-      const result = await startCloudCall(lead.id);
+      const result = await startCloudCall(cloudCallTarget(lead));
 
       if (!result.ok) {
         toast({ title: "Call Failed", description: result.error, variant: "destructive" });
@@ -1012,6 +1029,58 @@ export default function CloudDialer() {
   const composeCallNote = (disposition: string, auto = false) =>
     callNote.trim() || `Cloud Dialer: ${disposition.replace("_", " ")}${auto ? " (auto)" : ""}`;
 
+  const persistDialerCallLog = async (
+    lead: QueueLead,
+    disposition: string,
+    duration: number,
+    notes: string,
+  ) => {
+    const callUuid = callIdRef.current ?? crypto.randomUUID();
+    if (isContactQueueLead(lead)) {
+      if (lead.member_id) {
+        const qualifying = disposition === "interested" || disposition === "call_back";
+        const { error } = await (supabase as any).rpc("cold_call_disposition", {
+          p_member_id: lead.member_id,
+          p_call_uuid: callUuid,
+          p_disposition: disposition,
+          p_duration: duration,
+          p_notes: notes,
+          p_qualification: qualifying
+            ? { name: lead.name, course_id: lead.course_id || "", notes: callNote.trim() || undefined }
+            : null,
+        });
+        if (error) {
+          toast({ title: "Couldn't save disposition", description: error.message, variant: "destructive" });
+        }
+        return;
+      }
+      await (supabase as any).rpc("record_cloud_call_log", {
+        p_call_uuid: callUuid,
+        p_lead_id: null,
+        p_user_id: user?.id || null,
+        p_disposition: disposition,
+        p_duration: duration,
+        p_notes: notes,
+        p_source: "manual",
+        p_recording_url: null,
+        p_call_source: "cold_call",
+        p_contact_id: lead.id,
+      });
+      return;
+    }
+    await (supabase as any).rpc("record_cloud_call_log", {
+      p_call_uuid: callUuid,
+      p_lead_id: lead.id,
+      p_user_id: user?.id || null,
+      p_disposition: disposition,
+      p_duration: duration,
+      p_notes: notes,
+      p_source: "manual",
+      p_recording_url: null,
+      p_call_source: "cloud_dialer",
+    });
+  };
+
   // ── Finalize a pre-selected disposition after call ends ─────────────────
 
   const finalizeDisposition = async (disposition: string, duration: number) => {
@@ -1031,52 +1100,28 @@ export default function CloudDialer() {
     // save lands on the same row as the voice-agent's bridge-hangup webhook
     // (whichever fired first). Without this, the counsellor's pick + notes
     // create a duplicate row alongside the auto "Cloud Call [hash]" row.
-    const callUuid = callIdRef.current;
-    if (callUuid) {
-      await (supabase as any).rpc("record_cloud_call_log", {
-        p_call_uuid:     callUuid,
-        p_lead_id:       currentLead.id,
-        p_user_id:       user?.id || null,
-        p_disposition:   disposition,
-        p_duration:      duration,
-        p_notes:         composeCallNote(disposition),
-        p_source:        "manual",
-        p_recording_url: null,
-        p_call_source:   "cloud_dialer",
-      });
-    } else {
-      await (supabase as any).rpc("record_cloud_call_log", {
-        p_call_uuid:     crypto.randomUUID(),
-        p_lead_id:       currentLead.id,
-        p_user_id:       user?.id || null,
-        p_disposition:   disposition,
-        p_duration:      duration,
-        p_notes:         composeCallNote(disposition),
-        p_source:        "manual",
-        p_recording_url: null,
-        p_call_source:   "cloud_dialer",
-      });
+    await persistDialerCallLog(currentLead, disposition, duration, composeCallNote(disposition));
+
+    const isContact = isContactQueueLead(currentLead);
+    if (!isContact) {
+      await persistCnetAppearedForCurrentLead();
+      await persistCahetRegisteredForCurrentLead();
     }
 
-    await persistCnetAppearedForCurrentLead();
-    await persistCahetRegisteredForCurrentLead();
+    const followupCleared = isContact
+      ? true
+      : await completePendingFollowupsForCurrentLead(disposition);
 
-    // Mark pending followups as completed only when this disposition is
-    // allowed to clear the queue. First same-day not_answered stays pending.
-    const followupCleared = await completePendingFollowupsForCurrentLead(disposition);
-
-    // Log activity
-    const durStr = duration > 0 ? ` (${Math.floor(duration / 60)}m${duration % 60 ? ` ${duration % 60}s` : ""})` : "";
-    await supabase.from("lead_activities").insert({
-      lead_id: currentLead.id, user_id: profileId, type: "call",
-      description: `Call: ${disposition.replace("_", " ")}${durStr} (via Cloud Dialer)`,
-    });
-
-    // Update first_contact_at if first call
-    await supabase.from("leads").update({ first_contact_at: new Date().toISOString() } as any)
-      .eq("id", currentLead.id).is("first_contact_at", null);
-
-    await applyDispositionTransitionForCurrentLead(disposition);
+    if (!isContact) {
+      const durStr = duration > 0 ? ` (${Math.floor(duration / 60)}m${duration % 60 ? ` ${duration % 60}s` : ""})` : "";
+      await supabase.from("lead_activities").insert({
+        lead_id: currentLead.id, user_id: profileId, type: "call",
+        description: `Call: ${disposition.replace("_", " ")}${durStr} (via Cloud Dialer)`,
+      });
+      await supabase.from("leads").update({ first_contact_at: new Date().toISOString() } as any)
+        .eq("id", currentLead.id).is("first_contact_at", null);
+      await applyDispositionTransitionForCurrentLead(disposition);
+    }
 
     setStats(prev => ({
       ...prev,
@@ -1101,52 +1146,28 @@ export default function CloudDialer() {
     }
 
     // Log to call_logs via the merge RPC — see finalizeDisposition for why.
-    const callUuid = callIdRef.current;
-    if (callUuid) {
-      await (supabase as any).rpc("record_cloud_call_log", {
-        p_call_uuid:     callUuid,
-        p_lead_id:       currentLead.id,
-        p_user_id:       user?.id || null,
-        p_disposition:   disposition,
-        p_duration:      callState.elapsed,
-        p_notes:         composeCallNote(disposition),
-        p_source:        "manual",
-        p_recording_url: null,
-        p_call_source:   "cloud_dialer",
-      });
-    } else {
-      await (supabase as any).rpc("record_cloud_call_log", {
-        p_call_uuid:     crypto.randomUUID(),
-        p_lead_id:       currentLead.id,
-        p_user_id:       user?.id || null,
-        p_disposition:   disposition,
-        p_duration:      callState.elapsed,
-        p_notes:         composeCallNote(disposition),
-        p_source:        "manual",
-        p_recording_url: null,
-        p_call_source:   "cloud_dialer",
-      });
+    await persistDialerCallLog(currentLead, disposition, callState.elapsed, composeCallNote(disposition));
+
+    const isContact = isContactQueueLead(currentLead);
+    if (!isContact) {
+      await persistCnetAppearedForCurrentLead();
+      await persistCahetRegisteredForCurrentLead();
     }
 
-    await persistCnetAppearedForCurrentLead();
-    await persistCahetRegisteredForCurrentLead();
+    const followupCleared = isContact
+      ? true
+      : await completePendingFollowupsForCurrentLead(disposition);
 
-    // Mark pending followups as completed only when this disposition is
-    // allowed to clear the queue. First same-day not_answered stays pending.
-    const followupCleared = await completePendingFollowupsForCurrentLead(disposition);
-
-    // Log activity
-    const durStr = callState.elapsed > 0 ? ` (${Math.floor(callState.elapsed / 60)}m${callState.elapsed % 60 ? ` ${callState.elapsed % 60}s` : ""})` : "";
-    await supabase.from("lead_activities").insert({
-      lead_id: currentLead.id, user_id: profileId, type: "call",
-      description: `Call: ${disposition.replace("_", " ")}${durStr} (via Cloud Dialer)`,
-    });
-
-    // Update first_contact_at if first call
-    await supabase.from("leads").update({ first_contact_at: new Date().toISOString() } as any)
-      .eq("id", currentLead.id).is("first_contact_at", null);
-
-    await applyDispositionTransitionForCurrentLead(disposition);
+    if (!isContact) {
+      const durStr = callState.elapsed > 0 ? ` (${Math.floor(callState.elapsed / 60)}m${callState.elapsed % 60 ? ` ${callState.elapsed % 60}s` : ""})` : "";
+      await supabase.from("lead_activities").insert({
+        lead_id: currentLead.id, user_id: profileId, type: "call",
+        description: `Call: ${disposition.replace("_", " ")}${durStr} (via Cloud Dialer)`,
+      });
+      await supabase.from("leads").update({ first_contact_at: new Date().toISOString() } as any)
+        .eq("id", currentLead.id).is("first_contact_at", null);
+      await applyDispositionTransitionForCurrentLead(disposition);
+    }
 
     setStats(prev => ({
       ...prev,
@@ -1231,19 +1252,11 @@ export default function CloudDialer() {
     // before this point because they are not call outcomes.
     const callUuid = callIdRef.current;
     if (currentLead && !skipLog) {
-      await (supabase as any).rpc("record_cloud_call_log", {
-        p_call_uuid:     callUuid ?? crypto.randomUUID(),
-        p_lead_id:       currentLead.id,
-        p_user_id:       user?.id || null,
-        p_disposition:   disposition,
-        p_duration:      callState.elapsed,
-        p_notes:         composeCallNote(disposition, true),
-        p_source:        "manual",
-        p_recording_url: null,
-        p_call_source:   "cloud_dialer",
-      });
+      await persistDialerCallLog(currentLead, disposition, callState.elapsed, composeCallNote(disposition, true));
     }
-    const followupCleared = await completePendingFollowupsForCurrentLead(disposition);
+    const followupCleared = isContactQueueLead(currentLead)
+      ? true
+      : await completePendingFollowupsForCurrentLead(disposition);
     await showFollowupAndAutoNext(disposition, false, followupCleared);
   };
 
@@ -1262,6 +1275,13 @@ export default function CloudDialer() {
     if (!currentLead) return;
     const attempt = currentLead.attempt_count + 1;
     const isAutoDisp = ["busy", "not_answered", "voicemail", "cancelled"].includes(disposition);
+
+    if (isContactQueueLead(currentLead)) {
+      setFollowupDate("");
+      setFollowupTime("");
+      setAutoNextTimer(isAutoDisp ? 15 : 60);
+      return;
+    }
 
     if (!followupCanBeRescheduled) {
       setFollowupDate("");
@@ -1331,7 +1351,7 @@ export default function CloudDialer() {
         body: {
           template_key: templateKey,
           phone: currentLead.phone,
-          lead_id: currentLead.id,
+          ...(isContactQueueLead(currentLead) ? {} : { lead_id: currentLead.id }),
           ...(opts?.params ? { params: opts.params } : {}),
           ...(opts?.buttonUrls ? { button_urls: opts.buttonUrls } : {}),
         },
@@ -1351,7 +1371,7 @@ export default function CloudDialer() {
 
   const moveToNext = async () => {
     // Save followup if there's a date (skip for not_interested and inactive)
-    if (currentLead && followupDate && allowPostDispositionFollowup && callState.disposition !== "not_interested") {
+    if (currentLead && !isContactQueueLead(currentLead) && followupDate && allowPostDispositionFollowup && callState.disposition !== "not_interested") {
       const scheduledAt = new Date(`${followupDate}T${followupTime || "10:00"}:00`);
       await supabase.from("lead_followups").insert({
         lead_id: currentLead.id,
@@ -1368,14 +1388,14 @@ export default function CloudDialer() {
     // still advanced to visit_scheduled. Leads looked booked with no visit row
     // anywhere: absent from Visit Center, the Visit Check-in bucket, post-visit
     // follow-ups and the visit funnel. campus_visits is the real table.
-    if (currentLead && callState.disposition === "interested" && visitDate) {
+    if (currentLead && !isContactQueueLead(currentLead) && callState.disposition === "interested" && visitDate) {
       const visitAt = new Date(`${visitDate}T${visitTime || "10:00"}:00`);
       const scheduled = await scheduleCampusVisitFromDialer(visitAt.toISOString(), null);
       if (!scheduled) return; // toast already shown; don't advance a stage we can't back up
     }
 
     // Save future session note for ineligible
-    if (currentLead && callState.disposition === "ineligible" && futureSession) {
+    if (currentLead && !isContactQueueLead(currentLead) && callState.disposition === "ineligible" && futureSession) {
       await supabase.from("lead_notes").insert({
         lead_id: currentLead.id,
         content: `Ineligible for current session. Interested for ${futureSession}.`,
@@ -1517,10 +1537,10 @@ export default function CloudDialer() {
     // In list mode a skip is a real decision the assigner needs to see, not just
     // a UI advance — record it so progress doesn't stall on a lead nobody calls.
     if (activeListId && currentLead) {
-      supabase.rpc("skip_call_list_member" as any, {
-        p_list_id: activeListId,
-        p_lead_id: currentLead.id,
-      }).then(() => refetchCallLists());
+      const args = currentLead.member_id
+        ? { p_member_id: currentLead.member_id }
+        : { p_list_id: activeListId, p_lead_id: currentLead.id };
+      supabase.rpc("skip_call_list_member" as any, args).then(() => refetchCallLists());
     }
     setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
     setAutoNextTimer(0);
@@ -2221,7 +2241,7 @@ export default function CloudDialer() {
             <>
             <DialerLeadHeader
               lead={currentLead}
-              stageLabel={STAGE_LABELS[currentLead.stage] || currentLead.stage}
+              stageLabel={STAGE_LABELS[currentLead.stage] || currentLead.stage || (isContactQueueLead(currentLead) ? "Cold list" : "")}
               editing={editing}
               setEditing={setEditing}
               editValue={editValue}
@@ -2688,7 +2708,8 @@ export default function CloudDialer() {
                     advance out from under an open dialog. */}
                 <DialerActionRow
                   leadId={currentLead.id}
-                  canCreateProposal={canCreateProposal}
+                  kind={currentLead.kind}
+                  canCreateProposal={canCreateProposal && !isContactQueueLead(currentLead)}
                   onAction={(action: DialerAction) => holdCountdown(() => {
                     if (action === "payment") setShowPaymentLink(true);
                     else if (action === "whatsapp") setShowWhatsApp(true);

@@ -171,6 +171,8 @@ export interface CloudDialerQueueLead {
   bucket: string;
   bucket_priority: number;
   attempt_count: number;
+  kind?: "lead" | "contact";
+  member_id?: string;
 }
 
 export interface CloudDialerBucket {
