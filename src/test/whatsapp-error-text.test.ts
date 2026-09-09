@@ -33,6 +33,7 @@ describe("whatsAppErrorHint", () => {
   it("gives config hints for billing/template errors and nothing for unknown", () => {
     expect(whatsAppErrorHint("131042")).toMatch(/billing/i);
     expect(whatsAppErrorHint("132001")).toMatch(/approved/i);
+    expect(whatsAppErrorHint("133010")).toMatch(/connected on Meta/i);
     expect(whatsAppErrorHint(null)).toBeNull();
     expect(whatsAppErrorHint("999999")).toBeNull();
   });

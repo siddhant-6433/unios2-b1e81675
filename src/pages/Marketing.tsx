@@ -27,6 +27,7 @@ import {
   formatSenderNumber,
   loadWaSenders,
   senderCanSendTemplate,
+  senderIsConnected,
 } from "@/lib/waSenders";
 import { WhatsAppBusinessIdentity } from "@/components/whatsapp/WhatsAppBusinessIdentity";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
@@ -509,7 +510,9 @@ export default function Marketing() {
   // A sender must be explicitly chosen (no default) AND its WABA must match the
   // template — this gates the test-send and Queue Campaign buttons.
   const selectedSenderCanSend = useMemo(
-    () => !!waSelectedSender && senderCanSendTemplate(waSelectedSender, waTemplate, selectedTemplateWaba),
+    () => !!waSelectedSender
+      && senderCanSendTemplate(waSelectedSender, waTemplate, selectedTemplateWaba)
+      && senderIsConnected(waSelectedSender),
     [waSelectedSender, waTemplate, selectedTemplateWaba]
   );
   // Never leave a number selected that can't send the chosen template. The
@@ -1138,7 +1141,12 @@ export default function Marketing() {
     if (!["super_admin", "admission_head"].includes(String(role))) return;
     setSyncingTemplates(true);
     try {
-      await invokeEdge("whatsapp-templates", { body: { action: "sync" } });
+      await Promise.all([
+        invokeEdge("whatsapp-templates", { body: { action: "sync" } }),
+        // Refresh Meta connection status so school numbers (Mirai/Beacon) show
+        // Connected / Not connected instead of failing the test send with 133010.
+        invokeEdge("whatsapp-channel-profiles-sync", { body: {} }),
+      ]);
     } catch {
       /* best-effort — the picker still works off the last sync */
     } finally {
@@ -2413,6 +2421,11 @@ export default function Marketing() {
                                       Can't send "{waTemplate}"
                                     </span>
                                   )}
+                                  {canSend && sender.connectionStatus && !senderIsConnected(sender) && (
+                                    <span className="px-3 pb-1.5 text-[11px] font-medium text-destructive">
+                                      Not connected on Meta — can't send until it's registered
+                                    </span>
+                                  )}
                                 </div>
                               </CommandItem>
                             );
@@ -2421,7 +2434,12 @@ export default function Marketing() {
                       </Command>
                     </PopoverContent>
                   </Popover>
-                  {!selectedSenderCanSend && (
+                  {!selectedSenderCanSend && waSelectedSender && !senderIsConnected(waSelectedSender) && (
+                    <p className="mt-1.5 text-xs font-medium text-destructive">
+                      This number isn't connected on Meta Cloud API, so Meta rejects every send (error 133010). Pick another sender, or ask an admin to register it in WhatsApp Manager.
+                    </p>
+                  )}
+                  {!selectedSenderCanSend && waSelectedSender && senderIsConnected(waSelectedSender) && (
                     <p className="mt-1.5 text-xs font-medium text-destructive">
                       This number can't send "{waTemplate}" — its WhatsApp account doesn't have that template approved. Pick another sender or template.
                     </p>
@@ -2479,7 +2497,9 @@ export default function Marketing() {
                 {!!waTemplate && !!waTestPhone.trim() && !waTestSending && (!selectedSenderCanSend || !headerMediaReady) && (
                   <p className="text-xs font-medium text-destructive">
                     {!selectedSenderCanSend
-                      ? "Pick a sender that can send this template before testing."
+                      ? (waSelectedSender && !senderIsConnected(waSelectedSender)
+                        ? "This sender isn't connected on Meta — pick another number."
+                        : "Pick a sender that can send this template before testing.")
                       : "This template needs a public header image URL (saved in Template Manager or pasted below)."}
                   </p>
                 )}
