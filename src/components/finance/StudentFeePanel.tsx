@@ -32,6 +32,8 @@ import {
   type CourseChange,
 } from "@/lib/receiptCourseMigration";
 import { reviseStudentReceiptPdfs } from "@/lib/reviseStudentReceipts";
+import { buildYear1LumpSumOffer } from "@/lib/year1LumpSumWaiver";
+import { Year1LumpSumInfoBanner } from "./Year1LumpSumBanner";
 
 interface StudentFeePanelProps {
   student: any;
@@ -545,6 +547,18 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const abvmuInlineActive = abvmu.depositAmount > 0 &&
     feeGroups.some((g) => g.rows.some(isAbvmuTuitionRow));
 
+  const year1LumpSum = useMemo(() => {
+    const rows = feeGroupsDisplay.flatMap((g) => g.rows).map((f: any) => ({
+      id: String(f.id),
+      term: f.term,
+      fee_code: f.fee_codes?.code || f.fee_code || null,
+      fee_code_name: f.fee_codes?.name || null,
+      category: f.fee_codes?.category || f.category || null,
+      balance: Number(f.balance || 0),
+    }));
+    return buildYear1LumpSumOffer(rows, { lumpSumPct: abvmu.lumpSumPct });
+  }, [feeGroupsDisplay, abvmu.lumpSumPct]);
+
   if (loading) {
     return <PageLoader />;
   }
@@ -745,6 +759,8 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       {/* Summary. Five cards in a four-column grid orphaned the fifth on its own
           row; the unallocated credit is also rarely non-zero, so it only earns a
           slot when there is credit to show. */}
+      <Year1LumpSumInfoBanner offer={year1LumpSum} />
+
       <div className={`grid grid-cols-2 gap-3 ${
         Number(credit?.general_credit || 0) > 0 ? "lg:grid-cols-5" : "lg:grid-cols-4"
       }`}>
@@ -1190,6 +1206,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
             ? collectAllocations.reduce((s, a) => s + Number(a.amount || 0), 0)
             : null}
           defaultAllocations={collectAllocations}
+          year1LumpSum={year1LumpSum}
           onRecorded={() => {
             setPicked({});
             setCollectAllocations(null);

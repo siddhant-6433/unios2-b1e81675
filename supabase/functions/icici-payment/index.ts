@@ -28,6 +28,7 @@ import {
   settleApplicationFee,
   settleLeadPaymentRow,
   settleStudentFeePayment,
+  resolveYear1LumpSumCharge,
 } from "../_shared/gateway-settlement.ts";
 
 const corsHeaders = {
@@ -686,7 +687,8 @@ Deno.serve(async (req) => {
 
       const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
       const feeSelection = feeSelectionFromBody(payment_scope, fee_ids);
-      const waiver = Math.max(0, Number(waiver_amount || 0));
+      const year1 = await resolveYear1LumpSumCharge(admin, student_id, feeSelection);
+      const waiver = year1 ? Math.max(0, year1.discount) : Math.max(0, Number(waiver_amount || 0));
       let feeQuery = admin
         .from("fee_ledger")
         .select("balance, due_date")
@@ -705,8 +707,9 @@ Deno.serve(async (req) => {
       }
 
       const totalDue = dueRows.reduce((sum: number, row: any) => sum + Number(row.balance || 0), 0);
-      const payableDue = Math.max(totalDue - Math.min(waiver, totalDue), 0);
-      const waiverStr = String(Math.min(waiver, totalDue).toFixed(2));
+      const chargeDue = year1 ? year1.remaining : totalDue;
+      const payableDue = Math.max(chargeDue - Math.min(waiver, chargeDue), 0);
+      const waiverStr = String(Math.min(waiver, chargeDue).toFixed(2));
       const merchantTxnNo = compactMerchantTxnNo("F");
       await admin.from("pg_transactions").insert({
         txn_id: merchantTxnNo,

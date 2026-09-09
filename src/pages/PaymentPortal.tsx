@@ -40,6 +40,10 @@ interface StudentPortalPaymentHandoff {
   fromStudentPortal?: boolean;
   student?: StudentInfo;
   fees?: StudentFee[];
+  lumpSumYear1?: boolean;
+  lumpSumPct?: number;
+  lumpSumDiscount?: number;
+  lumpSumAmountDue?: number;
 }
 
 interface StudentFeeReceiptSnapshot {
@@ -404,16 +408,21 @@ export default function PaymentPortal() {
   };
 
   const totalDue = fees.reduce((s, f) => s + f.balance, 0);
-  // Only real ledger UUIDs go to the gateways; the hidden-mode synthetic row is
-  // excluded so the server falls back to computing the 'due' selection itself.
   const realFeeIds = fees.map((fee) => fee.id).filter((id) => /^[0-9a-f-]{36}$/i.test(id));
-  const waiverAmount = paymentScope === "all" ? Math.round(totalDue * 0.05) : 0;
-  const payableAmount = Math.max(totalDue - waiverAmount, 0);
-  const paymentTitle = paymentScope === "all"
-    ? "Annual Fee Payment"
-    : paymentScope === "fee"
-      ? "Future Fee Payment"
-      : "Due Fee Payment";
+  const lumpSumPct = Number(paymentHandoff?.lumpSumPct);
+  const waiverAmount = paymentHandoff?.lumpSumYear1
+    ? Math.max(0, Number(paymentHandoff.lumpSumDiscount ?? Math.round(totalDue * ((Number.isFinite(lumpSumPct) ? Math.max(0, lumpSumPct) : 5) / 100))))
+    : 0;
+  const payableAmount = paymentHandoff?.lumpSumYear1
+    ? Math.max(0, Number(paymentHandoff.lumpSumAmountDue ?? (totalDue - waiverAmount)))
+    : Math.max(totalDue - waiverAmount, 0);
+  const paymentTitle = paymentHandoff?.lumpSumYear1
+    ? "Year 1 Tuition (one-time)"
+    : paymentScope === "all"
+      ? "Annual Fee Payment"
+      : paymentScope === "fee"
+        ? "Future Fee Payment"
+        : "Due Fee Payment";
   const activeGateway = selectedGateway || feeGateways[0]?.gateway || "easebuzz";
   const activeGatewayName =
     feeGateways.find((gateway) => gateway.gateway === activeGateway)?.display_name ||
@@ -691,12 +700,12 @@ export default function PaymentPortal() {
                     ))}
                   <div className="flex items-center justify-between p-4 bg-gray-50">
                       <p className="text-sm font-bold text-gray-900">{paymentTitle}</p>
-                      <p className="text-lg font-bold text-gray-900">₹{totalDue.toLocaleString("en-IN")}</p>
+                      <p className="text-lg font-bold text-gray-900">₹{(waiverAmount > 0 ? payableAmount + waiverAmount : totalDue).toLocaleString("en-IN")}</p>
                     </div>
                     {waiverAmount > 0 && (
                       <>
                         <div className="flex items-center justify-between p-4 bg-success/5">
-                          <p className="text-sm font-semibold text-success">Pay All Waiver (5%)</p>
+                          <p className="text-sm font-semibold text-success">Year 1 tuition one-time waiver ({Number.isFinite(lumpSumPct) && lumpSumPct > 0 ? lumpSumPct : 5}%)</p>
                           <p className="text-sm font-bold text-success">-₹{waiverAmount.toLocaleString("en-IN")}</p>
                         </div>
                         <div className="flex items-center justify-between p-4 bg-gray-50">

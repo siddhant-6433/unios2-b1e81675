@@ -6,11 +6,14 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { StudentAvatar } from "@/components/ui/student-avatar";
 import {
-  feeTermLabelLong, feeTermGroupLabel, feePeriodNoun, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank,
+  feeTermLabelLong, feeTermGroupLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank,
 } from "@/lib/feeTermLabels";
 import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
 import { getStudentClaimToken } from "@/lib/studentClaim";
 import { brandForStudentOwner, type StudentBrand } from "@/lib/studentBranding";
+import { fetchLeadFeeStatus } from "@/lib/leadFeeStatus";
+import { buildYear1LumpSumOffer } from "@/lib/year1LumpSumWaiver";
+import { Year1LumpSumIncentiveCard } from "@/components/finance/Year1LumpSumBanner";
 import { IndianRupee, ClipboardCheck, Megaphone, AlertCircle, CheckCircle, Clock, CreditCard, FileText, // Aliased: `Receipt` is the payment-row type in this file.
   Receipt as ReceiptIcon, ChevronDown } from "lucide-react";
 
@@ -25,6 +28,7 @@ interface StudentInfo {
   name: string;
   photo_url: string | null;
   admission_no: string;
+  lead_id: string | null;
   course_id: string | null;
   session_id: string | null;
   campus_id: string | null;
@@ -39,6 +43,7 @@ interface FeeItem {
   id: string;
   fee_code_name: string;
   fee_code: string | null;
+  category: string | null;
   term: string;
   total_amount: number;
   paid_amount: number;
@@ -86,6 +91,8 @@ export default function StudentPortal() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [showReceipts, setShowReceipts] = useState(false);
   const [attendance, setAttendance] = useState<AttendanceSummary | null>(null);
+  const [lumpSumPct, setLumpSumPct] = useState(5);
+  const [abvmuCollegeDeduction, setAbvmuCollegeDeduction] = useState(0);
   const [loading, setLoading] = useState(true);
   const [claimError, setClaimError] = useState<string | null>(null);
 
@@ -152,7 +159,7 @@ export default function StudentPortal() {
 
     const { data: studentData } = await (supabase as any)
       .from("students")
-      .select("id, name, photo_url, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, session_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
+      .select("id, name, photo_url, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, session_id, lead_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
       .eq("user_id", user?.id)
       .limit(1)
       .single();
@@ -165,6 +172,7 @@ export default function StudentPortal() {
         name: studentData.name,
         photo_url: (studentData as any).photo_url || null,
         admission_no: studentData.admission_no || studentData.pre_admission_no || "",
+        lead_id: studentData.lead_id || null,
         course_id: studentData.course_id || null,
         session_id: studentData.session_id || null,
         campus_id: studentData.campus_id || null,
@@ -191,11 +199,22 @@ export default function StudentPortal() {
           .eq("student_id", studentData.id),
       ]);
 
+      if (studentData.lead_id) {
+        const { data: status } = await fetchLeadFeeStatus(studentData.lead_id);
+        const pct = Number(status?.lump_sum_pct);
+        setLumpSumPct(Number.isFinite(pct) ? Math.max(0, pct) : 5);
+        setAbvmuCollegeDeduction(Math.max(0, Number(status?.abvmu_deposit_amount || 0)));
+      } else {
+        setLumpSumPct(5);
+        setAbvmuCollegeDeduction(0);
+      }
+
       if (feeRes.data) {
         setFees(feeRes.data.map((f: any) => ({
           id: f.id,
           fee_code_name: f.fee_codes?.name || "",
           fee_code: f.fee_codes?.code || null,
+          category: f.fee_codes?.category || null,
           term: f.term,
           total_amount: Number(f.total_amount),
           paid_amount: Number(f.paid_amount),
@@ -245,11 +264,16 @@ export default function StudentPortal() {
     setLoading(false);
   };
 
+  const year1LumpSum = useMemo(
+    () => buildYear1LumpSumOffer(fees, { lumpSumPct, abvmuCollegeDeduction }),
+    [fees, lumpSumPct, abvmuCollegeDeduction],
+  );
+
   // `ids` pays an explicit set of ledger rows — one custom head, or a whole
   // quarter. The gateways resolve the amount from the ids server-side
   // (feeSelectionFromBody honours a non-empty fee_ids over the scope), so the
   // client never names a price.
-  const openPayment = (scope: "due" | "all" | "fee" | "set", feeId?: string, ids?: string[]) => {
+  const openPayment = (scope: "due" | "all" | "fee" | "set" | "year1", feeId?: string, ids?: string[]) => {
     if (!student) return;
     const todayKey = new Date().toLocaleDateString("en-CA");
     const idSet = new Set(ids || []);
@@ -257,7 +281,7 @@ export default function StudentPortal() {
       .filter((fee) => fee.balance > 0)
       .filter((fee) => {
         if (scope === "all") return true;
-        if (scope === "set") return idSet.has(fee.id);
+        if (scope === "set" || scope === "year1") return idSet.has(fee.id);
         if (scope === "fee") return fee.id === feeId;
         return fee.due_date <= todayKey;
       })
@@ -270,11 +294,15 @@ export default function StudentPortal() {
         due_date: fee.due_date,
       }));
 
-    navigate(`/pay?student=${student.id}&scope=${scope}${feeId ? `&fee=${feeId}` : ""}&token=student_portal`, {
+    navigate(`/pay?student=${student.id}&scope=${scope === "year1" ? "set" : scope}${feeId ? `&fee=${feeId}` : ""}&token=student_portal`, {
       state: {
         fromStudentPortal: true,
         student,
         fees: selectedFees,
+        lumpSumYear1: scope === "year1",
+        lumpSumPct: year1LumpSum.pct,
+        lumpSumDiscount: year1LumpSum.discount,
+        lumpSumAmountDue: year1LumpSum.amountDue,
       },
     });
   };
@@ -306,13 +334,8 @@ export default function StudentPortal() {
   const todayKey = new Date().toLocaleDateString("en-CA");
   const isOutstanding = (fee: FeeItem) => fee.balance > 0 && fee.status !== "paid";
   const isDueNow = (fee: FeeItem) => isOutstanding(fee) && fee.due_date <= todayKey;
-  const isFutureDue = (fee: FeeItem) => isOutstanding(fee) && fee.due_date > todayKey;
   const dueNowFees = fees.filter(isDueNow);
-  const futureFees = fees.filter(isFutureDue);
   const totalDueNow = dueNowFees.reduce((s, f) => s + f.balance, 0);
-  const totalOutstanding = fees.filter(isOutstanding).reduce((s, f) => s + f.balance, 0);
-  const payAllWaiver = Math.round(totalOutstanding * 0.05);
-  const payAllAmount = Math.max(totalOutstanding - payAllWaiver, 0);
 
   if (loading) {
     return (
@@ -481,26 +504,11 @@ export default function StudentPortal() {
             </div>
           )}
 
-          {futureFees.length > 0 && totalOutstanding > totalDueNow && (
-            <div className="rounded-xl bg-white border border-gray-200 p-4 flex items-center justify-between gap-4">
-              <div>
-                <p className="text-xs text-gray-500">
-                  {/^year$/i.test(feePeriodNoun(feeMeta)) ? "Annual Pay All" : "Pay All Remaining"}
-                </p>
-                <p className="text-sm font-semibold text-gray-900">
-                  ₹{payAllAmount.toLocaleString("en-IN")}
-                  <span className="ml-2 text-xs font-medium text-success">
-                    5% waiver saves ₹{payAllWaiver.toLocaleString("en-IN")}
-                  </span>
-                </p>
-              </div>
-              <button
-                onClick={() => openPayment("all")}
-                className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-semibold text-primary hover:bg-primary/10 transition-colors"
-              >
-                <CreditCard className="h-4 w-4" /> Pay All
-              </button>
-            </div>
+          {year1LumpSum.eligible && (
+            <Year1LumpSumIncentiveCard
+              offer={year1LumpSum}
+              onPay={() => openPayment("year1", undefined, year1LumpSum.feeIds)}
+            />
           )}
 
           <div className="rounded-xl bg-white border border-gray-200 overflow-hidden divide-y divide-gray-100">

@@ -17,6 +17,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TextField, SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { FeeHeadAllocationField, type FeeAllocation } from "./FeeHeadAllocationField";
+import { Year1LumpSumInfoBanner } from "./Year1LumpSumBanner";
+import {
+  allocationsCoverYear1Tuition,
+  scaleYear1AllocationsForLumpSum,
+  type Year1LumpSumOffer,
+} from "@/lib/year1LumpSumWaiver";
 import { IndianRupee, Upload, X as XIcon, FileText } from "lucide-react";
 
 const PAY_TYPES: { value: string; label: string }[] = [
@@ -86,12 +92,14 @@ interface Props {
    * every ticked head instead of one receipt per head.
    */
   defaultAllocations?: FeeAllocation[] | null;
+  /** Year-1 tuition lump-sum offer; cashiers can apply 5% when collecting remaining Year 1 in full. */
+  year1LumpSum?: Year1LumpSumOffer | null;
   onRecorded?: () => void;
 }
 
 export function OfflinePaymentDialog({
   open, onOpenChange, leadId, studentId, applicationId, defaultType,
-  defaultAmount, defaultAllocations, onRecorded,
+  defaultAmount, defaultAllocations, year1LumpSum, onRecorded,
 }: Props) {
   const { profile, role } = useAuth();
   const { toast } = useToast();
@@ -111,6 +119,7 @@ export function OfflinePaymentDialog({
   const [remarks,setRemarks]= useState<string>("");
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [applyYear1LumpSum, setApplyYear1LumpSum] = useState(false);
 
   // Ad-hoc charge heads a super_admin has enabled for this person. Only offered
   // pre-admission: an admitted student gets a real fee_ledger row via
@@ -214,9 +223,17 @@ export function OfflinePaymentDialog({
     setCreditNoteId("");
     setCreditNotes([]);
     setAllocations([]);
+    setApplyYear1LumpSum(false);
   };
 
   const breakupTotal = Math.round(allocations.reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100;
+  const year1Covered = !!(year1LumpSum && allocationsCoverYear1Tuition(
+    allocations.length ? allocations : defaultAllocations || [],
+    year1LumpSum,
+  ));
+  const lumpSumCashTotal = year1Covered && applyYear1LumpSum && year1LumpSum
+    ? Math.round(((allocations.length ? breakupTotal : Number(amount) || 0) - year1LumpSum.discount) * 100) / 100
+    : null;
   // A breakup, when present, must equal the amount so nothing is silently dropped.
   const breakupValid = (amt: number) =>
     allocations.length === 0 ||
@@ -265,14 +282,24 @@ export function OfflinePaymentDialog({
   };
 
   const handleSubmit = async () => {
-    const amt = parseFloat(amount);
+    const listAmt = parseFloat(amount);
+    const applyingLump = year1Covered && applyYear1LumpSum && !!year1LumpSum;
+    const amt = applyingLump && year1LumpSum
+      ? Math.round((listAmt - year1LumpSum.discount) * 100) / 100
+      : listAmt;
+    const submitAllocations = applyingLump && year1LumpSum
+      ? scaleYear1AllocationsForLumpSum(allocations, year1LumpSum)
+      : allocations;
     if (!amt || amt <= 0) {
       toast({ title: "Enter a valid amount", variant: "destructive" });
       return;
     }
     if (isCreditNote) { await submitCreditNote(amt); return; }
-    if (!breakupValid(amt)) {
-      toast({ title: "Breakup must equal the amount", description: `Breakup total ₹${breakupTotal.toLocaleString("en-IN")} vs amount ₹${amt.toLocaleString("en-IN")}. Each head also needs a positive amount.`, variant: "destructive" });
+    const submitBreakup = Math.round(submitAllocations.reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100;
+    const submitBreakupValid = submitAllocations.length === 0 ||
+      (submitAllocations.every((a) => a.fee_code_id && a.amount > 0) && Math.abs(submitBreakup - amt) < 0.01);
+    if (!submitBreakupValid) {
+      toast({ title: "Breakup must equal the amount", description: `Breakup total ₹${submitBreakup.toLocaleString("en-IN")} vs amount ₹${amt.toLocaleString("en-IN")}. Each head also needs a positive amount.`, variant: "destructive" });
       return;
     }
     if (cashBlocked) {
@@ -370,6 +397,8 @@ export function OfflinePaymentDialog({
       student_id:      isStudent ? studentId : null,
       type,
       amount:          amt,
+      concession_amount: applyingLump && year1LumpSum ? year1LumpSum.discount : 0,
+      waiver_reason:   applyingLump && year1LumpSum ? `Lump-sum Year 1 ${year1LumpSum.pct}%` : null,
       payment_mode:    mode,
       transaction_ref: txnRef.trim() || null,
       // Only UPI / bank transfers carry a bank RRN; a cheque number is not one.
@@ -384,7 +413,7 @@ export function OfflinePaymentDialog({
       proof_url:       proofUrl,
       fee_code_id:     selectedChargeHead?.fee_code_id || null,
       application_id:  !isStudent && type === "application_fee" ? applicationId || null : null,
-      allocations:     allocations.length ? allocations : null,
+      allocations:     submitAllocations.length ? submitAllocations : null,
     }).select("id").maybeSingle();
     setSubmitting(false);
 
@@ -402,6 +431,12 @@ export function OfflinePaymentDialog({
     // rows so we don't double-send.
     const paymentId = inserted?.id as string | undefined;
     if (paymentId) {
+      if (applyingLump && year1LumpSum) {
+        await (supabase.rpc as any)("apply_year1_lump_sum_on_payment", {
+          p_payment_id: paymentId,
+          p_ledger_ids: year1LumpSum.feeIds,
+        });
+      }
       if (isStudent) {
         // No lead to notify (WhatsApp/email flow is lead-centric); just mint the
         // receipt PDF + receipt_url straight from generate-payment-receipt.
@@ -436,6 +471,21 @@ export function OfflinePaymentDialog({
         </DialogHeader>
 
         <div className="min-w-0 space-y-3 py-2">
+          {year1LumpSum?.eligible && <Year1LumpSumInfoBanner offer={year1LumpSum} />}
+          {year1Covered && year1LumpSum && (
+            <label className="flex items-start gap-2 rounded-lg border border-success/30 bg-success/5 px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={applyYear1LumpSum}
+                onChange={(e) => setApplyYear1LumpSum(e.target.checked)}
+              />
+              <span>
+                Apply {year1LumpSum.pct}% Year 1 tuition waiver (save ₹{year1LumpSum.discount.toLocaleString("en-IN")}).
+                Collect ₹{year1LumpSum.amountDue.toLocaleString("en-IN")} for Year 1 tuition. Uniform is not discounted.
+              </span>
+            </label>
+          )}
           {/* Type + amount row */}
           <div className="grid grid-cols-2 gap-3">
             {isStudent ? (
@@ -457,7 +507,7 @@ export function OfflinePaymentDialog({
             <FieldShell label="Amount (₹)">
               <Input
                 type="number" min="1" step="1" inputMode="numeric"
-                value={amount}
+                value={lumpSumCashTotal != null ? String(lumpSumCashTotal) : amount}
                 onChange={e => setAmount(e.target.value)}
                 placeholder="0"
                 autoFocus
