@@ -26,6 +26,8 @@ export type WaSenderOption = {
   qualityRating: string | null;
   /** Meta's 24h messaging tier, e.g. TIER_1K / TIER_100K / UNLIMITED. */
   messagingLimitTier: string | null;
+  /** Meta Cloud API phone status: CONNECTED / DISCONNECTED / UNREGISTERED / … */
+  connectionStatus: string | null;
   verifiedName: string | null;
   profilePictureUrl: string | null;
   availableTemplates: string[] | null;
@@ -52,6 +54,7 @@ export const defaultWaSenderOption = (): WaSenderOption => ({
   qualityRiskLevel: null,
   qualityRating: null,
   messagingLimitTier: null,
+  connectionStatus: null,
   verifiedName: null,
   profilePictureUrl: null,
   availableTemplates: null,
@@ -76,6 +79,7 @@ export const knownBulkSenderOptions = (): WaSenderOption[] => [
     qualityRiskLevel: "watch",
     qualityRating: null,
     messagingLimitTier: null,
+    connectionStatus: null,
     verifiedName: null,
     profilePictureUrl: null,
     availableTemplates: null,
@@ -180,6 +184,16 @@ export const senderHealthClass = (failedPct: number | null | undefined) => {
  */
 export const normWaba = (w: string | null | undefined) => w || "MAIN";
 
+/** Meta has registered this number for Cloud API messaging. Unknown (null) does not block. */
+export const senderIsConnected = (
+  sender: Pick<WaSenderOption, "connectionStatus"> | null,
+): boolean => {
+  if (!sender) return true;
+  const status = String(sender.connectionStatus || "").toUpperCase();
+  if (!status) return true;
+  return status === "CONNECTED";
+};
+
 /**
  * Whether a sender can send a given template. Preferred path: compare WABA
  * ids (NULL normalised to "MAIN") — a sender can only send templates that
@@ -217,7 +231,7 @@ export async function loadWaSenders(
   const [channelsRes, healthRes] = await Promise.all([
     supabase
       .from("whatsapp_channels" as any)
-      .select("id,label,provider,route,business_number,meta_phone_number_id,waba_id,allow_bulk,quality_risk_level,quality_rating,messaging_limit_tier,verified_name,profile_picture_url,available_templates")
+      .select("id,label,provider,route,business_number,meta_phone_number_id,waba_id,allow_bulk,quality_risk_level,quality_rating,messaging_limit_tier,connection_status,verified_name,profile_picture_url,available_templates")
       .eq("is_active", true)
       .eq("allow_bulk", true)
       .order("label", { ascending: true }),
@@ -257,6 +271,7 @@ export async function loadWaSenders(
         qualityRiskLevel: channel.quality_risk_level || null,
         qualityRating: channel.quality_rating || null,
         messagingLimitTier: channel.messaging_limit_tier || null,
+        connectionStatus: channel.connection_status || null,
         verifiedName: channel.verified_name || null,
         profilePictureUrl: channel.profile_picture_url || null,
         availableTemplates: channel.available_templates ?? null,
@@ -293,6 +308,9 @@ export async function loadWaSenders(
       failedPct: health.failed_pct,
       readPct: health.read_pct,
       qualityRiskLevel: existingByNumber?.qualityRiskLevel || existing?.qualityRiskLevel || null,
+      qualityRating: existingByNumber?.qualityRating || existing?.qualityRating || null,
+      messagingLimitTier: existingByNumber?.messagingLimitTier || existing?.messagingLimitTier || null,
+      connectionStatus: existingByNumber?.connectionStatus || existing?.connectionStatus || null,
       verifiedName: existingByNumber?.verifiedName || existing?.verifiedName || null,
       profilePictureUrl: existingByNumber?.profilePictureUrl || existing?.profilePictureUrl || null,
       availableTemplates: existingByNumber?.availableTemplates ?? existing?.availableTemplates ?? null,

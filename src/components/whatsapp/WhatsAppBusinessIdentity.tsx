@@ -10,6 +10,7 @@ import {
   formatPct,
   metaQualityClass,
   formatMessagingTier,
+  senderIsConnected,
 } from "@/lib/waSenders";
 
 export const WhatsAppBusinessIdentity = ({
@@ -40,6 +41,17 @@ export const WhatsAppBusinessIdentity = ({
           <p className="truncate text-sm font-semibold text-foreground">{primaryLabel}</p>
           {sender.provider === "meta" && (
             <Badge variant="outline" className="h-5 rounded-full px-1.5 text-[10px]">Meta</Badge>
+          )}
+          {sender.connectionStatus && (
+            <Badge
+              className={`h-5 border-0 px-1.5 text-[10px] ${
+                senderIsConnected(sender)
+                  ? "bg-success/10 text-success"
+                  : "bg-destructive/10 text-destructive"
+              }`}
+            >
+              {senderIsConnected(sender) ? "Connected" : "Not connected"}
+            </Badge>
           )}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">

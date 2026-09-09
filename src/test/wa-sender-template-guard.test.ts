@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { senderCanSendTemplate, normWaba } from "@/lib/waSenders";
+import { senderCanSendTemplate, normWaba, senderIsConnected } from "@/lib/waSenders";
 
 // A sender can only send templates that live in its own WABA. NULL waba on
 // either side normalises to "MAIN".
@@ -34,5 +34,21 @@ describe("senderCanSendTemplate (WABA-based)", () => {
   it("normWaba maps null to MAIN", () => {
     expect(normWaba(null)).toBe("MAIN");
     expect(normWaba("W1")).toBe("W1");
+  });
+});
+
+describe("senderIsConnected", () => {
+  it("treats missing status as unknown and does not block", () => {
+    expect(senderIsConnected(null)).toBe(true);
+    expect(senderIsConnected({ connectionStatus: null })).toBe(true);
+    expect(senderIsConnected({ connectionStatus: "" })).toBe(true);
+  });
+
+  it("only CONNECTED is sendable once Meta has reported status", () => {
+    expect(senderIsConnected({ connectionStatus: "CONNECTED" })).toBe(true);
+    expect(senderIsConnected({ connectionStatus: "connected" })).toBe(true);
+    expect(senderIsConnected({ connectionStatus: "DISCONNECTED" })).toBe(false);
+    expect(senderIsConnected({ connectionStatus: "UNREGISTERED" })).toBe(false);
+    expect(senderIsConnected({ connectionStatus: "PENDING" })).toBe(false);
   });
 });

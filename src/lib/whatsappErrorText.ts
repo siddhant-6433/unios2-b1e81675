@@ -54,7 +54,7 @@ const META_ERROR_TEXT: Record<string, { text: string; ourFault?: boolean }> = {
   "132016": { text: "This template was disabled by Meta." },
   "131008": { text: "A required template parameter was missing — report this.", ourFault: true },
   "131009": { text: "A template parameter had an invalid value — report this.", ourFault: true },
-  "133010": { text: "Our WhatsApp number isn't registered. Contact the admin." },
+  "133010": { text: "Our WhatsApp number isn't registered. Contact the admin.", ourFault: true },
   "190": { text: "Our WhatsApp access token has expired. Contact the admin.", ourFault: true },
   // Written by whatsapp-ai-reply when generation or dispatch fails.
   ai_reply_failed: { text: "The auto-reply could not be sent.", ourFault: true },
@@ -148,6 +148,7 @@ export function whatsAppErrorHint(code: string | number | null | undefined): str
   if (key === "131053") return "Media fetch failed — usually temporary. Tap Send test again.";
   if (key === "131042") return "This number has no payment method — set up WhatsApp billing.";
   if (key === "132001") return "Pick a number that has this template approved.";
+  if (key === "133010") return "This sender isn't connected on Meta Cloud API — pick another number, or ask an admin to register it in WhatsApp Manager.";
   return null;
 }
 
