@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchCounsellorLeaderboard } from "@/lib/counsellorLeaderboard";
 import { LogOut, Settings, User, ChevronDown, Trophy, Flame, TrendingUp } from "lucide-react";
 import { roleLabel as labelForRole } from "@/lib/accessPolicy";
 
@@ -21,7 +22,7 @@ function CounsellorScoreChip({ profileId }: { profileId: string }) {
   const rankRef = useRef<HTMLDivElement>(null);
 
   const fetchData = async () => {
-    const { data } = await supabase.rpc("get_counsellor_leaderboard" as any);
+    const { data } = await fetchCounsellorLeaderboard();
     const rows = ((data || []) as LeaderboardRow[]).sort((a, b) => b.total_score - a.total_score);
     setAllScores(rows);
     const me = rows.find(r => r.counsellor_id === profileId);

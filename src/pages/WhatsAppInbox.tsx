@@ -879,6 +879,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const [replyStateCounts, setReplyStateCounts] = useState<
     { needsReply: number; awaitingThem: number; unreadMessages: number; total: number } | null
   >(null);
+  const [replyStateEpoch, setReplyStateEpoch] = useState(0);
   // Per-category server counts (all/admission/staff/other/jobs) so the chips
   // reflect the full population, not just the loaded page. { conversations, unread }.
   const [categoryCounts, setCategoryCounts] = useState<
@@ -1605,9 +1606,10 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     return () => { cancelled = true; };
   }, [role, profile?.id, counsellorFilter, isCampaignEngagedInbox, engagedCampaignParam]);
 
-  // Server-side reply-state totals. The list only holds the first 120 rows, so
-  // any count derived from it is a count of page one — which is how the inbox
-  // could say "All caught up" while the header showed pending work.
+  // Server-side pending-reply totals. The list only holds the first 120 rows,
+  // so chips must not be derived from page one. Do not depend on messages.length
+  // — the 8s poll would re-run this RPC as rows merge. Refresh on mount, inbox
+  // filter change, or after a send (replyStateEpoch).
   useEffect(() => {
     if (demoMode) return;
     if (role === "counsellor" && !profile?.id) return;
@@ -1633,7 +1635,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       } : null);
     })();
     return () => { cancelled = true; };
-  }, [demoMode, role, profile?.id, businessNumber, isOutboundMode, messages.length]);
+  }, [demoMode, role, profile?.id, businessNumber, isOutboundMode, isHrScope, replyStateEpoch]);
 
   // Per-category totals for the chips, same population/scoping as the reply-state
   // counts above. Replaces the client-side aggregate over the loaded ≤120 rows.
@@ -1656,7 +1658,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       setCategoryCounts(map);
     })();
     return () => { cancelled = true; };
-  }, [demoMode, isOutboundMode, role, profile?.id, businessNumber, isHrScope, messages.length]);
+  }, [demoMode, isOutboundMode, role, profile?.id, businessNumber, isHrScope]);
 
   // Course list for the template course picker.
   useEffect(() => {
@@ -2151,8 +2153,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       }
     };
 
-    const newId = setInterval(tickNew, 8_000);
-    const statusId = setInterval(tickStatus, 15_000);
+    const newId = setInterval(tickNew, 20_000);
+    const statusId = setInterval(tickStatus, 30_000);
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
         void tickNew();
@@ -2267,6 +2269,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       // This conversation just left "Needs Reply" — drop the cached counts so
       // the header pill and the chips decrement instead of waiting out the TTL.
       invalidateWhatsAppReplyStateCounts();
+      setReplyStateEpoch((n) => n + 1);
     }
     setSending(false);
   };
@@ -2515,6 +2518,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       appendTemplateBubble("sent", null, data?.message_id || null);
       toast({ title: "Template sent" });
       invalidateWhatsAppReplyStateCounts();
+      setReplyStateEpoch((n) => n + 1);
       setSelectedTemplate(null);
       setShowTemplatePicker(false);
       setTemplateParamOverrides({});
@@ -3161,7 +3165,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 ? `Engaged from ${engagedCampaignName || "campaign"} · ${filtered.length} chat${filtered.length !== 1 ? "s" : ""}`
                 : replyStateCounts
                 ? replyStateCounts.needsReply > 0
-                  ? `${replyStateCounts.needsReply} conversation${replyStateCounts.needsReply !== 1 ? "s" : ""} waiting on you · ${replyStateCounts.unreadMessages} unread message${replyStateCounts.unreadMessages !== 1 ? "s" : ""}`
+                  ? `${replyStateCounts.needsReply} conversation${replyStateCounts.needsReply !== 1 ? "s" : ""} waiting on you`
                   : "All caught up"
                 : "Loading…"}
           </p>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -60,7 +60,6 @@ export function useActionCenter(counsellorFilterId?: string) {
   const { role, profile } = useAuth();
   const [data, setData] = useState<ActionCenterData>(EMPTY);
   const [loading, setLoading] = useState(true);
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Determine which counsellor to scope to
   const isCounsellor = role === "counsellor";
@@ -91,24 +90,19 @@ export function useActionCenter(counsellorFilterId?: string) {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // Real-time refresh on key table changes. Debounce to avoid turning write
-  // bursts into repeated full-page payload refreshes.
+  // Poll while visible instead of unfiltered WAL on leads / followups /
+  // visits. Those tables are the hottest write paths; every UPDATE used to
+  // refetch the full action-center payload. A minute of staleness is fine
+  // for overdue/today buckets; refetch() still runs after dispositions.
   useEffect(() => {
-    const scheduleRefresh = () => {
-      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-      refreshTimerRef.current = setTimeout(() => fetchAll(false), 600);
+    const tick = () => {
+      if (document.visibilityState === "visible") void fetchAll(false);
     };
-
-    const channel = supabase
-      .channel("action-center-realtime")
-      .on("postgres_changes" as any, { event: "*", schema: "public", table: "lead_followups" }, scheduleRefresh)
-      .on("postgres_changes" as any, { event: "*", schema: "public", table: "campus_visits" }, scheduleRefresh)
-      .on("postgres_changes" as any, { event: "*", schema: "public", table: "leads" }, scheduleRefresh)
-      .subscribe();
-
+    const id = setInterval(tick, 60_000);
+    document.addEventListener("visibilitychange", tick);
     return () => {
-      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-      supabase.removeChannel(channel);
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
     };
   }, [fetchAll]);
 

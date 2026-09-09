@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { ArrowRight, GraduationCap, X } from "lucide-react";
 import {
+  UPDELED_SPRINT_OPEN,
   effectiveUpdeledDeadline,
   UPDELED_DEADLINE_ISO,
 } from "@/lib/deadlineRollover";
@@ -71,6 +72,7 @@ export function UpdeledSprintTicker() {
   const onSprintPage = location.pathname === "/updeled-sprint";
 
   useEffect(() => {
+    if (!UPDELED_SPRINT_OPEN) return;
     if (!eligible || dismissed || onSprintPage) return;
     let cancelled = false;
     let interval: number | undefined;
@@ -92,6 +94,7 @@ export function UpdeledSprintTicker() {
     return () => { cancelled = true; if (interval !== undefined) window.clearInterval(interval); };
   }, [eligible, dismissed, onSprintPage, profileId]);
 
+  if (!UPDELED_SPRINT_OPEN) return null;
   if (!eligible || dismissed || onSprintPage) return null;
   if (!stats) return null;
 

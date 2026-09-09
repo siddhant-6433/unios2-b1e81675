@@ -11,6 +11,7 @@ describe("LiveCallBar lifecycle guards", () => {
   it("uses a short stale initiated-call display cutoff", () => {
     expect(liveCallBarSource).toContain("UNCONNECTED_RING_DISPLAY_MS = 75 * 1000");
     expect(liveCallBarSource).toContain("LIVE_CALL_LOOKBACK_MS = 10 * 60 * 1000");
+    expect(liveCallBarSource).toContain("LIVE_CALL_IDLE_POLL_MS = 30_000");
     expect(liveCallBarSource).not.toContain("7 * 60 * 1000");
   });
 
@@ -26,6 +27,12 @@ describe("LiveCallBar lifecycle guards", () => {
     expect(staleLiveCallCronMigration).toContain("'reconcile-stale-live-calls'");
     expect(staleLiveCallCronMigration).toContain("REVOKE ALL ON FUNCTION public.reconcile_stale_live_calls_cron(integer) FROM PUBLIC, anon, authenticated");
     expect(staleLiveCallCronMigration).toContain("END;\n$do$;");
+  });
+
+  it("revokes authenticated EXECUTE on the leftover client reconcile RPC", () => {
+    const revoke = readMigration("revoke_client_stale_live_call_reconcile");
+    expect(revoke).toContain("REVOKE ALL ON FUNCTION public.reconcile_stale_live_calls(integer) FROM PUBLIC, anon, authenticated");
+    expect(liveCallBarSource).not.toContain('rpc("reconcile_stale_live_calls"');
   });
 
   it("closes live-transfer marker rows when the voice stream ends", () => {

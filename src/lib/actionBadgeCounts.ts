@@ -1,23 +1,16 @@
 import { supabase } from "@/integrations/supabase/client";
 
-// action_badge_counts is an expensive RLS-scoped aggregate. Three layout
-// components (AppSidebar, GlobalActionBar, WhatsAppPanel) each call it on mount
-// and on realtime bursts, so the same query fires 2-3x simultaneously and,
-// under load, blows past the 8s statement timeout (500 + 57014 in the DB logs).
-//
-// This wrapper collapses those bursts: identical concurrent calls share one
-// in-flight request, and a 60s TTL absorbs the mount-time triple-fire.
-// Layout chrome no longer refetches on every whatsapp_messages WAL event.
-// It does NOT change the RLS boundary or the SQL — same params still hit
-// the same function.
-//
-// ponytail: in-memory single-tab dedup. Cross-tab load is inherent (each open
-// CRM tab polls independently); upgrade to a shared worker only if that bites.
+// action_badge_counts is an expensive RLS-scoped aggregate. Sidebar and the
+// action bar share this helper so concurrent mounts collapse to one RPC.
+// Counts are directional (overdue follow-ups, fresh leads), not live ops, so
+// a 10-minute TTL is enough — visibilitychange must not bypass it.
 
 type BadgeArgs = { p_scope_counsellor_id: string | null; p_include_unassigned: boolean };
 type RpcResult = { data: any; error: any };
 
-const TTL_MS = 60_000;
+export const ACTION_BADGE_TTL_MS = 10 * 60_000;
+export const ACTION_BADGE_POLL_MS = ACTION_BADGE_TTL_MS;
+const TTL_MS = ACTION_BADGE_TTL_MS;
 const inflight = new Map<string, Promise<RpcResult>>();
 const cache = new Map<string, { at: number; res: RpcResult }>();
 
@@ -52,17 +45,15 @@ export async function fetchActionBadgeCounts(args: BadgeArgs): Promise<RpcResult
   return p;
 }
 
-// whatsapp_reply_state_counts is the same shape of problem: a ~1.2s
-// conversation-level aggregate that the inbox still calls. Layout chrome
-// no longer hits it. Same dedup, 60s TTL — reply state moves on the scale
-// of someone typing a reply, not milliseconds.
+// Pending WhatsApp reply status (last inbound, not DNC). Inbox chips only;
+// layout chrome must not call this. 5-minute TTL plus invalidate-on-send.
 type ReplyStateArgs = {
   p_counsellor_id: string | null;
   p_business_key: string | null;
   p_include_outbound_only: boolean;
 };
 
-const REPLY_STATE_TTL_MS = 60_000;
+export const REPLY_STATE_TTL_MS = 5 * 60_000;
 const replyStateInflight = new Map<string, Promise<RpcResult>>();
 const replyStateCache = new Map<string, { at: number; res: RpcResult }>();
 
@@ -103,7 +94,7 @@ export function invalidateWhatsAppReplyStateCounts(): void {
 // visible once the popover is open. So the every-page background poll passes
 // includeLeads=false (presence only), and we pay for the leads list on demand.
 // Separate cache slots per flag; dedup + TTL absorb the mount triple-fire.
-const ACTIVE_OVERVIEW_TTL_MS = 60_000;
+const ACTIVE_OVERVIEW_TTL_MS = 5 * 60_000;
 const activeOverviewInflight = new Map<string, Promise<RpcResult>>();
 const activeOverviewCache = new Map<string, { at: number; res: RpcResult }>();
 

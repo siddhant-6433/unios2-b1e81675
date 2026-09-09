@@ -27,7 +27,7 @@ interface ActiveLead {
   counsellor_name: string | null;
 }
 
-const POLL_MS = 120_000;
+const POLL_MS = 5 * 60_000;
 
 // Group login-users into the same buckets the Admin Panel uses.
 type Category = "Team" | "Students & Families" | "Consultants" | "Partners" | "Publishers";

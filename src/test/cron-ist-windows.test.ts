@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { readMigration } from "./readMigration";
 
@@ -52,5 +53,37 @@ describe("IST cron day/night split", () => {
     expect(migration).toContain("vault.decrypted_secrets");
     expect(migration).toContain("library_set_enrich_cron");
     expect(migration).toContain("'*/30 13-23,0-3 * * *'");
+  });
+});
+
+describe("nightly counsellor-score-cron grants", () => {
+  it("lets service_role write penalty logs the 10pm IST cron actually uses", () => {
+    // GRANT TO authenticated does not include service_role. The cron client
+    // is service_role, which produced ~100 "permission denied for table
+    // score_penalty_log / counsellor_score_events" at 10pm IST on 2026-09-08.
+    const grants = readMigration("score_cron_service_role_grants");
+    expect(grants).toContain("GRANT SELECT, INSERT, UPDATE, DELETE ON public.score_penalty_log TO service_role");
+    expect(grants).toContain("GRANT SELECT, INSERT, UPDATE, DELETE ON public.counsellor_score_events TO service_role");
+    expect(grants).toContain("GRANT SELECT ON public.post_visit_pending_followups TO service_role");
+    expect(grants).toContain("GRANT SELECT ON public.overdue_followups TO service_role");
+  });
+});
+
+describe("WhatsApp status-queue drain", () => {
+  it("returns immediately when the queue is empty and uses an 80-row minute batch", () => {
+    const statusBatch = readMigration("whatsapp_status_batch_empty_guard");
+    expect(statusBatch).toContain("SELECT 1 FROM public.whatsapp_status_queue WHERE processed_at IS NULL LIMIT 1");
+    expect(statusBatch).toContain("DEFAULT 80");
+    expect(statusBatch).toContain("process_whatsapp_status_batch(80)");
+    expect(statusBatch).not.toMatch(/Bearer [A-Za-z0-9._-]{20,}/);
+  });
+});
+
+describe("automation engine concurrency probe", () => {
+  it("does not COUNT(*) automation_rule_executions on every invoke", () => {
+    const engine = readFileSync("supabase/functions/automation-engine/index.ts", "utf8");
+    expect(engine).toContain('.select("id")');
+    expect(engine).toContain(".limit(MAX_CONCURRENT)");
+    expect(engine).not.toContain('count: "exact"');
   });
 });

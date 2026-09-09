@@ -106,8 +106,13 @@ export function HotEngagedLeads({ profileId, isSuperAdmin, isTeamLeader }: Props
 
   useEffect(() => {
     fetch();
-    const interval = setInterval(fetch, 60_000);
-    return () => clearInterval(interval);
+    const tick = () => { if (document.visibilityState === "visible") void fetch(); };
+    const interval = setInterval(tick, 90_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [fetch]);
 
   return (

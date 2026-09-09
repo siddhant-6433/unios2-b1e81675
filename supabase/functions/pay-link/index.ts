@@ -163,9 +163,9 @@ Deno.serve(async (req) => {
     let displayId: string | null = null;
     let photoUrl: string | null = null;
     if (link.lead_id) {
-      const { data } = await admin.from("leads").select("name, application_no, photo_url, courses:course_id(name, departments(institutions(name)))").eq("id", link.lead_id).maybeSingle();
+      const { data } = await admin.from("leads").select("name, application_id, admission_no, pre_admission_no, photo_url, courses:course_id(name, departments(institutions(name)))").eq("id", link.lead_id).maybeSingle();
       payerName = data?.name || payerName;
-      displayId = data?.application_no || null;
+      displayId = data?.admission_no || data?.pre_admission_no || data?.application_id || null;
       photoUrl = data?.photo_url || null;
       institutionName = (data?.courses as any)?.departments?.institutions?.name || null;
       courseName = (data?.courses as any)?.name || null;
@@ -173,15 +173,14 @@ Deno.serve(async (req) => {
     if (link.student_id) {
       const { data } = await admin.from("students").select("name, admission_no, pre_admission_no, photo_url, lead_id, courses:course_id(name, departments(institutions(name)))").eq("id", link.student_id).maybeSingle();
       payerName = data?.name || payerName;
-      // ponytail: admission_no > pre_admission_no > lead application_no
+      // ponytail: admission_no > pre_admission_no > lead application_id
       displayId = data?.admission_no || data?.pre_admission_no || displayId || null;
       photoUrl = data?.photo_url || photoUrl || null;
       institutionName = (data?.courses as any)?.departments?.institutions?.name || institutionName || null;
       courseName = (data?.courses as any)?.name || courseName || null;
-      // If no displayId yet and student has a linked lead, grab application_no
       if (!displayId && data?.lead_id && !link.lead_id) {
-        const { data: ld } = await admin.from("leads").select("application_no").eq("id", data.lead_id).maybeSingle();
-        displayId = ld?.application_no || null;
+        const { data: ld } = await admin.from("leads").select("application_id, admission_no, pre_admission_no").eq("id", data.lead_id).maybeSingle();
+        displayId = ld?.admission_no || ld?.pre_admission_no || ld?.application_id || null;
       }
       // Earliest unpaid fee due date for context
       const { data: dueFee } = await admin.from("fee_ledger").select("due_date").eq("student_id", link.student_id).in("status", ["due", "overdue"]).order("due_date", { ascending: true }).limit(1).maybeSingle();

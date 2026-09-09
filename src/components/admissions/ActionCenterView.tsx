@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Trophy, Flame, TrendingUp } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { fetchCounsellorLeaderboard } from "@/lib/counsellorLeaderboard";
 import { useToast } from "@/hooks/use-toast";
 import { useActionCenter, type ActionLead } from "@/hooks/useActionCenter";
 import { ActionBucketSection } from "./ActionBucketSection";
@@ -19,7 +20,7 @@ function LeaderboardWidget() {
 
   useEffect(() => {
     const fetchLeaderboard = async () => {
-      const { data } = await supabase.rpc("get_counsellor_leaderboard" as any);
+      const { data } = await fetchCounsellorLeaderboard();
       if (!data) return;
       const sorted = (data as any[]).sort((a, b) => b.weekly_score - a.weekly_score);
       setLeaders(sorted.slice(0, 5));
@@ -34,19 +35,13 @@ function LeaderboardWidget() {
     };
 
     fetchLeaderboard();
-
-    // Listen for score updates
-    if (!profile?.id) return;
-    const channel = supabase
-      .channel("leaderboard-widget")
-      .on("postgres_changes" as any, {
-        event: "INSERT",
-        schema: "public",
-        table: "counsellor_score_events",
-      }, fetchLeaderboard)
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    const tick = () => { if (document.visibilityState === "visible") void fetchLeaderboard(); };
+    const interval = setInterval(tick, 5 * 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [profile?.id]);
 
   if (leaders.length === 0) return null;

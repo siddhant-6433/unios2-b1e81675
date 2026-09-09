@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { ArrowRight, Flame, X } from "lucide-react";
 import {
+  CAHET_SPRINT_OPEN,
   effectiveCahetDeadline,
   INITIAL_CAHET_DEADLINE_ISO,
 } from "@/lib/deadlineRollover";
@@ -63,6 +64,7 @@ export function CahetSprintTicker() {
   const onSprintPage = location.pathname === "/cahet-sprint";
 
   useEffect(() => {
+    if (!CAHET_SPRINT_OPEN) return;
     if (!eligible || dismissed || onSprintPage) return;
     let cancelled = false;
     let interval: number | undefined;
@@ -84,6 +86,7 @@ export function CahetSprintTicker() {
     return () => { cancelled = true; if (interval !== undefined) window.clearInterval(interval); };
   }, [eligible, dismissed, onSprintPage, profileId]);
 
+  if (!CAHET_SPRINT_OPEN) return null;
   if (!eligible || dismissed || onSprintPage) return null;
   if (!stats) return null;
 

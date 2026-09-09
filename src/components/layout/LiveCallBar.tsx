@@ -41,7 +41,7 @@ const STAGE_COLORS: Record<string, string> = {
 
 const LIVE_CALL_LOOKBACK_MS = 10 * 60 * 1000;
 const UNCONNECTED_RING_DISPLAY_MS = 75 * 1000;
-const LIVE_CALL_IDLE_POLL_MS = 15_000;
+const LIVE_CALL_IDLE_POLL_MS = 30_000;
 const LIVE_CALL_ACTIVE_POLL_MS = 5_000;
 
 const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;

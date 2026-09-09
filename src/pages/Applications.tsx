@@ -42,6 +42,7 @@ import {
   PAID_APPLICATION_DELETE_CONFIRMATION,
 } from "@/lib/deleteApplication";
 import { fetchAllApplicationRows, type ApplicationsReadClient } from "@/lib/applicationsRead";
+import { fetchLeadFeeStatus, invalidateLeadFeeStatus } from "@/lib/leadFeeStatus";
 import {
   applyApplicationDossierToRow,
   buildApplicationDossier,
@@ -443,6 +444,7 @@ export default function Applications() {
 
   const handleOfflinePaymentSuccess = async () => {
     if (!offlinePaymentApp) return;
+    if (offlinePaymentApp.lead_id) invalidateLeadFeeStatus(offlinePaymentApp.lead_id);
     await supabase.from("applications" as any)
       .update({ payment_status: "paid" })
       .eq("id", offlinePaymentApp.id);
@@ -862,7 +864,7 @@ export default function Applications() {
       if (feeStatusLeadIds.length === 0) return;
 
       const enrichFeeStatus = async () => {
-        const workerCount = Math.min(8, feeStatusLeadIds.length);
+        const workerCount = Math.min(4, feeStatusLeadIds.length);
         let nextIndex = 0;
 
         const worker = async () => {
@@ -871,7 +873,7 @@ export default function Applications() {
             nextIndex += 1;
 
             try {
-              const { data: fs } = await (supabase as any).rpc("lead_fee_status", { _lead_id: lid });
+              const { data: fs } = await fetchLeadFeeStatus(lid);
               if (!fs) continue;
               const tokenReq = Number(fs.token_required || 0);
               const anThr = Number(fs.an_threshold || 0);

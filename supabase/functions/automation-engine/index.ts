@@ -54,12 +54,13 @@ Deno.serve(async (req) => {
     // are running (bulk stage change → 100+ pg_net calls), shed load early to
     // protect the DB connection pool. The trigger retries via cooldown_hours.
     const MAX_CONCURRENT = 20;
-    const { count: activeCount } = await admin
+    const { data: recentExecs } = await admin
       .from("automation_rule_executions")
-      .select("id", { count: "exact", head: true })
-      .gte("created_at", new Date(Date.now() - 60_000).toISOString());
-    if ((activeCount ?? 0) >= MAX_CONCURRENT) {
-      console.warn(`Automation engine: ${activeCount} executions in last 60s, shedding load`);
+      .select("id")
+      .gte("created_at", new Date(Date.now() - 60_000).toISOString())
+      .limit(MAX_CONCURRENT);
+    if ((recentExecs?.length ?? 0) >= MAX_CONCURRENT) {
+      console.warn(`Automation engine: ${recentExecs?.length} executions in last 60s, shedding load`);
       return new Response(JSON.stringify({ shed: true, reason: "rate_limited" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -174,13 +175,14 @@ Deno.serve(async (req) => {
       // ── Check dedup: don't fire same rule for same lead within cooldown ──
       const cooldownHours = config.cooldown_hours || 24;
       const cooldownSince = new Date(Date.now() - cooldownHours * 60 * 60 * 1000).toISOString();
-      const { count: recentExecs } = await admin
+      const { data: recentForRule } = await admin
         .from("automation_rule_executions")
-        .select("id", { count: "exact", head: true })
+        .select("id")
         .eq("rule_id", rule.id)
         .eq("lead_id", lead.id)
-        .gte("created_at", cooldownSince);
-      if ((recentExecs || 0) > 0) continue;
+        .gte("created_at", cooldownSince)
+        .limit(1);
+      if (recentForRule?.length) continue;
 
       // ── Execute actions ──
       const actions = (rule.actions as any[]) || [];
