@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Flame, Trophy, ArrowRight } from "lucide-react";
+import { CAHET_SPRINT_OPEN } from "@/lib/deadlineRollover";
 
 interface LeaderRow {
   counsellor_id: string;
@@ -33,6 +34,10 @@ export function CahetSprintLeaderboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!CAHET_SPRINT_OPEN) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     async function load() {
       const [lb, st] = await Promise.all([
@@ -48,7 +53,10 @@ export function CahetSprintLeaderboard() {
       setLoading(false);
     }
     load();
+    return () => { cancelled = true; };
   }, []);
+
+  if (!CAHET_SPRINT_OPEN) return null;
 
   const days = stats ? daysRemaining(stats.deadline_at) : 0;
   const top = rows[0];

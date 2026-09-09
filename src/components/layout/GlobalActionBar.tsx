@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
+import { ACTION_BADGE_POLL_MS, fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
@@ -138,10 +138,10 @@ export function GlobalActionBar() {
     };
 
     fetchCounts();
-    // Don't hammer the expensive aggregate from a backgrounded tab — poll only
-    // while visible, and refresh once on the way back to foreground.
+    // Directional chrome counts, not live ops. Poll only while visible; the
+    // shared TTL absorbs tab-focus refetch so visibilitychange is a cache hit.
     const tick = () => { if (document.visibilityState === "visible") fetchCounts(); };
-    const interval = setInterval(tick, 5 * 60 * 1000);
+    const interval = setInterval(tick, ACTION_BADGE_POLL_MS);
     document.addEventListener("visibilitychange", tick);
     return () => {
       clearInterval(interval);

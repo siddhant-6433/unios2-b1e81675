@@ -10,6 +10,7 @@ const headerResponseTime = readFileSync("src/components/layout/HeaderResponseTim
 const useTatDefaults = readFileSync("src/hooks/useTatDefaults.ts", "utf8");
 const actionBadgeCountsHelper = readFileSync("src/lib/actionBadgeCounts.ts", "utf8");
 const liveCallBar = readFileSync("src/components/layout/LiveCallBar.tsx", "utf8");
+const headerProfile = readFileSync("src/components/layout/HeaderProfile.tsx", "utf8");
 const migration = readFileSync("supabase/migrations/20260618150000_crm_layout_perf_indexes.sql", "utf8");
 const actionBadgeCounts = readFileSync("supabase/migrations/20260618183000_action_badge_counts.sql", "utf8");
 const fastActionBadgeCounts = readFileSync("supabase/migrations/20260625130000_fast_action_badge_counts.sql", "utf8");
@@ -96,6 +97,26 @@ describe("CRM layout performance guardrails", () => {
     expect(liveCallBar).toContain("LIVE_CALL_ACTIVE_POLL_MS");
   });
 
+  it("treats action badge counts as directional chrome, not realtime", () => {
+    expect(actionBadgeCountsHelper).toContain("ACTION_BADGE_TTL_MS = 10 * 60_000");
+    expect(actionBadgeCountsHelper).toContain("ACTION_BADGE_POLL_MS");
+    expect(appSidebar).toContain("ACTION_BADGE_POLL_MS");
+    expect(globalActionBar).toContain("ACTION_BADGE_POLL_MS");
+    expect(appSidebar).not.toContain("120_000");
+  });
+
+  it("does not mount closed CAHET/UPDELED sprint tickers on every CRM page", () => {
+    expect(appLayout).toContain("CAHET_SPRINT_OPEN && <CahetSprintTicker");
+    expect(appLayout).toContain("UPDELED_SPRINT_OPEN && <UpdeledSprintTicker");
+  });
+
+  it("counts WhatsApp unreplied badges from conversation_state pending status", () => {
+    const pendingReply = readMigration("whatsapp_pending_reply_status");
+    expect(pendingReply).toContain("FROM public.whatsapp_conversation_state s");
+    expect(pendingReply).toContain("s.last_direction = 'inbound'");
+    expect(pendingReply).not.toMatch(/FROM public\.whatsapp_messages wm\s+JOIN public\.leads l ON l\.id = wm\.lead_id/);
+  });
+
   it("does not subscribe layout chrome to unfiltered hot-table WAL", () => {
     // Delivery-status updates on whatsapp_messages (up to 500/min) plus lead
     // writes used to fan out to every CRM tab and re-run action_badge_counts.
@@ -146,5 +167,47 @@ describe("CRM layout performance guardrails", () => {
     expect(loadRelief).toContain("fn_invoke_campaign_dispatcher_if_due");
     expect(loadRelief).toContain("fn_invoke_whatsapp_buffer_if_due");
     expect(loadRelief).toContain("fn_invoke_easebuzz_fast_if_pending");
+  });
+
+  it("slows always-on chrome and drops remaining hot-table WAL", () => {
+    const presence = readFileSync("src/hooks/usePresenceHeartbeat.ts", "utf8");
+    const actionCenter = readFileSync("src/hooks/useActionCenter.ts", "utf8");
+    const inbox = readFileSync("src/pages/WhatsAppInbox.tsx", "utf8");
+    const scoreBadge = readFileSync("src/components/admissions/CounsellorScoreBadge.tsx", "utf8");
+    const actionCenterView = readFileSync("src/components/admissions/ActionCenterView.tsx", "utf8");
+    const headerActive = readFileSync("src/components/layout/HeaderActiveUsers.tsx", "utf8");
+    const leaderboardHelper = readFileSync("src/lib/counsellorLeaderboard.ts", "utf8");
+    const cloudDialer = readFileSync("src/pages/CloudDialer.tsx", "utf8");
+
+    expect(liveCallBar).toContain("LIVE_CALL_IDLE_POLL_MS = 30_000");
+    expect(presence).toContain("INTERVAL_MS = 5 * 60_000");
+    expect(presence).toContain("MIN_PING_GAP_MS");
+    expect(headerActive).toContain("POLL_MS = 5 * 60_000");
+    expect(actionBadgeCountsHelper).toContain("ACTIVE_OVERVIEW_TTL_MS = 5 * 60_000");
+
+    expect(actionCenter).not.toContain("postgres_changes");
+    expect(actionCenter).not.toContain('table: "leads"');
+    expect(actionCenter).toContain("60_000");
+    expect(scoreBadge).not.toContain("postgres_changes");
+    expect(actionCenterView).not.toContain("postgres_changes");
+    expect(appSidebar).not.toContain('table: "concessions"');
+    expect(appSidebar).not.toContain('table: "offer_letters"');
+
+    expect(inbox).toContain("setInterval(tickNew, 20_000)");
+    expect(inbox).toContain("setInterval(tickStatus, 30_000)");
+
+    expect(leaderboardHelper).toContain("COUNSELLOR_LEADERBOARD_TTL_MS = 5 * 60_000");
+    expect(headerProfile).toContain("fetchCounsellorLeaderboard(");
+    expect(scoreBadge).toContain("fetchCounsellorLeaderboard(");
+    expect(cloudDialer).toContain("fetchActionBadgeCounts(");
+    expect(cloudDialer).not.toContain(".eq(\"needs_followup\", true)");
+  });
+
+  it("skips FOR UPDATE on an empty WhatsApp status queue and caps the minute batch", () => {
+    const statusBatch = readMigration("whatsapp_status_batch_empty_guard");
+    expect(statusBatch).toContain("SELECT 1 FROM public.whatsapp_status_queue WHERE processed_at IS NULL LIMIT 1");
+    expect(statusBatch).toContain("process_whatsapp_status_batch(_batch_size INT DEFAULT 80)");
+    expect(statusBatch).toContain("SELECT process_whatsapp_status_batch(80)");
+    expect(statusBatch).toContain("wm.status IS DISTINCT FROM l.status");
   });
 });

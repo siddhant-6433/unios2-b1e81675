@@ -105,6 +105,14 @@ describe("pay-link edge function", () => {
     expect(payLinkFn).toContain('if (!webhookSecret) return json({ error: "Webhook secret not configured" }, 500);');
   });
 
+  it("resolves payer display id from real lead columns, not leads.application_no", () => {
+    // leads.application_no does not exist — 32 postgres 42703 errors in 2 minutes
+    // when a public pay-link was opened (2026-09-08 ~10:29pm IST).
+    expect(payLinkFn).not.toContain("application_no");
+    expect(payLinkFn).toContain("application_id, admission_no, pre_admission_no");
+    expect(payLinkFn).toContain("data?.admission_no || data?.pre_admission_no || data?.application_id");
+  });
+
   it("rejects non-active links for payment actions and lazily expires stale ones", () => {
     expect(payLinkFn).toContain('if (link.status !== "active")');
     expect(payLinkFn).toContain("This payment link is ${link.status}");

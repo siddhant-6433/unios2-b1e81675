@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { UpdeledRegisterDialog, type UpdeledRegisterTarget } from "@/components/leads/UpdeledRegisterDialog";
 import {
+  UPDELED_SPRINT_OPEN,
   effectiveUpdeledDeadline,
   effectiveUpdeledDeadlineLabel,
 } from "@/lib/deadlineRollover";
@@ -287,6 +288,10 @@ const UpdeledSprint = () => {
 
   // ── Data ────────────────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
+    if (!UPDELED_SPRINT_OPEN) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const counsellorParam = scope === "mine" ? profileId : null;
     const [queueRes, statsRes] = await Promise.all([
@@ -675,6 +680,21 @@ const UpdeledSprint = () => {
   }, [selectedRow, moveSelection, placeCall, skipRow, registerFor, activeCall, cancelCall, markDisposition]);
 
   // ── Render ──────────────────────────────────────────────────────────────
+  if (!UPDELED_SPRINT_OPEN) {
+    return (
+      <div className="space-y-4">
+        <Card className="border-border bg-muted/30">
+          <CardContent className="p-4">
+            <div className="font-semibold text-foreground">UPDELED sprint has ended</div>
+            <p className="text-sm text-muted-foreground mt-1">
+              The counselling registration sprint closed on {effectiveUpdeledDeadlineLabel()}. Direct links still open this page, but the live queue and stats RPCs no longer run.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   const deadlineIso = stats ? effectiveUpdeledDeadline(stats.deadline_at) : null;
   const deadlineLabel = effectiveUpdeledDeadlineLabel();
   const days = deadlineIso ? daysRemaining(deadlineIso) : 0;

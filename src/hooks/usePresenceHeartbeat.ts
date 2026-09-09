@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
-const INTERVAL_MS = 60_000;
+const INTERVAL_MS = 5 * 60_000;
+const MIN_PING_GAP_MS = 60_000;
 
 export function usePresenceHeartbeat() {
   const { user } = useAuth();
@@ -10,8 +11,12 @@ export function usePresenceHeartbeat() {
   useEffect(() => {
     if (!user) return;
 
+    let lastPingAt = 0;
     const ping = () => {
       if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastPingAt < MIN_PING_GAP_MS) return;
+      lastPingAt = now;
       supabase
         .from("profiles")
         .update({ last_seen_at: new Date().toISOString() } as any)
