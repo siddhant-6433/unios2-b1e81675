@@ -31,6 +31,7 @@ export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: (
   const [depositAmount, setDepositAmount] = useState(0);
   const [approvedCredit, setApprovedCredit] = useState(0);
   const [firstYearDue, setFirstYearDue] = useState(0); // net of the approved ABVMU credit
+  const [lumpSumPct, setLumpSumPct] = useState(5);
   const [claims, setClaims] = useState<AbvmuClaim[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -40,6 +41,7 @@ export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: (
   useEffect(() => {
     if (!leadId) {
       setDepositAmount(0);
+      setLumpSumPct(5);
       setClaims([]);
       setLoading(false);
       return;
@@ -56,6 +58,8 @@ export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: (
       setDepositAmount(Math.max(0, Number(status.abvmu_deposit_amount || 0)));
       setApprovedCredit(Math.max(0, Number(status.abvmu_approved_credit || 0)));
       setFirstYearDue(Math.max(0, Number(status.full_first_year_amount_due || 0)));
+      const pct = Number(status.lump_sum_pct);
+      setLumpSumPct(Number.isFinite(pct) ? Math.max(0, pct) : 5);
       setClaims((claimsRes?.data ?? []) as AbvmuClaim[]);
       setLoading(false);
     })();
@@ -141,6 +145,7 @@ export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: (
 
   return {
     depositAmount,
+    lumpSumPct,
     approvedCredit,
     firstYearDue,
     claims,

@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { isCronCaller } from "../_shared/service-auth.ts";
+import { resolveYear1LumpSumCharge } from "../_shared/gateway-settlement.ts";
 
 /**
  * Razorpay Standard Checkout settlement.
@@ -225,6 +226,10 @@ async function expectedStudentFeeAmount(
   const rows = await getStudentFeeRows(admin, studentId, selection);
   if (!rows.length) throw new Error("No outstanding fees found for this student");
   const grossTotal = rows.reduce((sum: number, row: any) => sum + Number(row.balance ?? 0), 0);
+  const year1 = await resolveYear1LumpSumCharge(admin, studentId, selection);
+  if (year1) {
+    return { payable: year1.amountDue, waiver: year1.discount };
+  }
   const waiver = Math.max(0, Math.min(Number(waiverAmount || 0), grossTotal));
   return {
     payable: Math.max(0, Math.round((grossTotal - waiver) * 100) / 100),
@@ -261,28 +266,44 @@ async function settleStudentFeePayment(
   if (!rows.length) return { ok: true, already: false, leadPaymentId: null };
 
   const grossTotal = rows.reduce((sum: number, row: any) => sum + Number(row.balance ?? 0), 0);
-  const waiver = Math.max(0, Math.min(Number(waiverAmount || 0), grossTotal));
-  const expectedPaid = grossTotal - waiver;
+  const year1 = await resolveYear1LumpSumCharge(admin, studentId, selection);
+  const cover = year1 ? year1.remaining : grossTotal;
+  const waiver = year1
+    ? Math.max(0, year1.discount)
+    : Math.max(0, Math.min(Number(waiverAmount || 0), grossTotal));
+  const expectedPaid = year1 ? year1.amountDue : grossTotal - waiver;
   if (Math.abs(paidAmount - expectedPaid) > 1) {
     return { ok: false, message: `Amount mismatch: received ${paidAmount}, expected ${expectedPaid}` };
   }
 
   let remainingWaiver = Math.round(waiver * 100) / 100;
+  let remainingCover = Math.round(cover * 100) / 100;
   const ledgerSplits: Array<{ id: string; amount: number; concession: number }> = [];
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const balance = Number(row.balance ?? 0);
-    const concessionPart = i === rows.length - 1
+    const isLast = i === rows.length - 1;
+    const take = Math.min(
+      balance,
+      isLast ? remainingCover : Math.round((cover * (balance / Math.max(grossTotal, 1))) * 100) / 100,
+    );
+    const concessionPart = isLast
       ? remainingWaiver
-      : Math.min(balance, Math.round((waiver * (balance / grossTotal)) * 100) / 100);
+      : Math.min(take, cover > 0 ? Math.round((waiver * (take / cover)) * 100) / 100 : 0);
     remainingWaiver = Math.round((remainingWaiver - concessionPart) * 100) / 100;
-    const paidPart = Math.max(0, Math.round((balance - concessionPart) * 100) / 100);
+    remainingCover = Math.round((remainingCover - take) * 100) / 100;
+    const paidPart = Math.max(0, Math.round((take - concessionPart) * 100) / 100);
     const newConcession = Number(row.concession || 0) + concessionPart;
-    const newPaid = Math.max(0, Number(row.total_amount) - newConcession);
+    const newPaid = Number(row.paid_amount || 0) + paidPart;
+    const fullyPaid = newPaid + newConcession >= Number(row.total_amount) - 0.01;
 
     const { error } = await admin
       .from("fee_ledger")
-      .update({ concession: newConcession, paid_amount: newPaid, status: "paid" })
+      .update({
+        concession: newConcession,
+        paid_amount: newPaid,
+        ...(fullyPaid ? { status: "paid" } : {}),
+      })
       .eq("id", row.id)
       .in("status", ["due", "overdue"]); // claim only unpaid rows
     if (error) return { ok: false, message: error.message };
@@ -310,7 +331,7 @@ async function settleStudentFeePayment(
         transaction_ref: paymentRef,
         status: "confirmed",
         applied_to_ledger: true,
-        notes: waiver > 0 ? "Course-fee payment with annual Pay All waiver" : "Course-fee instalment via Razorpay",
+        notes: waiver > 0 ? "Course-fee payment with Year-1 tuition lump-sum waiver" : "Course-fee instalment via Razorpay",
       })
       .select("id")
       .maybeSingle();

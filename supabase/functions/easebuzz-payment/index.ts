@@ -4,6 +4,7 @@ import {
   settleLeadPaymentRow,
   settlePaymentLink,
   settleStudentFeePayment,
+  resolveYear1LumpSumCharge,
 } from "../_shared/gateway-settlement.ts";
 import { isServiceCaller } from "../_shared/service-auth.ts";
 import {
@@ -624,7 +625,10 @@ Deno.serve(async (req) => {
       // Fetch actual outstanding balance from DB — never trust client-supplied amount
       const adminInit = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
       const feeSelection = feeSelectionFromBody(payment_scope, fee_ids);
-      const waiver = Math.max(0, Number(waiver_amount || 0));
+      const year1 = await resolveYear1LumpSumCharge(adminInit, student_id, feeSelection);
+      const waiver = year1
+        ? Math.max(0, year1.discount)
+        : Math.max(0, Number(waiver_amount || 0));
       const { rows: dueRows, error: dueErr } = await fetchStudentFeeRows(adminInit, student_id, feeSelection);
 
       if (dueErr || !dueRows?.length) {
@@ -635,8 +639,9 @@ Deno.serve(async (req) => {
       }
 
       const totalDue   = dueRows.reduce((s: number, r: any) => s + Number(r.balance), 0);
-      const amountStr  = Math.max(totalDue - Math.min(waiver, totalDue), 0).toFixed(2);
-      const waiverStr  = String(Math.min(waiver, totalDue).toFixed(2));
+      const chargeDue  = year1 ? year1.remaining : totalDue;
+      const amountStr  = Math.max(chargeDue - Math.min(waiver, chargeDue), 0).toFixed(2);
+      const waiverStr  = String(Math.min(waiver, chargeDue).toFixed(2));
       const emailStr   = email || "noreply@nimteducation.com";
       const productStr = productinfo || "Fee Payment";
       const selfUrl    = `${supabaseUrl}/functions/v1/easebuzz-payment`;
