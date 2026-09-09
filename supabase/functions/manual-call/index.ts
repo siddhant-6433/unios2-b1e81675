@@ -4,7 +4,7 @@
  * Initiates a bridge call: Plivo calls the counsellor's phone first,
  * when they answer, bridges to the student's number.
  *
- * Request: { lead_id: string }
+ * Request: { lead_id: string } | { contact_id: string }
  * Auth: Requires authenticated user (counsellor or admin)
  *
  * Flow:
@@ -67,8 +67,10 @@ Deno.serve(async (req) => {
     if (authErr || !authData?.user?.id) return json({ error: "Unauthorized" }, 401);
 
     const db = createClient(supabaseUrl, serviceRoleKey);
-    const { lead_id } = await req.json();
-    if (!lead_id) return json({ error: "lead_id required" }, 400);
+    const body = await req.json();
+    let leadId: string | null = body.lead_id || null;
+    let contactId: string | null = body.contact_id || null;
+    if (!leadId && !contactId) return json({ error: "lead_id or contact_id required" }, 400);
 
     const userId = authData.user.id;
 
@@ -77,30 +79,64 @@ Deno.serve(async (req) => {
     if (["student", "parent"].includes(String(callerRole))) {
       return json({ error: "Only staff and academic partners can place cloud calls." }, 403);
     }
-    if (callerRole === "academic_partner" || callerRole === "academic_partner_offer_letter") {
-      const { data: canCallLead, error: scopeErr } = await db.rpc("can_academic_partner_view_mapped_lead", {
-        _user_id: userId,
-        _lead_id: lead_id,
-      });
-      if (scopeErr) {
-        console.error("Academic partner call scope check failed:", scopeErr);
-        return json({ error: "Could not verify lead access." }, 500);
-      }
-      if (!canCallLead) {
-        return json({ error: "You can call only leads assigned to your academic partner account." }, 403);
+
+    let leadName: string | null = null;
+    let leadPhone: string | null = null;
+    let courseName: string | null = null;
+    let campusName: string | null = null;
+
+    // Bulk-imported call lists store marketing_contacts, not leads. The dialer
+    // queue returns those rows with kind=contact; looking them up in `leads`
+    // is what produced the "Lead not found" toast.
+    if (contactId && !leadId) {
+      const { data: contact, error: contactErr } = await db
+        .from("marketing_contacts")
+        .select("id, name, phone, opted_out, promoted_lead_id")
+        .eq("id", contactId)
+        .single();
+
+      if (contactErr || !contact) return json({ error: "Lead not found" }, 404);
+      if (contact.promoted_lead_id) {
+        leadId = contact.promoted_lead_id;
+        contactId = null;
+      } else {
+        if (contact.opted_out) return json({ error: "Contact has opted out — call blocked" }, 403);
+        if (!contact.phone) return json({ error: "Lead has no phone number" }, 400);
+        leadName = contact.name;
+        leadPhone = contact.phone;
       }
     }
 
-    // Fetch lead
-    const { data: lead, error: leadErr } = await db
-      .from("leads")
-      .select("id, name, phone, stage, courses:course_id(name), campuses:campus_id(name)")
-      .eq("id", lead_id)
-      .single();
+    if (leadId) {
+      if (callerRole === "academic_partner" || callerRole === "academic_partner_offer_letter") {
+        const { data: canCallLead, error: scopeErr } = await db.rpc("can_academic_partner_view_mapped_lead", {
+          _user_id: userId,
+          _lead_id: leadId,
+        });
+        if (scopeErr) {
+          console.error("Academic partner call scope check failed:", scopeErr);
+          return json({ error: "Could not verify lead access." }, 500);
+        }
+        if (!canCallLead) {
+          return json({ error: "You can call only leads assigned to your academic partner account." }, 403);
+        }
+      }
 
-    if (leadErr || !lead) return json({ error: "Lead not found" }, 404);
-    if (!lead.phone) return json({ error: "Lead has no phone number" }, 400);
-    if (lead.stage === "dnc") return json({ error: "Lead is DNC — call blocked" }, 403);
+      const { data: lead, error: leadErr } = await db
+        .from("leads")
+        .select("id, name, phone, stage, courses:course_id(name), campuses:campus_id(name)")
+        .eq("id", leadId)
+        .single();
+
+      if (leadErr || !lead) return json({ error: "Lead not found" }, 404);
+      if (!lead.phone) return json({ error: "Lead has no phone number" }, 400);
+      if (lead.stage === "dnc") return json({ error: "Lead is DNC — call blocked" }, 403);
+      leadName = lead.name;
+      leadPhone = lead.phone;
+      courseName = (lead.courses as any)?.name || null;
+      campusName = (lead.campuses as any)?.name || null;
+      contactId = null;
+    }
 
     // Fetch counsellor's phone from profile
     if (!userId) return json({ error: "caller_user_id required" }, 400);
@@ -115,7 +151,7 @@ Deno.serve(async (req) => {
       return json({ error: "Your phone number is not set in your profile. Go to Settings → Profile to add it." }, 400);
     }
 
-    const studentPhone = normalizePlivoVoiceNumber(lead.phone);
+    const studentPhone = normalizePlivoVoiceNumber(leadPhone);
     if (!studentPhone) {
       return json({ error: "Lead phone number is not valid for calling. Update the lead phone and try again." }, 400);
     }
@@ -126,20 +162,25 @@ Deno.serve(async (req) => {
     }
 
     const callId = crypto.randomUUID();
+    const displayName = leadName || "Lead";
 
     // Create the live-call row before touching Plivo. Plivo can emit status /
     // hangup callbacks before Call.create returns; if the row does not exist
     // yet, those callbacks patch zero rows and the later insert leaves a
     // permanent status='initiated' call in the LiveCallBar.
-    const { error: callRecordErr } = await db.from("ai_call_records").insert({
-      lead_id,
+    // XOR: a cold-list contact has no lead row, so persist contact_id instead.
+    const callRecord: Record<string, unknown> = {
       call_uuid: callId,
       status: "initiated",
       call_type: "manual",
       caller_user_id: userId,
       from_number: dialerFrom,
       summary: `Cloud Call: dialing counsellor ${profile.display_name}`,
-    });
+    };
+    if (leadId) callRecord.lead_id = leadId;
+    else callRecord.contact_id = contactId;
+
+    const { error: callRecordErr } = await db.from("ai_call_records").insert(callRecord);
 
     if (callRecordErr) {
       console.error("Failed to create manual call record:", callRecordErr);
@@ -167,10 +208,11 @@ Deno.serve(async (req) => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          leadId: lead_id,
-          leadName: lead.name,
-          courseName: (lead.courses as any)?.name || null,
-          campusName: (lead.campuses as any)?.name || null,
+          leadId: leadId || null,
+          contactId: contactId || null,
+          leadName: displayName,
+          courseName,
+          campusName,
           counsellorPhone,
           studentPhone,
           dialerFrom,
@@ -212,7 +254,7 @@ Deno.serve(async (req) => {
       hangup_url: hangupUrl,
       hangup_method: "POST",
       ring_timeout: 30,
-      caller_name: `NIMT CRM: ${lead.name || "Lead"}`,
+      caller_name: `NIMT CRM: ${displayName}`,
     };
 
     let plivoRes: Response;
@@ -276,25 +318,26 @@ Deno.serve(async (req) => {
       .update(callRecordPatch as any)
       .eq("call_uuid", callId);
 
-    // Log activity
-    await db.from("lead_activities").insert({
-      lead_id,
-      type: "call",
-      description: `Manual call initiated by ${profile.display_name} via CRM`,
-    });
+    // Log activity — lead-backed calls only. Contacts have no lead_activities row.
+    if (leadId) {
+      await db.from("lead_activities").insert({
+        lead_id: leadId,
+        type: "call",
+        description: `Manual call initiated by ${profile.display_name} via CRM`,
+      });
 
-    // Add note
-    await db.from("lead_notes").insert({
-      lead_id,
-      content: `📞 ${profile.display_name} initiated manual call via CRM`,
-      user_id: userId,
-    });
+      await db.from("lead_notes").insert({
+        lead_id: leadId,
+        content: `📞 ${profile.display_name} initiated manual call via CRM`,
+        user_id: userId,
+      });
+    }
 
     return json({
       success: true,
       call_id: callId,
       plivo_request_uuid: requestUuid || null,
-      message: `Calling your phone (${profile.phone})... Pick up to connect to ${lead.name || "the student"}.`,
+      message: `Calling your phone (${profile.phone})... Pick up to connect to ${displayName}.`,
     });
   } catch (err: any) {
     console.error("Manual call error:", err);

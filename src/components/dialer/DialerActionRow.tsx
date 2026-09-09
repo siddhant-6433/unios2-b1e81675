@@ -22,6 +22,7 @@ interface Props {
   onAction: (action: DialerAction) => void;
   canCreateProposal: boolean;
   leadId: string;
+  kind?: "lead" | "contact";
 }
 
 /**
@@ -29,8 +30,13 @@ interface Props {
  * link mid-call shouldn't force the counsellor to hang up first. Overflow goes
  * into a popover so the row never wraps to a second line.
  */
-export function DialerActionRow({ onAction, canCreateProposal, leadId }: Props) {
-  const actions = ACTIONS.filter(a => a.key !== "proposal" || canCreateProposal);
+export function DialerActionRow({ onAction, canCreateProposal, leadId, kind }: Props) {
+  const isContact = kind === "contact";
+  const actions = ACTIONS.filter(a => {
+    if (a.key === "proposal" && !canCreateProposal) return false;
+    if (isContact && a.key !== "whatsapp") return false;
+    return true;
+  });
   const inline = actions.slice(0, INLINE);
   const overflow = actions.slice(INLINE);
 
@@ -58,10 +64,12 @@ export function DialerActionRow({ onAction, canCreateProposal, leadId }: Props) 
           </PopoverContent>
         </Popover>
       )}
-      <a href={`/admissions/${leadId}`} target="_blank" rel="noreferrer"
-        className="ml-auto inline-flex h-7 items-center rounded-md border border-input px-2 text-[11px] font-medium hover:bg-muted">
-        Open lead →
-      </a>
+      {!isContact && (
+        <a href={`/admissions/${leadId}`} target="_blank" rel="noreferrer"
+          className="ml-auto inline-flex h-7 items-center rounded-md border border-input px-2 text-[11px] font-medium hover:bg-muted">
+          Open lead →
+        </a>
+      )}
     </div>
   );
 }

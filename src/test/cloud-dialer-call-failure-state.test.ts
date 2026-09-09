@@ -10,7 +10,7 @@ describe("CloudDialer call setup failure state", () => {
       cloudDialerSource.indexOf("// ── Pre-select disposition"),
     );
 
-    expect(placeCall).toContain("startCloudCall(lead.id)");
+    expect(placeCall).toContain("startCloudCall(cloudCallTarget(lead))");
 
     const providerFailureBlock = placeCall.slice(
       placeCall.indexOf("if (!result.ok)"),

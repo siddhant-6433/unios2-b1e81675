@@ -76,13 +76,19 @@ export function DialerLeadHeader({
             <span className={lead.attempt_count > 0 ? "text-warning-foreground" : "text-success"}>
               {lead.attempt_count > 0 ? `${lead.attempt_count} previous attempts` : "First call"}
             </span>
-            <CahetPendingBadge leadId={lead.id} leadName={lead.name} phone={lead.phone} courseName={lead.course_name} />
-            <UpdeledPendingBadge leadId={lead.id} leadName={lead.name} phone={lead.phone} courseName={lead.course_name} />
+            {lead.kind !== "contact" && (
+              <>
+                <CahetPendingBadge leadId={lead.id} leadName={lead.name} phone={lead.phone} courseName={lead.course_name} />
+                <UpdeledPendingBadge leadId={lead.id} leadName={lead.name} phone={lead.phone} courseName={lead.course_name} />
+              </>
+            )}
           </div>
         </div>
 
-        <a href={`/admissions/${lead.id}`} target="_blank" rel="noreferrer"
-          className="shrink-0 text-[10px] text-primary hover:underline">Open Lead →</a>
+        {lead.kind !== "contact" && (
+          <a href={`/admissions/${lead.id}`} target="_blank" rel="noreferrer"
+            className="shrink-0 text-[10px] text-primary hover:underline">Open Lead →</a>
+        )}
       </div>
     </div>
   );

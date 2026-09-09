@@ -9,6 +9,10 @@ export interface QueueLead {
   campus_name: string;
   bucket: string; // bucket label in smart queue
   attempt_count: number;
+  /** `contact` = bulk-imported marketing contact that is not a lead yet. */
+  kind?: "lead" | "contact";
+  /** `lead_list_members.id` — skip / cold-call disposition in list mode. */
+  member_id?: string;
   course_fee?: string;
   // Type of follow-up that placed this lead in the queue: call (default), whatsapp, email, visit.
   // Drives quick-action button next to the call bar for non-call follow-ups.
@@ -19,6 +23,10 @@ export interface QueueLead {
   // is still null.
   assigned_at?: string | null;
   first_contact_at?: string | null;
+}
+
+export function isContactQueueLead(lead: Pick<QueueLead, "kind"> | null | undefined): boolean {
+  return lead?.kind === "contact";
 }
 
 /**
