@@ -19,6 +19,7 @@ export interface WhatsAppChannel {
   business_number: string | null;
   meta_phone_number_id: string | null;
   secret_token_name: string | null;
+  waba_id: string | null;
   allow_ai: boolean;
   allow_manual_reply: boolean;
   allow_bulk: boolean;
@@ -137,6 +138,7 @@ function envMetaChannel(route: WhatsAppChannelRoute, requestedPhoneNumberId?: st
     business_number: null,
     meta_phone_number_id: requestedPhoneNumberId || Deno.env.get(env.phoneNumberId) || Deno.env.get("WHATSAPP_PHONE_NUMBER_ID") || null,
     secret_token_name: Deno.env.get(env.token) ? env.token : "WHATSAPP_API_TOKEN",
+    waba_id: null,
     allow_ai: true,
     allow_manual_reply: true,
     allow_bulk: route === "bulk",
@@ -152,6 +154,7 @@ function envPlivoChannel(businessNumber: string | null): WhatsAppChannel {
     business_number: businessNumber || digits(Deno.env.get("PLIVO_WHATSAPP_NUMBER")) || null,
     meta_phone_number_id: null,
     secret_token_name: null,
+    waba_id: null,
     allow_ai: true,
     allow_manual_reply: true,
     allow_bulk: false,
@@ -190,6 +193,7 @@ function parseChannel(row: unknown): WhatsAppChannel {
     business_number: typeof data.business_number === "string" ? data.business_number : null,
     meta_phone_number_id: typeof data.meta_phone_number_id === "string" ? data.meta_phone_number_id : null,
     secret_token_name: typeof data.secret_token_name === "string" ? data.secret_token_name : null,
+    waba_id: typeof data.waba_id === "string" ? data.waba_id : null,
     allow_ai: data.allow_ai !== false,
     allow_manual_reply: data.allow_manual_reply !== false,
     allow_bulk: data.allow_bulk === true,
@@ -207,7 +211,7 @@ export async function resolveWhatsAppChannel(
     : null;
   const { data, error } = await admin
     .from("whatsapp_channels")
-    .select("id,label,provider,route,business_number,meta_phone_number_id,secret_token_name,allow_ai,allow_manual_reply,allow_bulk")
+    .select("id,label,provider,route,business_number,meta_phone_number_id,secret_token_name,waba_id,allow_ai,allow_manual_reply,allow_bulk")
     .eq("is_active", true)
     .order("route", { ascending: true });
 
@@ -245,6 +249,229 @@ function metaConfig(channel: WhatsAppChannel, fallbackRoute: WhatsAppChannelRout
     Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
 
   return { token, phoneNumberId };
+}
+
+function canonicalPhone(value: string | null | undefined): string {
+  const d = digits(value);
+  if (d.length === 10) return `91${d}`;
+  return d;
+}
+
+type MetaCreds = {
+  token: string;
+  phoneNumberId: string;
+  secretTokenName: string | null;
+  wabaId: string | null;
+};
+
+async function postMetaTemplate(
+  token: string,
+  phoneNumberId: string,
+  to: string,
+  template: { name: string; language: string; components: unknown[] },
+  businessNumber: string | null,
+): Promise<WhatsAppSendResult> {
+  const response = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: digits(to),
+      type: "template",
+      template: {
+        name: template.name,
+        language: { code: template.language },
+        components: template.components,
+      },
+    }),
+  });
+  const raw = await response.json().catch(() => ({}));
+  return {
+    ok: response.ok,
+    provider: "meta",
+    messageId: (raw as { messages?: { id?: string }[] })?.messages?.[0]?.id || null,
+    businessPhoneNumberId: phoneNumberId,
+    businessNumber,
+    status: response.status,
+    raw,
+    error: response.ok ? null : errorMessage((raw as { error?: unknown })?.error || raw, "Failed to send template via Meta"),
+    errorCode: response.ok ? null : metaErrorCode(raw),
+  };
+}
+
+/** WABA ids this token is allowed to manage (debug_token granular_scopes). */
+async function wabaIdsForToken(token: string): Promise<string[]> {
+  try {
+    const res = await fetchWithTimeout(
+      `https://graph.facebook.com/v21.0/debug_token?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(token)}`,
+      {},
+      8000,
+    );
+    const body = await res.json().catch(() => ({}));
+    const scopes = (body as { data?: { granular_scopes?: Array<{ target_ids?: unknown[] }> } })?.data?.granular_scopes;
+    if (!Array.isArray(scopes)) return [];
+    const ids: string[] = [];
+    for (const scope of scopes) {
+      if (!Array.isArray(scope?.target_ids)) continue;
+      for (const id of scope.target_ids) {
+        const value = String(id || "").trim();
+        if (value) ids.push(value);
+      }
+    }
+    return [...new Set(ids)];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 133010 means this phone_number_id isn't registered on the token we used.
+ * School numbers (Mirai 9220522282) were stored on WHATSAPP_API_TOKEN even when
+ * they actually live under another app token (same pattern as Seralis). Probe
+ * every channel token / WABA — including WABAs the token can see but we never
+ * stored (Mirai's waba_id is null) — and return CONNECTED credentials.
+ */
+async function recoverUnregisteredMetaSender(
+  admin: SupabaseLike,
+  channel: WhatsAppChannel,
+  failedPhoneNumberId: string,
+  failedToken: string,
+): Promise<MetaCreds | null> {
+  const db = admin as any;
+  const { data, error } = await db
+    .from("whatsapp_channels")
+    .select("secret_token_name, waba_id, meta_phone_number_id, business_number")
+    .eq("provider", "meta")
+    .eq("is_active", true);
+  if (error) {
+    console.warn("[wa-channel] recover 133010: could not read channels:", error.message);
+    return null;
+  }
+
+  const tokenByEnv = new Map<string, string>();
+  const addEnv = (name: string | null | undefined) => {
+    const key = String(name || "").trim();
+    if (!key || tokenByEnv.has(key)) return;
+    const token = (Deno.env.get(key) || "").trim();
+    if (token) tokenByEnv.set(key, token);
+  };
+  addEnv("WHATSAPP_API_TOKEN");
+  addEnv("WHATSAPP_SERALIS_API_TOKEN");
+  addEnv("WHATSAPP_REPLY_API_TOKEN");
+  addEnv("WHATSAPP_BULK_API_TOKEN");
+  addEnv("WHATSAPP_OTP_API_TOKEN");
+  addEnv("WHATSAPP_CALL_API_TOKEN");
+  addEnv("WHATSAPP_VISIT_API_TOKEN");
+  addEnv(channel.secret_token_name);
+  for (const row of (data || []) as any[]) addEnv(row.secret_token_name);
+
+  const wanted = canonicalPhone(channel.business_number);
+  const defaultWaba = (Deno.env.get("WHATSAPP_WABA_ID") || "").trim();
+
+  const tryStatus = async (token: string, pnid: string): Promise<string | null> => {
+    try {
+      const res = await fetchWithTimeout(
+        `https://graph.facebook.com/v21.0/${pnid}?fields=status,display_phone_number`,
+        { headers: { Authorization: `Bearer ${token}` } },
+        8000,
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) return null;
+      return body?.status ? String(body.status).toUpperCase() : null;
+    } catch {
+      return null;
+    }
+  };
+
+  for (const [envName, token] of tokenByEnv) {
+    if (token === failedToken) continue;
+    const status = await tryStatus(token, failedPhoneNumberId);
+    if (status === "CONNECTED") {
+      console.log(`[wa-channel] 133010 recovered via token ${envName} on ${failedPhoneNumberId}`);
+      return { token, phoneNumberId: failedPhoneNumberId, secretTokenName: envName, wabaId: channel.waba_id };
+    }
+  }
+
+  const wabaTargets: Array<{ wabaId: string; envName: string; token: string }> = [];
+  const seen = new Set<string>();
+  const pushTarget = (wabaId: string, envName: string, token: string) => {
+    const key = `${wabaId}:${envName}`;
+    if (!wabaId || !token || seen.has(key)) return;
+    seen.add(key);
+    wabaTargets.push({ wabaId, envName, token });
+  };
+  if (defaultWaba) {
+    for (const [envName, token] of tokenByEnv) pushTarget(defaultWaba, envName, token);
+  }
+  for (const row of (data || []) as any[]) {
+    const envName = String(row.secret_token_name || "WHATSAPP_API_TOKEN");
+    const token = tokenByEnv.get(envName);
+    if (row.waba_id && token) pushTarget(String(row.waba_id), envName, token);
+  }
+  for (const [envName, token] of tokenByEnv) {
+    for (const wabaId of await wabaIdsForToken(token)) pushTarget(wabaId, envName, token);
+  }
+
+  for (const target of wabaTargets) {
+    try {
+      const res = await fetchWithTimeout(
+        `https://graph.facebook.com/v21.0/${target.wabaId}/phone_numbers?fields=id,display_phone_number,status&limit=100`,
+        { headers: { Authorization: `Bearer ${target.token}` } },
+        8000,
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !Array.isArray(body?.data)) continue;
+      for (const phone of body.data as Array<{ id?: string; display_phone_number?: string; status?: string }>) {
+        const pnid = String(phone.id || "");
+        if (!pnid) continue;
+        const matchesNumber = wanted && canonicalPhone(phone.display_phone_number) === wanted;
+        const matchesFailedId = pnid === failedPhoneNumberId;
+        if (!matchesNumber && !matchesFailedId) continue;
+        const status = phone.status ? String(phone.status).toUpperCase() : "";
+        if (status && status !== "CONNECTED") continue;
+        if (target.token === failedToken && pnid === failedPhoneNumberId) continue;
+        console.log(`[wa-channel] 133010 recovered ${pnid} on WABA ${target.wabaId} via ${target.envName}`);
+        return {
+          token: target.token,
+          phoneNumberId: pnid,
+          secretTokenName: target.envName,
+          wabaId: defaultWaba && target.wabaId === defaultWaba ? null : target.wabaId,
+        };
+      }
+    } catch {
+      /* try next WABA/token pair */
+    }
+  }
+  return null;
+}
+
+async function persistRecoveredMetaSender(
+  admin: SupabaseLike,
+  channel: WhatsAppChannel,
+  creds: MetaCreds,
+) {
+  const db = admin as any;
+  const patch: Record<string, unknown> = {
+    secret_token_name: creds.secretTokenName,
+    meta_phone_number_id: creds.phoneNumberId,
+    connection_status: "CONNECTED",
+  };
+  if (creds.wabaId) patch.waba_id = creds.wabaId;
+  try {
+    if (channel.id) {
+      await db.from("whatsapp_channels").update(patch).eq("id", channel.id);
+      return;
+    }
+    if (channel.meta_phone_number_id) {
+      await db.from("whatsapp_channels").update(patch).eq("meta_phone_number_id", channel.meta_phone_number_id);
+      return;
+    }
+    if (channel.business_number) {
+      await db.from("whatsapp_channels").update(patch).eq("business_number", channel.business_number);
+    }
+  } catch (err) {
+    console.warn("[wa-channel] persist recovered sender failed:", err);
+  }
 }
 
 export async function sendWhatsAppText(
@@ -430,31 +657,22 @@ export async function sendWhatsAppTemplate(
     };
   }
 
-  const response = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      messaging_product: "whatsapp",
-      to: digits(to),
-      type: "template",
-      template: {
-        name: template.name,
-        language: { code: template.language },
-        components: template.components,
-      },
-    }),
-  });
-  const raw = await response.json().catch(() => ({}));
-
-  return {
-    ok: response.ok,
-    provider: "meta",
-    messageId: (raw as { messages?: { id?: string }[] })?.messages?.[0]?.id || null,
-    businessPhoneNumberId: phoneNumberId,
-    businessNumber: channel.business_number,
-    status: response.status,
-    raw,
-    error: response.ok ? null : errorMessage((raw as { error?: unknown })?.error || raw, "Failed to send template via Meta"),
-    errorCode: response.ok ? null : metaErrorCode(raw),
-  };
+  let result = await postMetaTemplate(token, phoneNumberId, to, template, channel.business_number);
+  if (result.errorCode === 133010) {
+    const recovered = await recoverUnregisteredMetaSender(admin, channel, phoneNumberId, token);
+    if (recovered) {
+      const retry = await postMetaTemplate(
+        recovered.token,
+        recovered.phoneNumberId,
+        to,
+        template,
+        channel.business_number,
+      );
+      if (retry.errorCode !== 133010) {
+        await persistRecoveredMetaSender(admin, channel, recovered);
+      }
+      return retry;
+    }
+  }
+  return result;
 }

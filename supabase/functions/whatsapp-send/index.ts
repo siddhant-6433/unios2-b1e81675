@@ -620,13 +620,14 @@ Deno.serve(async (req) => {
     // Real indexes of dynamic URL buttons for a catalog template (empty for the
     // hardcoded TEMPLATES path, which keeps its by-array-position mapping).
     let urlButtonIndexes: number[] = [];
+    let templateLanguage = "en";
     let templateDef = TEMPLATES[template_key];
     if (!templateDef) {
       // A template can exist in multiple languages (e.g. en + hi) — maybeSingle
       // would error on >1 row and read as "Unknown template". Take one, English first.
       const { data: dynamicRows, error: dynamicErr } = await admin
         .from("whatsapp_templates")
-        .select("name, status, placeholder_count, has_media, header_format, components")
+        .select("name, status, placeholder_count, has_media, header_format, components, language")
         .eq("name", template_key)
         .eq("status", "APPROVED")
         .order("language", { ascending: true })
@@ -660,6 +661,8 @@ Deno.serve(async (req) => {
       }
       dynamicTemplateBody = templateBodyFromComponents((dynamicTemplate as any).components);
       const dynCount = Number((dynamicTemplate as any).placeholder_count || 0);
+      const dynLanguage = String((dynamicTemplate as any).language || "").trim();
+      if (dynLanguage) templateLanguage = dynLanguage;
       templateDef = {
         name: (dynamicTemplate as any).name,
         params: Array.from({ length: dynCount }, (_v, i) => `param_${i + 1}`),
@@ -818,7 +821,7 @@ Deno.serve(async (req) => {
         route: channelRoute,
       }, waPhone, {
       name: templateDef.name,
-      language: "en",
+      language: templateLanguage,
       components,
     });
     const waResult = sendResult.raw as { error?: { message?: string }; messages?: { id?: string }[] } | null;
@@ -920,7 +923,7 @@ Deno.serve(async (req) => {
             params,
             button_urls,
             provider_template_name: templateDef.name,
-            language: rendered_template.language || "en",
+            language: rendered_template.language || templateLanguage,
           }
         : {
             key: template_key,
@@ -929,7 +932,7 @@ Deno.serve(async (req) => {
             params,
             button_urls,
             provider_template_name: templateDef.name,
-            language: "en",
+            language: templateLanguage,
           },
       outboundKind: "template",
       expectedReplyType: expectedReplyTypeForTemplate(template_key),
