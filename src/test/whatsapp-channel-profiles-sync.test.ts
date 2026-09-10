@@ -57,6 +57,8 @@ describe("whatsapp 133010 sender recovery", () => {
     // The first send 133010s; recovery must look past stored WABAs via debug_token.
     expect(adapter).toContain("recoverUnregisteredMetaSender");
     expect(adapter).toContain("WHATSAPP_SERALIS_API_TOKEN");
+    expect(adapter).toContain("WHATSAPP_MIRAI_API_TOKEN");
+    expect(adapter).toContain("34722980423984295");
     expect(adapter).toContain("wabaIdsForToken");
     expect(adapter.indexOf("errorCode === 133010")).toBeGreaterThan(
       adapter.indexOf("postMetaTemplate"),

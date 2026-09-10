@@ -357,6 +357,7 @@ async function recoverUnregisteredMetaSender(
   };
   addEnv("WHATSAPP_API_TOKEN");
   addEnv("WHATSAPP_SERALIS_API_TOKEN");
+  addEnv("WHATSAPP_MIRAI_API_TOKEN");
   addEnv("WHATSAPP_REPLY_API_TOKEN");
   addEnv("WHATSAPP_BULK_API_TOKEN");
   addEnv("WHATSAPP_OTP_API_TOKEN");
@@ -403,6 +404,9 @@ async function recoverUnregisteredMetaSender(
   if (defaultWaba) {
     for (const [envName, token] of tokenByEnv) pushTarget(defaultWaba, envName, token);
   }
+  // WhatsApp Manager asset for Mirai Experiential School (business 515556675506273).
+  // Stored waba_id was null, so listing never found this account on the NIMT token.
+  for (const [envName, token] of tokenByEnv) pushTarget("34722980423984295", envName, token);
   for (const row of (data || []) as any[]) {
     const envName = String(row.secret_token_name || "WHATSAPP_API_TOKEN");
     const token = tokenByEnv.get(envName);
