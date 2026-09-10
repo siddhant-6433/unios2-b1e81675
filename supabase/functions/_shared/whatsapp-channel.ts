@@ -326,10 +326,9 @@ async function wabaIdsForToken(token: string): Promise<string[]> {
 
 /**
  * 133010 means this phone_number_id isn't registered on the token we used.
- * School numbers (Mirai 9220522282) were stored on WHATSAPP_API_TOKEN even when
- * they actually live under another app token (same pattern as Seralis). Probe
- * every channel token / WABA — including WABAs the token can see but we never
- * stored (Mirai's waba_id is null) — and return CONNECTED credentials.
+ * School numbers (Mirai 9220522282) share NIMT's WHATSAPP_API_TOKEN but live
+ * on a different WABA under the same org. Probe every channel token / WABA —
+ * including WABAs the token can see but we never stored — and retry.
  */
 async function recoverUnregisteredMetaSender(
   admin: SupabaseLike,
@@ -357,7 +356,6 @@ async function recoverUnregisteredMetaSender(
   };
   addEnv("WHATSAPP_API_TOKEN");
   addEnv("WHATSAPP_SERALIS_API_TOKEN");
-  addEnv("WHATSAPP_MIRAI_API_TOKEN");
   addEnv("WHATSAPP_REPLY_API_TOKEN");
   addEnv("WHATSAPP_BULK_API_TOKEN");
   addEnv("WHATSAPP_OTP_API_TOKEN");
@@ -404,8 +402,8 @@ async function recoverUnregisteredMetaSender(
   if (defaultWaba) {
     for (const [envName, token] of tokenByEnv) pushTarget(defaultWaba, envName, token);
   }
-  // WhatsApp Manager asset for Mirai Experiential School (business 515556675506273).
-  // Stored waba_id was null, so listing never found this account on the NIMT token.
+  // WhatsApp Manager asset for Mirai (same NIMT org, not the college WABA).
+  // Stored waba_id was null, so listing never found this account.
   for (const [envName, token] of tokenByEnv) pushTarget("34722980423984295", envName, token);
   for (const row of (data || []) as any[]) {
     const envName = String(row.secret_token_name || "WHATSAPP_API_TOKEN");

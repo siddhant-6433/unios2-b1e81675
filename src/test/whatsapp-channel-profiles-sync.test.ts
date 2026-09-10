@@ -20,6 +20,7 @@ describe("whatsapp channel connection status", () => {
     // Mirai/Beacon (route=reply, waba_id NULL) never synced templates or status.
     expect(fn).toContain("listWabaPhones");
     expect(fn).toContain("discoveredByDigits");
+    expect(fn).toContain("34722980423984295");
     expect(fn).toContain("listed?.isDefaultWaba || [\"bulk\", \"admissions\"].includes(ch.route)");
   });
 
@@ -57,7 +58,6 @@ describe("whatsapp 133010 sender recovery", () => {
     // The first send 133010s; recovery must look past stored WABAs via debug_token.
     expect(adapter).toContain("recoverUnregisteredMetaSender");
     expect(adapter).toContain("WHATSAPP_SERALIS_API_TOKEN");
-    expect(adapter).toContain("WHATSAPP_MIRAI_API_TOKEN");
     expect(adapter).toContain("34722980423984295");
     expect(adapter).toContain("wabaIdsForToken");
     expect(adapter.indexOf("errorCode === 133010")).toBeGreaterThan(
