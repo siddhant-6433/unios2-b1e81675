@@ -40,6 +40,9 @@ export function isAbvmuDepositHead(row: Year1LumpSumRow): boolean {
 export function isYear1TuitionHead(row: Year1LumpSumRow): boolean {
   if (String(row.term || "").toLowerCase() !== "year_1") return false;
   if (isUniformFeeHead(row) || isAbvmuDepositHead(row)) return false;
+  const code = String(row.fee_code || "");
+  // Ledger codes are TUITION / TUITION-Y1 — match those even if category is blank.
+  if (/^TUITION/i.test(code)) return true;
   const cat = String(row.category || "").toLowerCase();
   if (cat && cat !== "tuition") return false;
   const blob = blobOf(row);
@@ -117,4 +120,8 @@ export function buildYear1LumpSumOffer(
     amountDue,
     feeIds,
   };
+}
+
+export function year1LumpSumNoticeVisible(offer: Year1LumpSumOffer): boolean {
+  return offer.pct > 0 && offer.feeIds.length > 0;
 }

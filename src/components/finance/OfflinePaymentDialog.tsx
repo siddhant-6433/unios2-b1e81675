@@ -471,7 +471,7 @@ export function OfflinePaymentDialog({
         </DialogHeader>
 
         <div className="min-w-0 space-y-3 py-2">
-          {year1LumpSum?.eligible && <Year1LumpSumInfoBanner offer={year1LumpSum} />}
+          {year1LumpSum && <Year1LumpSumInfoBanner offer={year1LumpSum} />}
           {year1Covered && year1LumpSum && (
             <label className="flex items-start gap-2 rounded-lg border border-success/30 bg-success/5 px-3 py-2 text-sm">
               <input

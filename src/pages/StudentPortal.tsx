@@ -12,7 +12,7 @@ import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
 import { getStudentClaimToken } from "@/lib/studentClaim";
 import { brandForStudentOwner, type StudentBrand } from "@/lib/studentBranding";
 import { fetchLeadFeeStatus } from "@/lib/leadFeeStatus";
-import { buildYear1LumpSumOffer } from "@/lib/year1LumpSumWaiver";
+import { buildYear1LumpSumOffer, lumpSumPctFromPolicy } from "@/lib/year1LumpSumWaiver";
 import { Year1LumpSumIncentiveCard } from "@/components/finance/Year1LumpSumBanner";
 import { IndianRupee, ClipboardCheck, Megaphone, AlertCircle, CheckCircle, Clock, CreditCard, FileText, // Aliased: `Receipt` is the payment-row type in this file.
   Receipt as ReceiptIcon, ChevronDown } from "lucide-react";
@@ -201,8 +201,7 @@ export default function StudentPortal() {
 
       if (studentData.lead_id) {
         const { data: status } = await fetchLeadFeeStatus(studentData.lead_id);
-        const pct = Number(status?.lump_sum_pct);
-        setLumpSumPct(Number.isFinite(pct) ? Math.max(0, pct) : 5);
+        setLumpSumPct(lumpSumPctFromPolicy(status?.policy, 5));
         setAbvmuCollegeDeduction(Math.max(0, Number(status?.abvmu_deposit_amount || 0)));
       } else {
         setLumpSumPct(5);
@@ -564,6 +563,13 @@ export default function StudentPortal() {
                     <p className="text-sm font-medium text-gray-900 truncate">
                       {fee.fee_code_name || feeTermLabelLong(fee.term, feeMeta)}
                     </p>
+                    {year1LumpSum.feeIds.includes(fee.id) && year1LumpSum.pct > 0 && (
+                      <p className="text-[11px] font-semibold text-success mt-0.5">
+                        {year1LumpSum.eligible
+                          ? `${year1LumpSum.pct}% off Year 1 tuition if paid in full · save ₹${year1LumpSum.discount.toLocaleString("en-IN")}`
+                          : `${year1LumpSum.pct}% Year 1 tuition waiver`}
+                      </p>
+                    )}
                     <p className="text-xs text-gray-400">
                       {futureDue ? "Upcoming" : "Due"} {new Date(fee.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                     </p>

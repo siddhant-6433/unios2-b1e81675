@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { lumpSumPctFromPolicy } from "@/lib/year1LumpSumWaiver";
 
 // Finance/cashier roles allowed to record the ABVMU remittance receipt (mirrors the
 // server-side guard in settle_abvmu_deposit_claim).
@@ -58,8 +59,9 @@ export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: (
       setDepositAmount(Math.max(0, Number(status.abvmu_deposit_amount || 0)));
       setApprovedCredit(Math.max(0, Number(status.abvmu_approved_credit || 0)));
       setFirstYearDue(Math.max(0, Number(status.full_first_year_amount_due || 0)));
-      const pct = Number(status.lump_sum_pct);
-      setLumpSumPct(Number.isFinite(pct) ? Math.max(0, pct) : 5);
+      // Follow the structure policy, not deadline-zeroed lump_sum_pct from
+      // lead_fee_status (that gate hid the Year-1 tuition offer on the ledger).
+      setLumpSumPct(lumpSumPctFromPolicy(status.policy, 5));
       setClaims((claimsRes?.data ?? []) as AbvmuClaim[]);
       setLoading(false);
     })();

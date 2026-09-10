@@ -33,7 +33,11 @@ import {
 } from "@/lib/receiptCourseMigration";
 import { reviseStudentReceiptPdfs } from "@/lib/reviseStudentReceipts";
 import { buildYear1LumpSumOffer } from "@/lib/year1LumpSumWaiver";
-import { Year1LumpSumInfoBanner } from "./Year1LumpSumBanner";
+import {
+  Year1LumpSumInfoBanner,
+  Year1LumpSumYearGroupNotice,
+  Year1TuitionWaiverBadge,
+} from "./Year1LumpSumBanner";
 
 interface StudentFeePanelProps {
   student: any;
@@ -759,8 +763,6 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       {/* Summary. Five cards in a four-column grid orphaned the fifth on its own
           row; the unallocated credit is also rarely non-zero, so it only earns a
           slot when there is credit to show. */}
-      <Year1LumpSumInfoBanner offer={year1LumpSum} />
-
       <div className={`grid grid-cols-2 gap-3 ${
         Number(credit?.general_credit || 0) > 0 ? "lg:grid-cols-5" : "lg:grid-cols-4"
       }`}>
@@ -785,7 +787,9 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         <AbvmuDepositPanel leadId={student.lead_id} onChanged={onRefresh} />
       )}
 
-      {/* Fee table */}
+      {/* Fee table — waiver sits here so it stays on screen with the Year 1 rows
+          instead of above the summary cards (cashiers scroll those off). */}
+      <Year1LumpSumInfoBanner offer={year1LumpSum} />
       <div className="rounded-xl bg-card card-shadow overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -840,6 +844,9 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                   <td className="px-4 py-2.5 text-right text-[11px] tabular-nums text-success">{gConcession > 0 ? `−₹${gConcession.toLocaleString("en-IN")}` : ""}</td>
                   <td colSpan={colCount - (canPick ? 4 : 3)} />
                 </tr>
+                {String(g.term || "").toLowerCase() === "year_1" && (
+                  <Year1LumpSumYearGroupNotice offer={year1LumpSum} colSpan={colCount} />
+                )}
                 {g.rows.map((f: any) => f.__abvmu ? (
                   <Fragment key={f.id}>
                     <tr className="bg-info/5">
@@ -897,6 +904,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                           {f.fee_codes.code}
                         </span>
                       )}
+                      <Year1TuitionWaiverBadge offer={year1LumpSum} feeId={String(f.id)} />
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
                     {/* The waiver control sits inline as a quiet icon rather than
@@ -910,6 +918,10 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                           {Number(f.concession) > 0 ? (
                             <span className="font-medium text-success">
                               −₹{Number(f.concession).toLocaleString("en-IN")}
+                            </span>
+                          ) : year1LumpSum.eligible && year1LumpSum.feeIds.includes(String(f.id)) ? (
+                            <span className="text-[10px] font-medium text-success">
+                              {year1LumpSum.pct}% off · ₹{year1LumpSum.discount.toLocaleString("en-IN")}
                             </span>
                           ) : (
                             <span className="text-muted-foreground/40">—</span>

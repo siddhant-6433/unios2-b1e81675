@@ -6,6 +6,7 @@ import {
   isYear1TuitionHead,
   lumpSumPctFromPolicy,
   scaleYear1AllocationsForLumpSum,
+  year1LumpSumNoticeVisible,
 } from "./year1LumpSumWaiver";
 
 const tuition = {
@@ -78,12 +79,23 @@ describe("year-1 lump-sum waiver", () => {
     expect(offer.amountDue).toBe(49_400);
   });
 
+  it("matches TUITION-Y1 even when category is missing", () => {
+    expect(isYear1TuitionHead({
+      id: "y1",
+      term: "year_1",
+      fee_code: "TUITION-Y1",
+      fee_code_name: "Year 1 Tuition (to college)",
+      category: null,
+      balance: 52_000,
+    })).toBe(true);
+  });
+
   it("hides the offer when policy is 0% or Year 1 tuition is cleared", () => {
     expect(buildYear1LumpSumOffer([tuition], { lumpSumPct: 0 }).eligible).toBe(false);
-    expect(buildYear1LumpSumOffer([{ ...tuition, balance: 0 }], { lumpSumPct: 5 })).toMatchObject({
-      eligible: false,
-      alreadyAvailed: true,
-    });
+    const cleared = buildYear1LumpSumOffer([{ ...tuition, balance: 0 }], { lumpSumPct: 5 });
+    expect(cleared).toMatchObject({ eligible: false, alreadyAvailed: true });
+    expect(year1LumpSumNoticeVisible(cleared)).toBe(true);
+    expect(year1LumpSumNoticeVisible(buildYear1LumpSumOffer([tuition], { lumpSumPct: 0 }))).toBe(false);
   });
 
   it("reads lump_sum_first_year_waiver_pct from structure policy", () => {
