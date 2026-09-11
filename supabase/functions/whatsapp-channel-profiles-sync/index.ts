@@ -221,6 +221,11 @@ Deno.serve(async (req) => {
   if (defaultWabaId && defaultToken) {
     wabaTargets.push({ wabaId: defaultWabaId, token: defaultToken, isDefaultWaba: true });
   }
+  // Mirai school WABA sits in the same NIMT org but is not WHATSAPP_WABA_ID.
+  // List it with the shared token so we pick up CONNECTED + the real phone id.
+  if (defaultToken) {
+    wabaTargets.push({ wabaId: "34722980423984295", token: defaultToken, isDefaultWaba: false });
+  }
   for (const ch of (channels || []) as any[]) {
     const waba = String(ch.waba_id || "").trim();
     const token = resolveToken(ch);

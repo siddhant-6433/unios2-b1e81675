@@ -20,6 +20,7 @@ describe("whatsapp channel connection status", () => {
     // Mirai/Beacon (route=reply, waba_id NULL) never synced templates or status.
     expect(fn).toContain("listWabaPhones");
     expect(fn).toContain("discoveredByDigits");
+    expect(fn).toContain("34722980423984295");
     expect(fn).toContain("listed?.isDefaultWaba || [\"bulk\", \"admissions\"].includes(ch.route)");
   });
 
@@ -45,5 +46,27 @@ describe("whatsapp channel connection status", () => {
   it("blocks a Marketing send from a known-disconnected number", () => {
     expect(marketing).toContain("senderIsConnected(waSelectedSender)");
     expect(marketing).toContain("isn't connected on Meta");
+  });
+});
+
+describe("whatsapp 133010 sender recovery", () => {
+  const adapter = readFileSync("supabase/functions/_shared/whatsapp-channel.ts", "utf8");
+  const send = readFileSync("supabase/functions/whatsapp-send/index.ts", "utf8");
+
+  it("retries a template send on another token/WABA after Meta 133010", () => {
+    // Mirai 9220522282 is stored on WHATSAPP_API_TOKEN with a null waba_id.
+    // The first send 133010s; recovery must look past stored WABAs via debug_token.
+    expect(adapter).toContain("recoverUnregisteredMetaSender");
+    expect(adapter).toContain("WHATSAPP_SERALIS_API_TOKEN");
+    expect(adapter).toContain("34722980423984295");
+    expect(adapter).toContain("wabaIdsForToken");
+    expect(adapter.indexOf("errorCode === 133010")).toBeGreaterThan(
+      adapter.indexOf("postMetaTemplate"),
+    );
+  });
+
+  it("sends catalog templates in their stored Meta language, not a hardcoded en", () => {
+    expect(send).toContain("templateLanguage");
+    expect(send).toContain("language: templateLanguage");
   });
 });

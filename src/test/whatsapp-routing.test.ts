@@ -142,6 +142,10 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(channelAdapter).toContain("resolveWhatsAppChannel");
     expect(channelAdapter).toContain("sendWhatsAppText");
     expect(channelAdapter).toContain("sendWhatsAppTemplate");
+    expect(channelAdapter).toContain("recoverUnregisteredMetaSender");
+    expect(channelAdapter).toContain("errorCode === 133010");
+    expect(channelAdapter).toContain("wabaIdsForToken");
+    expect(channelAdapter).toContain("debug_token");
   });
 
   it("uses the shared WhatsApp channel adapter for reply, AI, template, and campaign sends", () => {
