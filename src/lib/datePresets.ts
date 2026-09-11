@@ -1,3 +1,5 @@
+import { addCalendarDays, indiaTodayDate } from "./indiaDateTime";
+
 export type DatePreset =
   | "all"
   | "today"
@@ -28,36 +30,32 @@ export function toDateInputValue(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
+function indiaWeekday(isoDate: string) {
+  return new Date(`${isoDate}T12:00:00+05:30`).getUTCDay();
+}
+
 export function getDatePresetRange(preset: DatePreset): { from: string; to: string } {
-  const today = new Date();
-  const todayValue = toDateInputValue(today);
+  const todayValue = indiaTodayDate();
 
   switch (preset) {
     case "today":
       return { from: todayValue, to: todayValue };
     case "yesterday": {
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-      const value = toDateInputValue(yesterday);
+      const value = addCalendarDays(todayValue, -1);
       return { from: value, to: value };
     }
     case "this_week": {
-      const start = new Date(today);
-      const day = start.getDay();
-      start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
-      return { from: toDateInputValue(start), to: todayValue };
+      const day = indiaWeekday(todayValue);
+      const mondayOffset = day === 0 ? 6 : day - 1;
+      return { from: addCalendarDays(todayValue, -mondayOffset), to: todayValue };
     }
-    case "this_month": {
-      const start = new Date(today.getFullYear(), today.getMonth(), 1);
-      return { from: toDateInputValue(start), to: todayValue };
-    }
+    case "this_month":
+      return { from: `${todayValue.slice(0, 7)}-01`, to: todayValue };
     case "last_7":
     case "last_30":
     case "last_90": {
       const days = preset === "last_7" ? 7 : preset === "last_30" ? 30 : 90;
-      const start = new Date(today);
-      start.setDate(start.getDate() - days + 1);
-      return { from: toDateInputValue(start), to: todayValue };
+      return { from: addCalendarDays(todayValue, -days + 1), to: todayValue };
     }
     case "all":
     case "custom":

@@ -74,7 +74,7 @@ const Finance = () => {
   const canCloseDay = isSuperAdmin || role === "accountant" || role === "office_admin";
   const [dayCloserOpen, setDayCloserOpen] = useState(false);
   const [dayClosed, setDayClosed] = useState(false);
-  // Date range scopes the "Total Collected" card only (collections are a flow);
+  // Date range scopes the Receipts collection cards (collections are a flow);
   // Due/Overdue/Concession stay current snapshots. Defaults to today.
   const [preset, setPreset] = useState<DatePreset>("today");
   const [fromDate, setFromDate] = useState(getDatePresetRange("today").from);
@@ -107,17 +107,14 @@ const Finance = () => {
 
   useEffect(() => { fetchAll(); }, [selectedCampusId]);
 
-  // Card totals are date-scoped, so fetch them separately from the heavy
-  // ledger/payments/structures load — only this re-runs on a range change.
+  // Due / overdue / concession are current snapshots, not date-scoped.
   useEffect(() => {
     (supabase.rpc as any)("finance_summary", {
       _campus_ids: selectedCampusId === "all" ? null : [selectedCampusId],
-      _from: fromDate || null,   // "" (All time) -> null -> cumulative source
-      _to: toDate || null,
     }).then(({ data }: { data: Record<string, number> | null }) => {
       if (data) setSummary(data);
     });
-  }, [selectedCampusId, fromDate, toDate]);
+  }, [selectedCampusId]);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -182,10 +179,8 @@ const Finance = () => {
     [payments, selectedCampusId],
   );
 
-  const totalCollected = Number(summary?.collected ?? 0);
   const totalDue = Number(summary?.due ?? 0);
   const totalOverdue = Number(summary?.overdue ?? 0);
-  const paidCount = Number(summary?.paid_items ?? 0);
   const isDateScoped = !!(fromDate || toDate);
   const rangeLabel = !isDateScoped
     ? "all time"
@@ -257,26 +252,8 @@ const Finance = () => {
       </div>
 
       {tab !== "refunds" && (
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">
-          Collections for <span className="font-medium text-foreground">{rangeLabel}</span> · balances shown as of now
-        </p>
-        <DateRangeFilter
-          preset={preset}
-          fromDate={fromDate}
-          toDate={toDate}
-          onPresetChange={setPreset}
-          onFromDateChange={setFromDate}
-          onToDateChange={setToDate}
-          ariaPrefix="Collection date"
-        />
-      </div>
-      )}
-
-      {tab !== "refunds" && (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
-          { label: "Total Collected", value: `₹${(totalCollected / 100000).toFixed(1)}L`, sub: isDateScoped ? `${paidCount} payments` : `${paidCount} items paid`, icon: IndianRupee, iconBg: "bg-pastel-green" },
           { label: "Total Due", value: `₹${(totalDue / 100000).toFixed(1)}L`, sub: "Pending balance · as of now", icon: Clock, iconBg: "bg-pastel-yellow" },
           { label: "Overdue", value: `₹${(totalOverdue / 100000).toFixed(1)}L`, sub: "Action required · as of now", icon: AlertTriangle, iconBg: "bg-pastel-red" },
           { label: "Concession", value: `₹${(Number(summary?.concession ?? 0) / 100000).toFixed(1)}L`, sub: `${Number(summary?.total_items ?? 0)} fee items · as of now`, icon: Receipt, iconBg: "bg-pastel-blue" },
@@ -385,7 +362,25 @@ const Finance = () => {
 
       {tab === "receipts" && receiptsView === "online" && <TransactionHistoryPanel />}
 
-      {tab === "receipts" && receiptsView === "receipts" && <FeeCollections embedded />}
+      {tab === "receipts" && receiptsView === "receipts" && (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              Collections for <span className="font-medium text-foreground">{rangeLabel}</span>
+            </p>
+            <DateRangeFilter
+              preset={preset}
+              fromDate={fromDate}
+              toDate={toDate}
+              onPresetChange={setPreset}
+              onFromDateChange={setFromDate}
+              onToDateChange={setToDate}
+              ariaPrefix="Collection date"
+            />
+          </div>
+          <FeeCollections embedded fromDate={fromDate} toDate={toDate} />
+        </>
+      )}
 
       {tab === "approvals" && (
         <div className="space-y-8">
