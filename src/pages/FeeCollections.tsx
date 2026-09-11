@@ -12,6 +12,12 @@ import { Button } from "@/components/ui/button";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useNavigate } from "react-router-dom";
 import { matchesCampus } from "@/lib/campusFilter";
+import { formatCompactINR } from "@/lib/formatCompactINR";
+import {
+  indiaDayEndExclusiveIso,
+  indiaDayStartIso,
+  indiaTodayDate,
+} from "@/lib/indiaDateTime";
 
 const modeBadge: Record<string, string> = {
   online: "bg-pastel-blue", gateway: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
@@ -29,10 +35,18 @@ const gatewayLabel = (gateway?: string | null) =>
   gateway ? (gatewayLabels[gateway] || gateway) : "—";
 
 /** Rendered standalone at /collections and embedded as Finance → Receipts. */
-const FeeCollections = ({ embedded = false }: { embedded?: boolean }) => {
+const FeeCollections = ({
+  embedded = false,
+  fromDate,
+  toDate,
+}: {
+  embedded?: boolean;
+  fromDate?: string;
+  toDate?: string;
+}) => {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const [dateFilter, setDateFilter] = useState(new Date().toISOString().slice(0, 10));
+  const [dateFilter, setDateFilter] = useState(indiaTodayDate());
   const [modeFilter, setModeFilter] = useState("all");
   const [payments, setPayments] = useState<any[]>([]);
   const [consultantManagedIds, setConsultantManagedIds] = useState<Set<string>>(new Set());
@@ -41,25 +55,32 @@ const FeeCollections = ({ embedded = false }: { embedded?: boolean }) => {
   const { selectedCampusId } = useCampus();
   const { can } = usePermissions();
   const canCreateFinance = can("finance", "create");
+  // Embedded receipts follow the Finance header range so the two collection
+  // cards cannot drift onto different days. Standalone /collections keeps its
+  // own day picker.
+  const rangeFrom = embedded ? (fromDate || "") : dateFilter;
+  const rangeTo = embedded ? (toDate || "") : dateFilter;
 
   useEffect(() => {
     fetchPayments();
-  }, [selectedCampusId, dateFilter]);
+  }, [selectedCampusId, rangeFrom, rangeTo]);
 
   const fetchPayments = async () => {
     setLoading(true);
-    const startOfDay = `${dateFilter}T00:00:00`;
-    const endOfDay = `${dateFilter}T23:59:59`;
+    // IST half-open bounds — same window finance_summary uses, not a naive
+    // UTC midnight-to-midnight string that shifted evening IST receipts
+    // onto a different calendar day than the header card.
+    let query = supabase
+      .from("v_all_payments" as any)
+      .select("*")
+      .order("paid_at", { ascending: false })
+      .limit(500);
+    if (rangeFrom) query = query.gte("paid_at", indiaDayStartIso(rangeFrom)!);
+    if (rangeTo) query = query.lt("paid_at", indiaDayEndExclusiveIso(rangeTo)!);
 
     // v_all_payments unifies pre-AN lead_payments + post-AN payments; render
     // code expects {students,profiles} sub-objects so we reshape after fetch.
-    const { data } = await supabase
-      .from("v_all_payments" as any)
-      .select("*")
-      .gte("paid_at", startOfDay)
-      .lte("paid_at", endOfDay)
-      .order("paid_at", { ascending: false })
-      .limit(500);
+    const { data } = await query;
 
     if (data) {
       const raw = data as any[];
@@ -114,13 +135,17 @@ const FeeCollections = ({ embedded = false }: { embedded?: boolean }) => {
   }, [payments, selectedCampusId, modeFilter, search]);
 
   // Consultant credit-note receipts are a book offset against "due to consultant",
-  // not money received — exclude them from every cash/collection total.
+  // not money received — exclude them from every cash/collection total and from
+  // the transaction count so it matches the Finance header "X payments".
   const isCashless = (p: any) => p.payment_mode === "consultant_credit_note";
-  const todayTotal = filtered.filter((p: any) => !isCashless(p)).reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
-  const cashTotal = filtered.filter((p: any) => p.payment_mode === "cash").reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
-  const onlineTotal = filtered.filter((p: any) => p.payment_mode !== "cash" && !isCashless(p)).reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+  const collectedRows = filtered.filter((p: any) => !isCashless(p));
+  const todayTotal = collectedRows.reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+  const cashTotal = collectedRows.filter((p: any) => p.payment_mode === "cash").reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+  const onlineTotal = collectedRows.filter((p: any) => p.payment_mode !== "cash").reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
 
-  const isToday = dateFilter === new Date().toISOString().slice(0, 10);
+  const isSingleDay = !!rangeFrom && rangeFrom === rangeTo;
+  const isToday = isSingleDay && rangeFrom === indiaTodayDate();
+  const collectionsLabel = isToday ? "Today's Collections" : isSingleDay ? "Day's Collections" : "Collections";
 
   return (
     <>
@@ -149,9 +174,9 @@ const FeeCollections = ({ embedded = false }: { embedded?: boolean }) => {
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pastel-green mb-4">
                 <IndianRupee className="h-5 w-5 text-foreground/70" />
               </div>
-              <p className="text-xs font-medium text-muted-foreground">{isToday ? "Today's" : "Day's"} Collections</p>
-              <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">₹{(todayTotal / 1000).toFixed(1)}K</p>
-              <p className="text-xs font-medium mt-1 text-primary">{filtered.length} transactions</p>
+              <p className="text-xs font-medium text-muted-foreground">{collectionsLabel}</p>
+              <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">{formatCompactINR(todayTotal)}</p>
+              <p className="text-xs font-medium mt-1 text-primary">{collectedRows.length} transactions</p>
             </CardContent>
           </Card>
           <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
@@ -160,7 +185,7 @@ const FeeCollections = ({ embedded = false }: { embedded?: boolean }) => {
                 <Receipt className="h-5 w-5 text-foreground/70" />
               </div>
               <p className="text-xs font-medium text-muted-foreground">Cash</p>
-              <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">₹{(cashTotal / 1000).toFixed(1)}K</p>
+              <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">{formatCompactINR(cashTotal)}</p>
             </CardContent>
           </Card>
           <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
@@ -169,7 +194,7 @@ const FeeCollections = ({ embedded = false }: { embedded?: boolean }) => {
                 <CheckCircle className="h-5 w-5 text-foreground/70" />
               </div>
               <p className="text-xs font-medium text-muted-foreground">Online / UPI</p>
-              <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">₹{(onlineTotal / 1000).toFixed(1)}K</p>
+              <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">{formatCompactINR(onlineTotal)}</p>
             </CardContent>
           </Card>
         </div>
@@ -185,12 +210,14 @@ const FeeCollections = ({ embedded = false }: { embedded?: boolean }) => {
             />
           </div>
           <div className="flex items-center gap-2">
-            <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              <FieldShell hideLabel>
-                <Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="pl-10" />
-              </FieldShell>
-            </div>
+            {!embedded && (
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <FieldShell hideLabel>
+                  <Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="pl-10" />
+                </FieldShell>
+              </div>
+            )}
             <SelectField
               value={modeFilter}
               onValueChange={setModeFilter}
@@ -233,7 +260,11 @@ const FeeCollections = ({ embedded = false }: { embedded?: boolean }) => {
                   {filtered.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
-                        {isToday ? "No collections recorded today yet" : "No collections on this date"}
+                        {isToday
+                          ? "No collections recorded today yet"
+                          : isSingleDay
+                            ? "No collections on this date"
+                            : "No collections in this range"}
                       </td>
                     </tr>
                   ) : filtered.map((p: any) => (

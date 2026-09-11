@@ -36227,7 +36227,7 @@ export type Database = {
       }
       fee_due_report: { Args: { _campus_ids?: string[] }; Returns: Json }
       fee_reconciliation_report: { Args: never; Returns: Json }
-      finance_summary: { Args: { _campus_ids?: string[] }; Returns: Json }
+      finance_summary: { Args: { _campus_ids?: string[]; _from?: string; _to?: string }; Returns: Json }
       find_auth_user_by_email_or_phone: {
         Args: { _email?: string; _phone?: string }
         Returns: string
