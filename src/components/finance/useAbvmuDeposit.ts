@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { isGnmCourseName } from "@/lib/examRegistration";
 
 // Finance/cashier roles allowed to record the ABVMU remittance receipt (mirrors the
 // server-side guard in settle_abvmu_deposit_claim).
@@ -22,7 +23,8 @@ export interface AbvmuClaim {
  * standalone AbvmuDepositPanel card and the inline Year-1 fee-head split in
  * StudentFeePanel. Self-fetches the configured deposit amount + approved credit
  * (lead_fee_status) and the claim rows (get_abvmu_deposit_claims). `depositAmount === 0`
- * means the course carries no ABVMU deposit (callers should render nothing).
+ * means the course carries no ABVMU deposit, or GNM was marked not-applicable
+ * (callers should render nothing / the N/A banner).
  */
 export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: () => void) {
   const { role } = useAuth();
@@ -33,6 +35,8 @@ export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: (
   const [firstYearDue, setFirstYearDue] = useState(0); // net of the approved ABVMU credit
   const [lumpSumPct, setLumpSumPct] = useState(5);
   const [claims, setClaims] = useState<AbvmuClaim[]>([]);
+  const [notApplicable, setNotApplicable] = useState(false);
+  const [challanOptional, setChallanOptional] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshTick, setRefreshTick] = useState(0);
 
@@ -43,15 +47,22 @@ export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: (
       setDepositAmount(0);
       setLumpSumPct(5);
       setClaims([]);
+      setNotApplicable(false);
+      setChallanOptional(false);
       setLoading(false);
       return;
     }
     let alive = true;
     (async () => {
       setLoading(true);
-      const [statusRes, claimsRes] = await Promise.all([
+      const [statusRes, claimsRes, leadRes] = await Promise.all([
         (supabase as any).rpc("lead_fee_status", { _lead_id: leadId }),
         (supabase as any).rpc("get_abvmu_deposit_claims", { _lead_id: leadId }),
+        (supabase as any)
+          .from("leads")
+          .select("abvmu_deposit_not_applicable, courses(name)")
+          .eq("id", leadId)
+          .maybeSingle(),
       ]);
       if (!alive) return;
       const status = statusRes?.data || {};
@@ -61,6 +72,23 @@ export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: (
       const pct = Number(status.lump_sum_pct);
       setLumpSumPct(Number.isFinite(pct) ? Math.max(0, pct) : 5);
       setClaims((claimsRes?.data ?? []) as AbvmuClaim[]);
+      let lead = leadRes?.data || {};
+      // Column is added by the GNM not-applicable migration; fall back if it
+      // hasn't been applied yet so the optional-challan control still appears.
+      if (leadRes?.error) {
+        const fallback = await (supabase as any)
+          .from("leads")
+          .select("courses(name)")
+          .eq("id", leadId)
+          .maybeSingle();
+        if (!alive) return;
+        lead = fallback?.data || {};
+      }
+      setNotApplicable(Boolean(lead.abvmu_deposit_not_applicable));
+      const courseName = Array.isArray(lead.courses)
+        ? lead.courses[0]?.name
+        : lead.courses?.name;
+      setChallanOptional(isGnmCourseName(courseName));
       setLoading(false);
     })();
     return () => { alive = false; };
@@ -143,6 +171,19 @@ export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: (
     [leadId, depositAmount, onChanged, refresh],
   );
 
+  const setDepositNotApplicable = useCallback(
+    async (value: boolean) => {
+      const { error } = await (supabase as any).rpc("set_abvmu_deposit_not_applicable", {
+        _lead_id: leadId,
+        _not_applicable: value,
+      });
+      if (error) throw error;
+      refresh();
+      onChanged?.();
+    },
+    [leadId, onChanged, refresh],
+  );
+
   return {
     depositAmount,
     lumpSumPct,
@@ -156,9 +197,12 @@ export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: (
     settledAmount,
     directCollectDeduction,
     canSettle,
+    notApplicable,
+    challanOptional,
     viewChallan,
     settle,
     submitClaim,
+    setDepositNotApplicable,
     refresh,
   };
 }

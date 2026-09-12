@@ -18983,6 +18983,7 @@ export type Database = {
       leads: {
         Row: {
           academic_partner_id: string | null
+          abvmu_deposit_not_applicable: boolean
           admission_no: string | null
           admission_partner_id: string | null
           admitted_at: string | null
@@ -19085,6 +19086,7 @@ export type Database = {
         }
         Insert: {
           academic_partner_id?: string | null
+          abvmu_deposit_not_applicable?: boolean
           admission_no?: string | null
           admission_partner_id?: string | null
           admitted_at?: string | null
@@ -19187,6 +19189,7 @@ export type Database = {
         }
         Update: {
           academic_partner_id?: string | null
+          abvmu_deposit_not_applicable?: boolean
           admission_no?: string | null
           admission_partner_id?: string | null
           admitted_at?: string | null
@@ -38133,6 +38136,10 @@ export type Database = {
       set_fee_structure_active: {
         Args: { _active: boolean; _id: string }
         Returns: undefined
+      }
+      set_abvmu_deposit_not_applicable: {
+        Args: { _lead_id: string; _not_applicable: boolean }
+        Returns: Json
       }
       set_fee_structure_policy: {
         Args: { _fee_structure_id: string; _policy: Json }

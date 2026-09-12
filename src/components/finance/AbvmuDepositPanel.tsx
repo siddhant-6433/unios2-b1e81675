@@ -22,7 +22,7 @@ const fmt = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN", { maximu
  */
 export function AbvmuDepositPanel({ leadId, onChanged }: Props) {
   const abvmu = useAbvmuDeposit(leadId, onChanged);
-  const { depositAmount, approvedCredit, firstYearDue, loading, openClaim, rejected, settledClaim, canSettle, viewChallan } = abvmu;
+  const { depositAmount, approvedCredit, firstYearDue, loading, openClaim, rejected, settledClaim, canSettle, viewChallan, challanOptional } = abvmu;
 
   const [open, setOpen] = useState(false);
   const [challanNo, setChallanNo] = useState("");
@@ -39,6 +39,8 @@ export function AbvmuDepositPanel({ leadId, onChanged }: Props) {
   const [settleNotes, setSettleNotes] = useState("");
   const [settling, setSettling] = useState(false);
   const [settleError, setSettleError] = useState<string | null>(null);
+  const [naBusy, setNaBusy] = useState(false);
+  const [naError, setNaError] = useState<string | null>(null);
 
   const doSettle = async (claim: AbvmuClaim) => {
     setSettling(true);
@@ -268,6 +270,30 @@ export function AbvmuDepositPanel({ leadId, onChanged }: Props) {
         {rejected && !openClaim && (
           <div className="border-t border-destructive/15 px-4 py-2 text-xs text-destructive">
             Previous claim rejected{rejected.rejection_reason ? `: ${rejected.rejection_reason}` : ""}. You may submit again.
+          </div>
+        )}
+
+        {challanOptional && !openClaim && !settledClaim && (
+          <div className="border-t border-info/15 px-4 py-2.5">
+            <p className="text-[11px] text-muted-foreground">
+              Direct admission without counselling? The university deposit becomes part of Year 1 tuition.
+            </p>
+            {naError && <p className="mt-1 text-xs text-destructive">{naError}</p>}
+            <button
+              type="button"
+              disabled={naBusy}
+              onClick={async () => {
+                setNaBusy(true); setNaError(null);
+                try {
+                  await abvmu.setDepositNotApplicable(true);
+                } catch (e: any) {
+                  setNaError(e?.message || "Could not mark university deposit not applicable");
+                } finally { setNaBusy(false); }
+              }}
+              className="mt-1 text-xs text-info hover:underline disabled:opacity-50"
+            >
+              {naBusy ? "Saving…" : "Not applicable — include in Year 1 fee"}
+            </button>
           </div>
         )}
       </CardContent>
