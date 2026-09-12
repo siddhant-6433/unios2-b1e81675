@@ -195,7 +195,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     // receipts key on student_id — both live in lead_payments.
     const q = supabase
       .from("lead_payments")
-      .select("id, type, amount, payment_mode, transaction_ref, receipt_no, receipt_url, receipt_course_id, status, payment_date, created_at, concession_amount")
+      .select("id, type, amount, payment_mode, transaction_ref, receipt_no, receipt_url, receipt_course_id, status, payment_date, created_at, concession_amount, lead_id, student_id, notes")
       .order("created_at", { ascending: false });
     const { data } = student.lead_id
       ? await q.eq("lead_id", student.lead_id)
@@ -1195,7 +1195,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           open={!!editPayment}
           onOpenChange={(v) => { if (!v) setEditPayment(null); }}
           payment={editPayment}
-          onSaved={() => { fetchPayments(); fetchFees(); }}
+          studentId={student.id}
+          leadId={student.lead_id}
+          fees={fees}
+          feeMeta={feeMeta}
+          onSaved={() => { fetchPayments(); fetchFees(); fetchCredit(); }}
         />
       )}
 
