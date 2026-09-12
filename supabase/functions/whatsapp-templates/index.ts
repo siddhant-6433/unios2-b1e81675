@@ -395,12 +395,13 @@ Deno.serve(async (req) => {
     try { body = await req.json(); } catch { body = {}; }
     const action = body.action || "list";
 
-    // The nightly sync cron has no user JWT. It may only run `sync`, which is a
-    // read from Meta plus an upsert into our own mirror — no Meta mutation.
+    // The nightly sync cron has no user JWT. It may run `sync` (read + mirror)
+    // and `create` (submit a template to a specific WABA — used to onboard a
+    // coexistence sender that has no templates of its own).
     const cronSecret = Deno.env.get("CRON_SECRET");
     const isCron = !!cronSecret && req.headers.get("x-cron-secret") === cronSecret;
-    if (isCron && action !== "sync") {
-      return new Response(JSON.stringify({ error: "Cron may only run the sync action" }), {
+    if (isCron && action !== "sync" && action !== "create") {
+      return new Response(JSON.stringify({ error: "Cron may only run sync or create" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -601,6 +602,7 @@ Deno.serve(async (req) => {
         name: safeName,
         language: safeLanguage,
         category: safeCategory,
+        allow_category_change: true,
         components,
       };
 

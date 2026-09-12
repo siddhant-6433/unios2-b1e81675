@@ -42,6 +42,13 @@ describe("whatsapp-templates multi-WABA sync", () => {
     expect(fn).not.toContain("const metaUrl =");
   });
 
+  it("lets cron submit a template onto a specific WABA", () => {
+    // A newly connected coexistence sender (Mirai 9220522282, 9555) has no
+    // templates of its own, so sends 132001 until one is created on that WABA.
+    expect(fn).toContain('action !== "sync" && action !== "create"');
+    expect(fn).toContain("allow_category_change: true");
+  });
+
   it("never returns a token from the wabas action", () => {
     const wabasAction = fn.slice(fn.indexOf('if (action === "wabas")'));
     const body = wabasAction.slice(0, wabasAction.indexOf("// ── CREATE"));
