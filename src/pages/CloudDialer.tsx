@@ -20,6 +20,7 @@ import { useSidebar } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { DialerQueuePane } from "@/components/dialer/DialerQueuePane";
 import { DialerLeadHeader } from "@/components/dialer/DialerLeadHeader";
+import { DialerWhatsAppPreview } from "@/components/dialer/DialerWhatsAppPreview";
 import { DialerActionRow, type DialerAction } from "@/components/dialer/DialerActionRow";
 import { DialerContextRail, type RailTab } from "@/components/dialer/DialerContextRail";
 import { type QueueLead, isContactQueueLead } from "@/lib/dialerQueue";
@@ -2248,6 +2249,10 @@ export default function CloudDialer() {
               setEditValue={setEditValue}
               saveLeadEdit={saveLeadEdit}
               courseOptions={courseOptions}
+            />
+            <DialerWhatsAppPreview
+              lead={currentLead}
+              onOpenWhatsApp={() => { setRailTab("whatsapp"); setRailOpen(true); }}
             />
             {/* Non-call follow-up callout — routes counsellor to the native action.
                 Shown only when this queue entry came from a whatsapp / email / visit

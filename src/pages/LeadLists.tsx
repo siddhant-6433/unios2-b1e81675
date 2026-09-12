@@ -70,6 +70,8 @@ import {
 } from "@/lib/campaignEligibility";
 import { fetchLastWhatsAppMarketingAtByLeadIds, fetchListMembers } from "@/lib/campaignEligibilityFetch";
 import { evaluateTemplateQualityForBulk } from "@/lib/campaignTemplateQuality";
+import { callingReportByCounsellor, callingReportCalledCount, callingReportLastCallAt } from "@/lib/callingReportStats";
+import { callingReportPreviousCounsellors, fetchListAssignmentOwners, type ListAssignmentOwners } from "@/lib/listAssignmentOwners";
 
 const BulkLeadImportDialog = lazy(() =>
   import("@/components/admissions/BulkLeadImportDialog").then((m) => ({ default: m.BulkLeadImportDialog })));
@@ -188,11 +190,20 @@ type LeadListAssignmentReportRow = {
   assigned_at: string;
 };
 
+type CallListHolder = {
+  counsellor_id: string;
+  counsellor_name: string;
+  count: number;
+};
+
 type CallListPreview = {
   total: number;
   dialable: number;
   no_phone: number;
   terminal: number;
+  unassigned?: number;
+  holders?: CallListHolder[];
+  crm_owners?: CallListHolder[];
 };
 
 type CallListProgress = {
@@ -386,8 +397,6 @@ export default function LeadLists() {
   const [assignList, setAssignList] = useState<LeadList | null>(null);
   const [counsellors, setCounsellors] = useState<CounsellorOption[]>([]);
   const [selectedCounsellorIds, setSelectedCounsellorIds] = useState<string[]>([]);
-  // ponytail: counsellors already assigned to this list — shown disabled in the assign dialog
-  const [alreadyAssignedIds, setAlreadyAssignedIds] = useState<string[]>([]);
   const [assigning, setAssigning] = useState(false);
   const [assignmentSummary, setAssignmentSummary] = useState<string | null>(null);
   // Working instructions the counsellor sees on the dialer's list banner.
@@ -398,6 +407,7 @@ export default function LeadLists() {
   // Some pushes (win-backs) deliberately want cold / not-interested leads.
   const [assignIncludeTerminal, setAssignIncludeTerminal] = useState(false);
   const [assignPreview, setAssignPreview] = useState<CallListPreview | null>(null);
+  const [assignOwners, setAssignOwners] = useState<ListAssignmentOwners | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportList, setReportList] = useState<LeadList | null>(null);
   const [assignmentReport, setAssignmentReport] = useState<LeadListAssignmentReportRow[]>([]);
@@ -405,6 +415,8 @@ export default function LeadLists() {
   const [reportProgress, setReportProgress] = useState<CallListProgress | null>(null);
   // Click an outcome chip to see only those leads.
   const [reportDispositionFilter, setReportDispositionFilter] = useState<string | null>(null);
+  const [reportCounsellorFilter, setReportCounsellorFilter] = useState<string | null>(null);
+  const [reportPreviousFilter, setReportPreviousFilter] = useState<string | null>(null);
   // Roll a list forward: archive it and spawn the next calling attempt out of the
   // leads that were never actually reached.
   const [followupOpen, setFollowupOpen] = useState(false);
@@ -821,21 +833,12 @@ export default function LeadLists() {
   const openAssign = async (list: LeadList) => {
     setAssignList(list);
     setSelectedCounsellorIds([]);
-    setAlreadyAssignedIds([]);
     setAssignmentSummary(null);
     setAssignIncludeTerminal(list.include_terminal ?? false);
     setAssignPreview(null);
+    setAssignOwners(null);
     setAssignOpen(true);
     await loadAssignableCounsellors();
-
-    // Fetch counsellors already assigned to this list so they show disabled.
-    const { data: assigned } = await supabase
-      .from("lead_list_members" as any)
-      .select("assigned_to")
-      .eq("list_id", list.id)
-      .not("assigned_to", "is", null);
-    const ids = [...new Set((assigned || []).map((r: any) => r.assigned_to).filter(Boolean))] as string[];
-    setAlreadyAssignedIds(ids);
 
     // A pure counsellor can only assign themselves — preselect so it's one click.
     if (!canAssignLists && role === "counsellor" && profile?.id) {
@@ -854,6 +857,9 @@ export default function LeadLists() {
         _include_terminal: assignIncludeTerminal,
       })
       .then(({ data }) => { if (!cancelled) setAssignPreview((data as CallListPreview) || null); });
+    fetchListAssignmentOwners(assignList.id)
+      .then((owners) => { if (!cancelled) setAssignOwners(owners); })
+      .catch(() => { if (!cancelled) setAssignOwners(null); });
     return () => { cancelled = true; };
   }, [assignOpen, assignList, assignIncludeTerminal]);
 
@@ -885,27 +891,60 @@ export default function LeadLists() {
     setAssignmentSummary(`${total} lead${total === 1 ? "" : "s"} assigned across ${rows.length} counsellor${rows.length === 1 ? "" : "s"}.`);
     toast({ title: "List assigned", description: `${total} leads reassigned in round-robin order.` });
     await fetchLists();
+    if (assignList) {
+      fetchListAssignmentOwners(assignList.id).then(setAssignOwners).catch(() => undefined);
+    }
   };
 
   // Called-first ordering: the assigner opens this to read outcomes, and rows
   // with no call yet have nothing to say.
   const visibleAssignmentReport = useMemo(() => {
-    const rows = reportDispositionFilter
-      ? assignmentReport.filter((r) =>
-          (r.latest_call_disposition || "unrecorded") === reportDispositionFilter)
-      : assignmentReport;
+    let rows = assignmentReport;
+    if (reportDispositionFilter) {
+      rows = rows.filter((r) =>
+        (r.latest_call_disposition || "unrecorded") === reportDispositionFilter);
+    }
+    if (reportPreviousFilter) {
+      rows = rows.filter((r) => r.previous_counsellor_name === reportPreviousFilter);
+    }
     return [...rows].sort((a, b) => {
       const at = a.latest_call_at ? new Date(a.latest_call_at).getTime() : -1;
       const bt = b.latest_call_at ? new Date(b.latest_call_at).getTime() : -1;
       return bt - at;
     });
-  }, [assignmentReport, reportDispositionFilter]);
+  }, [assignmentReport, reportDispositionFilter, reportCounsellorFilter, reportPreviousFilter]);
+
+  // Same grain as the table: assignment history, not lead_list_members.assigned_to.
+  const reportCounsellorStats = useMemo(
+    () => callingReportByCounsellor(assignmentReport),
+    [assignmentReport],
+  );
+  const reportCalledCount = useMemo(
+    () => callingReportCalledCount(assignmentReport),
+    [assignmentReport],
+  );
+  const reportLastCallAt = useMemo(
+    () => callingReportLastCallAt(assignmentReport),
+    [assignmentReport],
+  );
+  const reportPreviousCounsellors = useMemo(
+    () => callingReportPreviousCounsellors(assignmentReport),
+    [assignmentReport],
+  );
+  const assignHolders = assignOwners;
+  const counsellorChips = assignmentReport.length > 0
+    ? reportCounsellorStats
+    : (!reportLoading ? (reportProgress?.by_counsellor ?? []) : []);
 
   const openAssignmentReport = async (list: LeadList) => {
     setReportList(list);
     setReportOpen(true);
     setReportLoading(true);
+    setAssignmentReport([]);
+    setReportProgress(null);
     setReportDispositionFilter(null);
+    setReportCounsellorFilter(null);
+    setReportPreviousFilter(null);
     // Aggregated server-side — a per-row client fetch would hit the 1000-row cap
     // on any list worth assigning.
     supabase.rpc("call_list_progress" as any, { p_list_id: list.id })
@@ -2366,27 +2405,70 @@ export default function LeadLists() {
                 )}
               </div>
             )}
+            <div className="rounded-lg border border-border px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Who already has these leads</p>
+              {!assignHolders ? (
+                <p className="mt-1 text-xs text-muted-foreground">Counting current owners…</p>
+              ) : (
+                <div className="mt-1.5 space-y-2">
+                  <div>
+                    <p className="text-[11px] text-muted-foreground">Via this list</p>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {assignHolders.holders.length === 0 && assignHolders.unassigned === 0 ? (
+                        <span className="text-xs text-muted-foreground">No list owners yet.</span>
+                      ) : (
+                        <>
+                          {assignHolders.holders.map((h) => (
+                            <Badge key={h.counsellor_id} variant="secondary" className="text-[11px] font-normal">
+                              {h.counsellor_name}: {h.count}
+                            </Badge>
+                          ))}
+                          {assignHolders.unassigned > 0 && (
+                            <Badge variant="outline" className="text-[11px] font-normal">
+                              Unassigned: {assignHolders.unassigned}
+                            </Badge>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {assignHolders.crmOwners.length > 0 && (
+                    <div>
+                      <p className="text-[11px] text-muted-foreground">Current CRM counsellor</p>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {assignHolders.crmOwners.map((h) => (
+                          <Badge key={h.counsellor_id} variant="outline" className="text-[11px] font-normal">
+                            {h.counsellor_name}: {h.count}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
               {counsellors.length === 0 ? (
                 <div className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellors available.</div>
               ) : (
                 counsellors.map((counsellor) => {
-                  const alreadyAssigned = alreadyAssignedIds.includes(counsellor.id);
-                  const checked = alreadyAssigned || selectedCounsellorIds.includes(counsellor.id);
+                  const onThisList = assignHolders?.holders.find((h) => h.counsellor_id === counsellor.id)?.count ?? 0;
+                  const checked = selectedCounsellorIds.includes(counsellor.id);
                   const days = daysSince(counsellor.last_call_at);
                   const dormant = days === null || days >= DORMANT_DAYS;
                   return (
-                    <label key={counsellor.id} className={`flex items-center gap-3 border-b border-border/50 px-4 py-3 last:border-b-0 ${alreadyAssigned ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:bg-muted/30"}`}>
+                    <label key={counsellor.id} className="flex cursor-pointer items-center gap-3 border-b border-border/50 px-4 py-3 last:border-b-0 hover:bg-muted/30">
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => !alreadyAssigned && toggleCounsellor(counsellor.id)}
-                        disabled={alreadyAssigned}
+                        onChange={() => toggleCounsellor(counsellor.id)}
                         className="h-4 w-4"
                       />
                       <span className="text-sm font-medium text-foreground">{counsellor.name}</span>
-                      {alreadyAssigned && (
-                        <Badge variant="secondary" className="text-[10px] font-normal">Already assigned</Badge>
+                      {onThisList > 0 && (
+                        <Badge variant="secondary" className="text-[10px] font-normal">
+                          {onThisList} on this list
+                        </Badge>
                       )}
                       <span className={`ml-auto flex items-center gap-2 text-[11px] ${dormant ? "text-destructive" : "text-muted-foreground"}`}>
                         {dormant && <AlertTriangle className="h-3 w-3" />}
@@ -2438,10 +2520,10 @@ export default function LeadLists() {
               <div className="flex items-center gap-3">
                 <div className="h-2 w-48 overflow-hidden rounded-full bg-muted">
                   <div className="h-full bg-primary transition-all"
-                    style={{ width: `${Math.round((reportProgress.worked / Math.max(reportProgress.dialable || reportProgress.total, 1)) * 100)}%` }} />
+                    style={{ width: `${Math.min(100, Math.round(((assignmentReport.length > 0 ? reportCalledCount : reportProgress.worked) / Math.max(reportProgress.dialable || reportProgress.total, 1)) * 100))}%` }} />
                 </div>
                 <span className="text-sm tabular-nums text-foreground">
-                  {reportProgress.worked}/{reportProgress.dialable ?? reportProgress.total} called
+                  {assignmentReport.length > 0 ? reportCalledCount : reportProgress.worked}/{reportProgress.dialable ?? reportProgress.total} called
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {reportProgress.pending} pending
@@ -2449,8 +2531,8 @@ export default function LeadLists() {
                   {reportProgress.not_dialable > 0 && ` · ${reportProgress.not_dialable} not dialable (no phone or closed)`}
                 </span>
                 <span className="ml-auto text-[11px] text-muted-foreground">
-                  {reportProgress.last_call_at
-                    ? `last call ${new Date(reportProgress.last_call_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`
+                  {(reportLastCallAt || reportProgress.last_call_at)
+                    ? `last call ${new Date(reportLastCallAt || reportProgress.last_call_at as string).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`
                     : "no calls yet"}
                 </span>
               </div>
@@ -2500,13 +2582,49 @@ export default function LeadLists() {
                   )}
                 </div>
               )}
-              {reportProgress.by_counsellor.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {reportProgress.by_counsellor.map((c) => (
-                    <Badge key={c.counsellor_id} variant="outline" className="text-[11px] font-normal">
-                      {c.counsellor_name}: {c.worked}/{c.total}
-                    </Badge>
-                  ))}
+              {counsellorChips.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex flex-wrap gap-2">
+                    {counsellorChips.map((c) => (
+                      <button
+                        key={c.counsellor_id}
+                        onClick={() => setReportCounsellorFilter((cur) => cur === c.counsellor_id ? null : c.counsellor_id)}
+                        className={`rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                          reportCounsellorFilter === c.counsellor_id
+                            ? "border-primary bg-primary/15 text-primary"
+                            : "border-border text-muted-foreground hover:bg-muted"
+                        }`}
+                      >
+                        {c.counsellor_name}: {c.worked}/{c.total}
+                      </button>
+                    ))}
+                    {reportCounsellorFilter && (
+                      <button
+                        onClick={() => setReportCounsellorFilter(null)}
+                        className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted"
+                      >
+                        All counsellors
+                      </button>
+                    )}
+                  </div>
+                  {reportPreviousCounsellors.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">From</span>
+                      {reportPreviousCounsellors.map((p) => (
+                        <button
+                          key={p.name}
+                          onClick={() => setReportPreviousFilter((cur) => cur === p.name ? null : p.name)}
+                          className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                            reportPreviousFilter === p.name
+                              ? "border-primary bg-primary/15 text-primary"
+                              : "border-border text-muted-foreground hover:bg-muted"
+                          }`}
+                        >
+                          {p.name}: {p.count}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
