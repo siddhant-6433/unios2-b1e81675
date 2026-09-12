@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { TextField, SelectField, DatePickerField } from "@/components/ui/state-fields";
 import { Loader2, UserPlus, School, Users, Banknote, ChevronRight, ChevronLeft, Save } from "lucide-react";
 import { SCHOOL_SESSION_YEARS, isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
+import { formatPersonName, formatPersonNameOrNull } from "@/lib/personName";
 
 interface Campus      { id: string; name: string; code: string; }
 interface Institution { id: string; name: string; code: string; type: string; }
@@ -381,7 +382,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       : `PAN-${Date.now().toString(36).toUpperCase()}`;
 
     const student: StudentInsert = {
-      name: form.name.trim(),
+      name: formatPersonName(form.name),
       dob:  form.dob  || null,
       gender: form.gender ? form.gender.toLowerCase() : null,
       course_id:  form.course_id,
@@ -396,11 +397,11 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       class_roll_no: form.class_roll_no || null,
       student_type:  form.student_type,
       school_admission_no: form.school_admission_no.trim() || null,
-      father_name:  form.father_name.trim()  || null,
+      father_name:  formatPersonNameOrNull(form.father_name),
       father_phone: form.father_phone.trim() || null,
-      mother_name:  form.mother_name.trim()  || null,
+      mother_name:  formatPersonNameOrNull(form.mother_name),
       mother_phone: form.mother_phone.trim() || null,
-      guardian_name:  form.father_name.trim()  || null,
+      guardian_name:  formatPersonNameOrNull(form.father_name),
       guardian_phone: form.father_phone.trim() || null,
       // Carries the candidate's payments and offer waivers onto this ledger.
       lead_id: linkLeadId,

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { StudentAvatar } from "@/components/ui/student-avatar";
 import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
+import { formatPersonName } from "@/lib/personName";
 
 interface SearchResult {
   type: "lead" | "student" | "application";
@@ -111,7 +112,7 @@ export function HeaderSearch() {
     const all: SearchResult[] = [];
     (leadsRes.data || []).forEach((l: any) => {
       all.push({
-        type: "lead", id: l.id, name: l.name, phone: l.phone,
+        type: "lead", id: l.id, name: formatPersonName(l.name), phone: l.phone,
         identifier: l.application_id || l.pre_admission_no || l.admission_no || undefined,
         identifierLabel: l.admission_no ? "AN" : l.pre_admission_no ? "PAN" : l.application_id ? "App" : undefined,
         secondaryIdentifier: l.admission_no && l.pre_admission_no ? l.pre_admission_no : undefined,
@@ -128,7 +129,7 @@ export function HeaderSearch() {
     (applicationsRes.data || []).forEach((a: any) => {
       if (seenLeadAppIds.has(a.application_id)) return;
       all.push({
-        type: "application", id: a.id, name: a.full_name || "(no name)", phone: a.phone || "",
+        type: "application", id: a.id, name: a.full_name ? formatPersonName(a.full_name) : "(no name)", phone: a.phone || "",
         identifier: a.application_id, identifierLabel: "App",
         status: a.status, leadId: a.lead_id,
         isSecondary: matchesStudent(a.phone),
@@ -136,7 +137,7 @@ export function HeaderSearch() {
     });
     (studentsRes.data || []).forEach((s: any) => {
       all.push({
-        type: "student", id: s.id, name: s.name, phone: s.phone || "",
+        type: "student", id: s.id, name: formatPersonName(s.name), phone: s.phone || "",
         identifier: s.admission_no || s.pre_admission_no || undefined,
         identifierLabel: s.admission_no ? "AN" : s.pre_admission_no ? "PAN" : undefined,
         secondaryIdentifier: s.admission_no && s.pre_admission_no ? s.pre_admission_no : undefined,

@@ -12,6 +12,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { FileText, Download, Check, X, AlertCircle, Clock } from "lucide-react";
+import { formatPersonName } from "@/lib/personName";
 
 // Roles allowed to draft/submit a TC vs approve one. Mirrors the RPC guards.
 const CAN_ISSUE = new Set(["office_assistant", "school_coordinator", "principal", "super_admin", "campus_admin"]);
@@ -139,9 +140,9 @@ export function TransferCertificateSection({
       const now = new Date();
       setForm({
         ...emptyForm(),
-        name: str("name"),
-        motherName: str("mother_name"),
-        fatherName: str("father_name") || str("guardian_name"),
+        name: formatPersonName(str("name")),
+        motherName: formatPersonName(str("mother_name")),
+        fatherName: formatPersonName(str("father_name") || str("guardian_name")),
         nationality: str("nationality") || "Indian",
         category: str("caste_category") || "General",
         firstAdmissionDateClass: [fmtDate(admDate), joiningClass ? `Class ${joiningClass}` : ""].filter(Boolean).join(", "),

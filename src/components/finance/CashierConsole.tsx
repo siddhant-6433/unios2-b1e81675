@@ -18,6 +18,7 @@ import { StudentFeePanel } from "./StudentFeePanel";
 import { LeadFeeLedger } from "./LeadFeeLedger";
 import { SendPaymentLinkDialog } from "./SendPaymentLinkDialog";
 import { StudentAvatar } from "@/components/ui/student-avatar";
+import { formatPersonName } from "@/lib/personName";
 import {
   Search, Loader2, IndianRupee, Link as LinkIcon, X, User, GraduationCap, Copy,
 } from "lucide-react";
@@ -93,7 +94,7 @@ export function CashierConsole() {
     setHits((data || []).map((r: any) => ({
       kind: r.kind as "student" | "lead",
       id: r.id,
-      name: r.name,
+      name: formatPersonName(r.name),
       phone: r.phone,
       identifier: r.identifier,
       identifierLabel: r.identifier_label,
@@ -218,7 +219,7 @@ export function CashierConsole() {
                   ? <GraduationCap className="h-4 w-4 text-muted-foreground shrink-0" />
                   : <User className="h-4 w-4 text-muted-foreground shrink-0" />}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-foreground">{h.name}</div>
+                  <div className="truncate text-sm font-medium capitalize text-foreground">{h.name}</div>
                   {/* Course first: at a busy counter seven "Anjali Kumari" rows are
                       told apart by the course the candidate names, not by a phone
                       number the cashier cannot check at a glance. */}
@@ -277,10 +278,10 @@ export function CashierConsole() {
                   fall back to initials. */}
               <StudentAvatar
                 src={person.photo_url}
-                name={person.name}
+                name={formatPersonName(person.name)}
                 className="h-12 w-12 rounded-xl"
               />
-              <Field label="Name" value={person.name} strong />
+              <Field label="Name" value={formatPersonName(person.name)} strong name />
               {/* Both parents, not just the father. mother_name is in fact the
                   better-filled column (300 of 328 students against 294), and a
                   counter that only ever names the father is telling half the
@@ -290,11 +291,11 @@ export function CashierConsole() {
                   for every one of them. */}
               {target.kind === "student" ? (
                 <>
-                  <Field label="Father's Name" value={person.father_name} />
-                  <Field label="Mother's Name" value={person.mother_name} />
+                  <Field label="Father's Name" value={formatPersonName(person.father_name)} name />
+                  <Field label="Mother's Name" value={formatPersonName(person.mother_name)} name />
                 </>
               ) : (
-                <Field label="Guardian" value={person.guardian_name} />
+                <Field label="Guardian" value={formatPersonName(person.guardian_name)} name />
               )}
               <Field
                 label={target.kind === "student" ? "Admission No." : "Application / PAN"}
@@ -375,11 +376,11 @@ export function CashierConsole() {
   );
 }
 
-function Field({ label, value, mono, strong }: { label: string; value?: string | null; mono?: boolean; strong?: boolean }) {
+function Field({ label, value, mono, strong, name }: { label: string; value?: string | null; mono?: boolean; strong?: boolean; name?: boolean }) {
   return (
     <div className="min-w-0">
       <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={`truncate text-sm ${strong ? "font-semibold" : ""} ${mono ? "font-mono text-xs" : ""} text-foreground`}>
+      <p className={`truncate text-sm ${strong ? "font-semibold" : ""} ${mono ? "font-mono text-xs" : ""} ${name ? "capitalize" : ""} text-foreground`}>
         {value || "—"}
       </p>
     </div>

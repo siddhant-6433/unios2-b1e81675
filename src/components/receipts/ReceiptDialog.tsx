@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { X, Download, Printer } from "lucide-react";
+import { formatPersonName } from "@/lib/personName";
 
 // ── Shared branding defaults ──────────────────────────────────────────────────
 // Callers don't need to pass logo/primaryColor — these defaults make the
@@ -176,14 +177,14 @@ function ReceiptContent({ d }: { d: ReceiptData }) {
           <tbody>
             {isApp ? (
               <>
-                <Row label="Name" value={d.applicant_name} />
+                <Row label="Name" value={formatPersonName(d.applicant_name)} />
                 <Row label="Phone" value={d.phone} />
                 {d.email && <Row label="Email" value={d.email} />}
                 <Row label="Application ID" value={d.application_id} mono />
               </>
             ) : (
               <>
-                <Row label="Student" value={d.student_name} />
+                <Row label="Student" value={formatPersonName(d.student_name)} />
                 {d.roll_no && <Row label="Roll No" value={d.roll_no} mono />}
                 {d.admission_no && <Row label="Admission No" value={d.admission_no} mono />}
                 {d.course_name && <Row label="Course" value={d.course_name} />}
