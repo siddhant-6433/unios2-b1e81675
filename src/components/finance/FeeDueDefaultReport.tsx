@@ -7,11 +7,14 @@ import { exportRowsPdf } from "@/lib/pdfExport";
 import { maskPhone } from "@/lib/maskContact";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 import { useAuth } from "@/contexts/AuthContext";
-import { IndianRupee, AlertTriangle, Wallet, Search, Download, FileText, Users } from "lucide-react";
+import { IndianRupee, AlertTriangle, Wallet, Search, Download, FileText, Users, ChevronDown } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -176,24 +179,33 @@ export function FeeDueDefaultReport() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseOpts, batchOpts, sessionOpts]);
 
+  const studentsFor = (exportScope: Scope) =>
+    students
+      .filter((s) => (exportScope === "overdue" ? s.days_overdue > 0 : true))
+      .filter(matchesDims)
+      .filter((s) => matchesSearch(s.name, s.admission_no));
+  const linesFor = (exportScope: Scope) =>
+    lines
+      .filter((l) => (exportScope === "overdue" ? l.is_overdue : true))
+      .filter(matchesDims)
+      .filter((l) => matchesSearch(l.name, l.admission_no));
+
   const filteredStudents = useMemo(
-    () =>
-      students
-        .filter((s) => (scope === "overdue" ? s.days_overdue > 0 : true))
-        .filter(matchesDims)
-        .filter((s) => matchesSearch(s.name, s.admission_no)),
+    () => studentsFor(scope),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [students, scope, q, campusF, courseF, batchF, sessionF],
   );
 
   const filteredLines = useMemo(
-    () =>
-      lines
-        .filter((l) => (scope === "overdue" ? l.is_overdue : true))
-        .filter(matchesDims)
-        .filter((l) => matchesSearch(l.name, l.admission_no)),
+    () => linesFor(scope),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [lines, scope, q, campusF, courseF, batchF, sessionF],
+  );
+
+  const overdueExportCount = useMemo(
+    () => (granularity === "student" ? studentsFor("overdue").length : linesFor("overdue").length),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [granularity, students, lines, q, campusF, courseF, batchF, sessionF],
   );
 
   // KPIs over the currently-shown rows.
@@ -224,53 +236,58 @@ export function FeeDueDefaultReport() {
   // sees the masked form (mirrors the maskContact export policy).
   const showPhone = (p: string | null) => (p ? (isSuperAdmin ? p : maskPhone(p)) : "—");
 
-  const buildExportRows = (): ExportRow[] =>
-    granularity === "student"
-      ? filteredStudents.map((s) => ({
-          Student: s.name || "",
-          "Admission No": s.admission_no || "",
-          Mobile: s.phone || "",
-          Course: s.course_name || "",
-          Batch: s.batch_name || "",
-          Session: s.session_name || "",
-          Campus: s.campus_name || "",
-          "Next Due Date": s.next_due_date || "",
-          "Overdue Amount": Number(s.overdue_amount || 0),
-          "Days Overdue": s.days_overdue,
-          Status: s.fully_paid ? "Paid" : s.days_overdue > 0 ? "Overdue" : "Due",
-        }))
-      : filteredLines.map((l) => ({
-          Student: l.name || "",
-          "Admission No": l.admission_no || "",
-          Course: l.course_name || "",
-          Batch: l.batch_name || "",
-          Session: l.session_name || "",
-          Campus: l.campus_name || "",
-          "Fee Head": l.fee_name || l.fee_code || "",
-          Term: termLabel(l),
-          Total: Number(l.total_amount || 0),
-          Concession: Number(l.concession || 0),
-          Paid: Number(l.paid_amount || 0),
-          Balance: Number(l.balance || 0),
-          "Due Date": l.due_date || "",
-          "Days Overdue": l.days_overdue,
-          Status: l.is_overdue ? "Overdue" : Number(l.balance) <= 0 ? "Paid" : "Due",
-        }));
+  const withSerial = (rows: ExportRow[]): ExportRow[] =>
+    rows.map((row, i) => ({ "S. No.": i + 1, ...row }));
 
-  const handleExport = async (fmt: "xlsx" | "pdf") => {
-    const rows = buildExportRows();
+  const buildExportRows = (exportScope: Scope): ExportRow[] =>
+    withSerial(
+      granularity === "student"
+        ? studentsFor(exportScope).map((s) => ({
+            Student: s.name || "",
+            "Admission No": s.admission_no || "",
+            Mobile: s.phone || "",
+            Course: s.course_name || "",
+            Batch: s.batch_name || "",
+            Session: s.session_name || "",
+            Campus: s.campus_name || "",
+            "Next Due Date": s.next_due_date || "",
+            "Overdue Amount": Number(s.overdue_amount || 0),
+            "Days Overdue": s.days_overdue,
+            Status: s.fully_paid ? "Paid" : s.days_overdue > 0 ? "Overdue" : "Due",
+          }))
+        : linesFor(exportScope).map((l) => ({
+            Student: l.name || "",
+            "Admission No": l.admission_no || "",
+            Course: l.course_name || "",
+            Batch: l.batch_name || "",
+            Session: l.session_name || "",
+            Campus: l.campus_name || "",
+            "Fee Head": l.fee_name || l.fee_code || "",
+            Term: termLabel(l),
+            Total: Number(l.total_amount || 0),
+            Concession: Number(l.concession || 0),
+            Paid: Number(l.paid_amount || 0),
+            Balance: Number(l.balance || 0),
+            "Due Date": l.due_date || "",
+            "Days Overdue": l.days_overdue,
+            Status: l.is_overdue ? "Overdue" : Number(l.balance) <= 0 ? "Paid" : "Due",
+          })),
+    );
+
+  const handleExport = async (fmt: "xlsx" | "pdf", exportScope: Scope = scope) => {
+    const rows = buildExportRows(exportScope);
     if (rows.length === 0) {
       toast({ title: "Nothing to export" });
       return;
     }
     const setBusy = fmt === "pdf" ? setExportingPdf : setExporting;
     setBusy(true);
-    const prefix = `fee-${granularity}-${scope}`;
+    const prefix = `fee-${granularity}-${exportScope}`;
     if (fmt === "pdf") {
       // Filter context shown under the title so a printed sheet is self-describing.
       const subtitle = [
         granularity === "student" ? "By Student" : "By Fee Head",
-        scope === "overdue" ? "Overdue only" : "All Dues",
+        exportScope === "overdue" ? "Overdue only" : "All Dues",
         campusF === "all" ? "All Campuses" : campusF,
         courseF !== "all" ? courseF : null,
         batchF !== "all" ? batchF : null,
@@ -422,15 +439,30 @@ export function FeeDueDefaultReport() {
         >
           {exporting ? <ButtonOrb state="composing" /> : <Download className="h-3.5 w-3.5" />} Export to Excel
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-1.5 h-9 text-xs"
-          disabled={exporting || exportingPdf || rowCount === 0}
-          onClick={() => handleExport("pdf")}
-        >
-          {exportingPdf ? <ButtonOrb state="composing" /> : <FileText className="h-3.5 w-3.5" />} Export to PDF
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 h-9 text-xs"
+              disabled={exporting || exportingPdf || (rowCount === 0 && overdueExportCount === 0)}
+            >
+              {exportingPdf ? <ButtonOrb state="composing" /> : <FileText className="h-3.5 w-3.5" />} Export to PDF
+              <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem disabled={rowCount === 0} onClick={() => handleExport("pdf", scope)}>
+              All shown rows
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={overdueExportCount === 0}
+              onClick={() => handleExport("pdf", "overdue")}
+            >
+              Overdue only ({overdueExportCount})
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* KPI row */}
@@ -456,6 +488,7 @@ export function FeeDueDefaultReport() {
                       onCheckedChange={toggleAll}
                     />
                   </th>
+                  <th className={`${thClass} w-14`}>S. No.</th>
                   <th className={thClass}>Student</th>
                   <th className={thClass}>Adm. No</th>
                   <th className={thClass}>Mobile</th>
@@ -470,12 +503,12 @@ export function FeeDueDefaultReport() {
               <tbody>
                 {filteredStudents.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
+                    <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
                       No records
                     </td>
                   </tr>
                 ) : (
-                  filteredStudents.map((s) => (
+                  filteredStudents.map((s, i) => (
                     <tr
                       key={s.student_id}
                       className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors"
@@ -489,6 +522,7 @@ export function FeeDueDefaultReport() {
                           />
                         )}
                       </td>
+                      <td className="px-4 py-3 tabular-nums text-muted-foreground">{i + 1}</td>
                       <td className="px-4 py-3 font-medium text-foreground">{s.name || "—"}</td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.admission_no || "—"}</td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{showPhone(s.phone)}</td>
@@ -507,6 +541,7 @@ export function FeeDueDefaultReport() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
+                  <th className={`${thClass} w-14`}>S. No.</th>
                   <th className={thClass}>Student</th>
                   <th className={thClass}>Adm. No</th>
                   <th className={thClass}>Fee Head</th>
@@ -522,7 +557,7 @@ export function FeeDueDefaultReport() {
               <tbody>
                 {filteredLines.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
+                    <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
                       No records
                     </td>
                   </tr>
@@ -532,6 +567,7 @@ export function FeeDueDefaultReport() {
                       key={`${l.student_id}-${l.fee_code}-${l.term}-${i}`}
                       className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors"
                     >
+                      <td className="px-4 py-3 tabular-nums text-muted-foreground">{i + 1}</td>
                       <td className="px-4 py-3 font-medium text-foreground">{l.name || "—"}</td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{l.admission_no || "—"}</td>
                       <td className="px-4 py-3 text-foreground">{l.fee_name || l.fee_code || "—"}</td>

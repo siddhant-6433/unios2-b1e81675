@@ -80,7 +80,12 @@ export async function exportRowsPdf(
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 10;
   const usableW = pageW - margin * 2;
-  const colW = usableW / headers.length;
+  // Serial-number columns are short; give them less than an equal share so
+  // student/course names keep more of the landscape width.
+  const colWeights = headers.map((h) => (/^s\.?\s*no\.?$/i.test(h) ? 0.45 : 1));
+  const weightSum = colWeights.reduce((a, b) => a + b, 0);
+  const colWidths = colWeights.map((w) => (w / weightSum) * usableW);
+  const colX = (i: number) => margin + colWidths.slice(0, i).reduce((a, b) => a + b, 0);
   const rowH = 7;
   const today = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
@@ -90,7 +95,7 @@ export async function exportRowsPdf(
     try { logo = await imageAssetToPng(opts.brand.logoSrc); } catch { logo = null; }
   }
 
-  const clip = (text: string, width = colW) => {
+  const clip = (text: string, width: number) => {
     let t = text;
     while (t.length > 3 && doc.getTextWidth(t) > width - 3) t = t.slice(0, -1);
     return t === text ? t : t.slice(0, -1) + "…";
@@ -141,7 +146,7 @@ export async function exportRowsPdf(
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(60);
-    headers.forEach((h, i) => doc.text(clip(h), margin + i * colW + 1.5, y + 4.8));
+    headers.forEach((h, i) => doc.text(clip(h, colWidths[i]), colX(i) + 1.5, y + 4.8));
     y += rowH;
   };
 
@@ -164,7 +169,7 @@ export async function exportRowsPdf(
     doc.setFontSize(8);
     headers.forEach((h, i) => {
       const v = row[h];
-      doc.text(clip(v == null ? "" : String(v)), margin + i * colW + 1.5, y + 4.8);
+      doc.text(clip(v == null ? "" : String(v), colWidths[i]), colX(i) + 1.5, y + 4.8);
     });
     y += rowH;
   });
