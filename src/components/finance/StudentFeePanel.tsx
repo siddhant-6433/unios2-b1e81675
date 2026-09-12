@@ -22,7 +22,7 @@ import { FeeLedgerAuditDialog } from "./FeeLedgerAuditDialog";
 import { RowConcessionPopover } from "./RowConcessionPopover";
 import { PaidBreakdownPopover } from "./PaidBreakdownPopover";
 import { AbvmuDepositPanel } from "./AbvmuDepositPanel";
-import { AbvmuInlineControls } from "./AbvmuInlineControls";
+import { AbvmuInlineControls, GnmDepositNotApplicableBanner } from "./AbvmuInlineControls";
 import { useAbvmuDeposit } from "./useAbvmuDeposit";
 import type { FeeAllocation } from "./FeeHeadAllocationField";
 import { feeTermLabel, feeTermGroupLabel, ONE_TIME_TERMS, ONE_TIME_GROUP, oneTimeRank } from "@/lib/feeTermLabels";
@@ -779,9 +779,13 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       )}
 
       {/* ABVMU deposit challan — cashier can submit/track on the candidate's
-          behalf (BPT/BMRIT/B.Sc Nursing carry a seat-reservation deposit).
-          Self-hides when the course has no deposit or the student has no lead. */}
-      {student?.lead_id && !abvmuInlineActive && (
+          behalf (BPT/BMRIT/B.Sc Nursing/GNM carry a seat-reservation deposit).
+          Self-hides when the course has no deposit or the student has no lead.
+          GNM direct admits can mark it not-applicable so the amount stays in Year 1. */}
+      {student?.lead_id && abvmu.notApplicable && (
+        <GnmDepositNotApplicableBanner abvmu={abvmu} />
+      )}
+      {student?.lead_id && !abvmuInlineActive && !abvmu.notApplicable && (
         <AbvmuDepositPanel leadId={student.lead_id} onChanged={onRefresh} />
       )}
 

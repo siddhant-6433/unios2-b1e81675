@@ -19,7 +19,7 @@ type Abvmu = ReturnType<typeof useAbvmuDeposit>;
  * when the course has no deposit configured.
  */
 export function AbvmuInlineControls({ abvmu }: { abvmu: Abvmu }) {
-  const { depositAmount, loading, openClaim, rejected, settledClaim, canSettle, viewChallan } = abvmu;
+  const { depositAmount, loading, openClaim, rejected, settledClaim, canSettle, viewChallan, challanOptional } = abvmu;
 
   const [open, setOpen] = useState(false); // record-challan (submit) form
   const [challanNo, setChallanNo] = useState("");
@@ -35,6 +35,10 @@ export function AbvmuInlineControls({ abvmu }: { abvmu: Abvmu }) {
   const [settleNotes, setSettleNotes] = useState("");
   const [settling, setSettling] = useState(false);
   const [settleError, setSettleError] = useState<string | null>(null);
+
+  const [naOpen, setNaOpen] = useState(false);
+  const [naSubmitting, setNaSubmitting] = useState(false);
+  const [naError, setNaError] = useState<string | null>(null);
 
   if (loading || depositAmount <= 0) return null;
 
@@ -57,6 +61,16 @@ export function AbvmuInlineControls({ abvmu }: { abvmu: Abvmu }) {
     } catch (e: any) {
       setSettleError(e?.message || "Could not settle ABVMU deposit claim");
     } finally { setSettling(false); }
+  };
+
+  const doMarkNotApplicable = async () => {
+    setNaSubmitting(true); setNaError(null);
+    try {
+      await abvmu.setDepositNotApplicable(true);
+      setNaOpen(false);
+    } catch (e: any) {
+      setNaError(e?.message || "Could not mark university deposit not applicable");
+    } finally { setNaSubmitting(false); }
   };
 
   const infoPill = (icon: JSX.Element, tip: string) => (
@@ -137,10 +151,19 @@ export function AbvmuInlineControls({ abvmu }: { abvmu: Abvmu }) {
             {!open && (
               <button
                 type="button"
-                onClick={() => setOpen(true)}
+                onClick={() => { setOpen(true); setNaOpen(false); }}
                 className="inline-flex items-center gap-1 text-info hover:underline"
               >
                 <Plus className="h-3 w-3" /> Record ABVMU challan
+              </button>
+            )}
+            {challanOptional && !open && !naOpen && (
+              <button
+                type="button"
+                onClick={() => { setNaOpen(true); setOpen(false); }}
+                className="inline-flex items-center gap-1 text-muted-foreground hover:underline"
+              >
+                Not applicable (no counselling)
               </button>
             )}
           </>
@@ -180,7 +203,24 @@ export function AbvmuInlineControls({ abvmu }: { abvmu: Abvmu }) {
         </div>
       )}
 
-      {/* Record-challan (submit) form — collapsed until "Record ABVMU challan" is pressed. */}
+      {/* GNM direct admit: fold the university deposit into Year-1 college tuition. */}
+      {naOpen && challanOptional && !openClaim && !settledClaim && (
+        <div className="mt-2 space-y-2 rounded-lg border border-border bg-background/60 p-2.5">
+          <p className="text-[11px] text-muted-foreground">
+            Direct admission without counselling. {fmt(depositAmount)} will be collected as part of
+            Year 1 tuition instead of a separate university challan.
+          </p>
+          {naError && <p className="text-xs text-destructive">{naError}</p>}
+          <div className="flex gap-2">
+            <Button type="button" size="sm" className="h-7 text-xs gap-2" disabled={naSubmitting} onClick={doMarkNotApplicable}>
+              {naSubmitting ? <><ButtonOrb state="composing" /> Saving…</> : "Include in Year 1 fee"}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" disabled={naSubmitting} onClick={() => { setNaOpen(false); setNaError(null); }}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
       {open && !openClaim && !settledClaim && (
         <div className="mt-2 space-y-2 rounded-lg border border-border bg-background/60 p-2.5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -212,6 +252,36 @@ export function AbvmuInlineControls({ abvmu }: { abvmu: Abvmu }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Shown on the student fee tab after GNM is marked direct-admit / no counselling. */
+export function GnmDepositNotApplicableBanner({ abvmu }: { abvmu: Abvmu }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const undo = async () => {
+    setBusy(true); setError(null);
+    try {
+      await abvmu.setDepositNotApplicable(false);
+    } catch (e: any) {
+      setError(e?.message || "Could not restore the university deposit line");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="rounded-xl border border-border bg-muted/40 px-4 py-3">
+      <p className="text-sm text-foreground">
+        University deposit not applicable (direct admission / no counselling). The amount is part of Year 1 tuition.
+      </p>
+      <button
+        type="button"
+        onClick={undo}
+        disabled={busy}
+        className="mt-1 text-xs text-info hover:underline disabled:opacity-50"
+      >
+        {busy ? "Restoring…" : "Record challan instead"}
+      </button>
+      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
     </div>
   );
 }
