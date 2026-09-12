@@ -76,7 +76,7 @@ describe("normalizeCampaignPhoneDigits", () => {
 
 describe("add_lead_list_members migration", () => {
   it("installs a server helper that skips duplicates and contact/lead mismatches", () => {
-    const migration = readFileSync("supabase/migrations/20260911075105_add_lead_list_members_from_ids.sql", "utf8");
+    const migration = readFileSync("supabase/migrations/20260912070739_add_lead_list_members_from_ids.sql", "utf8");
     expect(migration).toContain("CREATE OR REPLACE FUNCTION public.add_lead_list_members");
     expect(migration).toContain("JOIN public.leads");
     expect(migration).toContain("JOIN public.marketing_contacts");
