@@ -40,6 +40,9 @@ interface LeadPayment {
   receipt_url: string | null;
   proof_url: string | null;
   waiver_reason: string | null;
+  lead_id?: string | null;
+  student_id?: string | null;
+  notes?: string | null;
 }
 
 interface LedgerRow {
@@ -162,7 +165,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
       const queries: any[] = [];
       if (lid) {
         queries.push(supabase.from("lead_payments")
-          .select("id, receipt_no, type, amount, concession_amount, payment_mode, transaction_ref, status, payment_date, created_at, receipt_url, proof_url, waiver_reason")
+          .select("id, receipt_no, type, amount, concession_amount, payment_mode, transaction_ref, status, payment_date, created_at, receipt_url, proof_url, waiver_reason, lead_id, student_id, notes")
           .eq("lead_id", lid).order("created_at", { ascending: false }));
       }
       if (sid) {
@@ -681,6 +684,10 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
             open={!!editPayment}
             onOpenChange={(v) => { if (!v) setEditPayment(null); }}
             payment={editPayment}
+            studentId={resolvedStudentId}
+            leadId={resolvedLeadId}
+            fees={ledger}
+            feeMeta={feeMeta}
             onSaved={() => setInternalRefresh(n => n + 1)}
           />
           <PaymentAuditDialog
