@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
       const { data: stRow } = await admin.from("students").select("name").eq("id", pl.student_id).single();
       const validTill = pl.expires_at
         ? new Date(pl.expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
-        : "—";
+        : "the fee is paid";
 
       // Send via WA API
       const phoneStr = phone.length === 10 ? `91${phone}` : phone;
@@ -126,9 +126,15 @@ Deno.serve(async (req) => {
     const feeTerm = parsed.fee_term ? String(parsed.fee_term) : null;
     const purposeLabel = parsed.purpose_label ? String(parsed.purpose_label).slice(0, 60) : "Fee due";
     const dryRun = parsed.dry_run === true;
-    const expiresDays = Number.isFinite(Number(parsed.expires_days))
-      ? Math.max(1, Math.min(365, Math.round(Number(parsed.expires_days))))
-      : 7;
+    // expires_days=0 or never_expires=true → payment_links.expires_at stays null.
+    // pay-link only expires a row when expires_at is in the past, so a null
+    // expiry keeps the link active until the ledger is paid.
+    const neverExpires = parsed.never_expires === true || Number(parsed.expires_days) === 0;
+    const expiresDays = neverExpires
+      ? 0
+      : Number.isFinite(Number(parsed.expires_days))
+        ? Math.max(1, Math.min(365, Math.round(Number(parsed.expires_days))))
+        : 7;
 
     if (!byStudentIds) {
       if (!courseIds.length && !batchId) {
@@ -233,7 +239,7 @@ Deno.serve(async (req) => {
           : { course_ids: courseIds, session_id: sessionId, campus_id: campusId, batch_id: batchId },
         fee_term: byStudentIds ? "all_dues" : feeTerm,
         purpose_label: purposeLabel,
-        expires_at: new Date(Date.now() + expiresDays * 86400000).toISOString(),
+        expires_at: neverExpires ? null : new Date(Date.now() + expiresDays * 86400000).toISOString(),
         total: targets.length,
         status: "sending",
       })
@@ -258,7 +264,7 @@ Deno.serve(async (req) => {
       return json({ campaign_id: campaign.id, total: 0, sent: 0, failed: 0, results: [] });
     }
 
-    const expiresAt = new Date(Date.now() + expiresDays * 86400000).toISOString();
+    const expiresAt = neverExpires ? null : new Date(Date.now() + expiresDays * 86400000).toISOString();
     const { data: linkRows, error: linkErr } = await admin
       .from("payment_links")
       .insert(targets.map((s: any) => ({
@@ -283,8 +289,10 @@ Deno.serve(async (req) => {
       linkRows.map((r: any) => [r.student_id, { id: r.id, token: r.token }]),
     );
 
-    const validTill = new Date(Date.now() + expiresDays * 86400000)
-      .toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+    const validTill = neverExpires
+      ? "the fee is paid"
+      : new Date(Date.now() + expiresDays * 86400000)
+        .toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
 
     // Send WhatsApp SERIALLY with a small pace. whatsapp-send is a nested edge
     // call, so it draws from this execution's trace budget — one call per student,
