@@ -58,6 +58,13 @@ export function campaignPhoneDigits(phone: string): string {
   return phone.replace(/\D/g, "");
 }
 
+/** Collapse +91 / 91-prefix variants so the same person is one conversation. */
+export function normalizeCampaignPhoneDigits(phone: string): string {
+  const digits = campaignPhoneDigits(phone);
+  if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);
+  return digits;
+}
+
 /** Recipient phones and conversation phones may differ by 91-prefix / punctuation. */
 export function campaignPhoneLookupValues(phone: string): string[] {
   const digits = campaignPhoneDigits(phone);

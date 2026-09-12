@@ -47,7 +47,9 @@ import {
   conversationMatchesEngagedPhones,
   engagedPhoneDigitSet,
   fetchEngagedCampaignPhones,
+  normalizeCampaignPhoneDigits,
 } from "@/lib/campaignEngaged";
+import { uniqueLeadIds } from "@/lib/leadListMembers";
 import {
   buildTemplateParams,
   loadWhatsAppTemplateCatalog,
@@ -1539,13 +1541,22 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       if (error) throw error;
       collected.push(...((data || []) as any[]).map(withConversationDefaults));
     }
+    // Engaged lookup expands 91-prefix variants, so the same person often
+    // lands twice (98765… and 9198765…). Keep the latest thread per
+    // normalised phone + business number so Create List does not insert
+    // duplicate lead_ids (that 23505's the whole member chunk to 0).
     const seen = new Set<string>();
-    return collected.filter((conversation) => {
-      const key = conversationIdentityKey(conversation);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    return [...collected]
+      .sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime())
+      .filter((conversation) => {
+        const digits = normalizeCampaignPhoneDigits(conversation.phone);
+        const key = digits
+          ? `${digits}:${conversationBusinessKey(conversation) || ""}`
+          : conversationIdentityKey(conversation);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
   };
 
   // Fetch the first conversation page only. Additional pages load on scroll so
@@ -3335,7 +3346,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 />
                 <button
                   onClick={() => {
-                    const ids = filtered.map(c => c.lead_id).filter(Boolean) as string[];
+                    const ids = uniqueLeadIds(filtered.map(c => c.lead_id));
                     if (ids.length === 0) {
                       toast({ title: "No leads", description: "No leads in the current view to assign.", variant: "destructive" });
                       return;
@@ -3351,7 +3362,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                 </button>
                 <button
                   onClick={() => {
-                    const ids = filtered.map(c => c.lead_id).filter(Boolean) as string[];
+                    const ids = uniqueLeadIds(filtered.map(c => c.lead_id));
                     if (ids.length === 0) {
                       toast({ title: "No leads", description: "No leads in the current view to add to a list.", variant: "destructive" });
                       return;

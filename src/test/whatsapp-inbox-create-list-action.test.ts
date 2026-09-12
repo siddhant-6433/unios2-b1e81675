@@ -13,26 +13,22 @@ describe("WhatsApp inbox Create List action", () => {
     expect(inbox).toContain("setAddToListLeadIds(ids)");
   });
 
-  it("collects lead ids from the filtered view, same as Bulk Assign", () => {
-    // Both actions map the filtered conversations to lead ids.
-    expect(inbox).toContain("filtered.map(c => c.lead_id).filter(Boolean) as string[]");
+  it("collects unique lead ids from the filtered view, same as Bulk Assign", () => {
+    // Engaged inbox expands 91-prefix phone variants into separate chats that
+    // often share a lead_id. Unique first so the join insert cannot 23505.
+    expect(inbox).toContain("uniqueLeadIds(filtered.map(c => c.lead_id))");
     expect(inbox).toContain("<AddToListDialog");
+    expect(inbox).toContain("normalizeCampaignPhoneDigits");
   });
 });
 
 describe("AddToListDialog", () => {
-  it("creates a lead_lists row and links members via the join table", () => {
+  it("creates a lead_lists row then adds members via the resilient helper", () => {
     expect(dialog).toContain('.from("lead_lists" as any)');
-    expect(dialog).toContain('.from("lead_list_members" as any)');
     expect(dialog).toContain('source: "manual"');
-  });
-
-  it("uses a plain chunked insert (partial unique index is not an upsert target)", () => {
-    // See Admissions.tsx:1148-1157 / migration 20260830053655. A plain insert
-    // on a brand-new list is correct; an onConflict target would 400.
-    expect(dialog).toContain(".insert(members.slice(i, i + 500))");
+    expect(dialog).toContain('supabase.rpc("add_lead_list_members" as any');
+    expect(dialog).toContain("insertLeadListMembers");
     expect(dialog).not.toContain('onConflict: "list_id,lead_id"');
-    expect(dialog).toContain("i += 500");
   });
 
   it("never writes leads directly when grouping — ownership is untouched", () => {
@@ -40,11 +36,14 @@ describe("AddToListDialog", () => {
     // opt-in assign path may change ownership, and only via the round-robin RPC.
     expect(dialog).not.toContain('.from("leads")');
     expect(dialog).not.toContain('.update(');
+    expect(dialog).toContain("uniqueLeadIds");
   });
 
   it("optionally hands the list to counsellors as a Cloud Dialer call list", () => {
     expect(dialog).toContain('supabase.rpc("assign_lead_list_round_robin" as any');
     expect(dialog).toContain("assignAfterCreate");
     expect(dialog).toContain("_counsellor_ids: assignCounsellorIds");
+    expect(dialog).toContain("_include_terminal: false");
+    expect(dialog).toContain('supabase.rpc("assignable_counsellors" as any');
   });
 });
