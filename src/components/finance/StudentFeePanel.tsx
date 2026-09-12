@@ -32,6 +32,7 @@ import {
   type CourseChange,
 } from "@/lib/receiptCourseMigration";
 import { reviseStudentReceiptPdfs } from "@/lib/reviseStudentReceipts";
+import { formatPersonName } from "@/lib/personName";
 import { buildYear1LumpSumOffer } from "@/lib/year1LumpSumWaiver";
 import { Year1LumpSumInfoBanner } from "./Year1LumpSumBanner";
 
@@ -1274,7 +1275,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       {canRefund && student?.id && (
         <RefundDialog
           studentId={student.id}
-          studentName={student.name}
+          studentName={formatPersonName(student.name)}
           open={refundOpen}
           onOpenChange={setRefundOpen}
           onDone={() => { fetchRefunds(); fetchFees(); onRefresh?.(); }}

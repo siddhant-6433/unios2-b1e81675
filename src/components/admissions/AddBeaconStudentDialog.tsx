@@ -6,6 +6,7 @@ import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { UserPlus, School, Users, Banknote, ChevronRight, ChevronLeft } from "lucide-react";
+import { formatPersonName, formatPersonNameOrNull } from "@/lib/personName";
 
 interface Course { id: string; name: string; code: string; }
 interface Campus { id: string; name: string; }
@@ -95,7 +96,7 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
       : `BSAV-${Date.now().toString(36).toUpperCase()}`;
 
     const { data: inserted, error } = await supabase.from("students").insert({
-      name: form.name.trim(),
+      name: formatPersonName(form.name),
       dob: form.dob || null,
       gender: form.gender ? form.gender.toLowerCase() : null,
       course_id: form.course_id,
@@ -111,11 +112,11 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
       transport_zone: form.transport_zone || null,
       hostel_type: form.hostel_type || null,
       school_admission_no: form.school_admission_no.trim() || null,
-      father_name: form.father_name.trim() || null,
+      father_name: formatPersonNameOrNull(form.father_name),
       father_phone: form.father_phone.trim() || null,
-      mother_name: form.mother_name.trim() || null,
+      mother_name: formatPersonNameOrNull(form.mother_name),
       mother_phone: form.mother_phone.trim() || null,
-      guardian_name: form.father_name.trim() || null,
+      guardian_name: formatPersonNameOrNull(form.father_name),
       guardian_phone: form.father_phone.trim() || null,
       fee_structure_version: form.fee_version,
       status: "active" as any,

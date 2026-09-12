@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
 import { normalizeStudentImportDate, resolveStudentImportAdmissionDate } from "@/lib/studentImportDate";
+import { formatPersonName, formatPersonNameOrNull } from "@/lib/personName";
 import { Upload, FileText, CheckCircle, XCircle, Download, AlertTriangle, Users } from "lucide-react";
 
 interface Course    { id: string; name: string; code: string; }
@@ -532,10 +533,10 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
 
     for (let i = 0; i < valid.length; i += 50) {
       const batch = valid.slice(i, i + 50).map((r, j) => ({
-        name: r.name,
-        first_name: r.first_name || null,
-        middle_name: r.middle_name || null,
-        last_name: r.last_name || null,
+        name: formatPersonName(r.name),
+        first_name: formatPersonNameOrNull(r.first_name),
+        middle_name: formatPersonNameOrNull(r.middle_name),
+        last_name: formatPersonNameOrNull(r.last_name),
         dob:  r.dob  || null,
         gender: r.gender || null,
         course_id: r.course_id,
@@ -553,19 +554,19 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
           : `IMP-${Date.now().toString(36).toUpperCase()}-${i + j}`,
         section: r.section || null,
         class_roll_no: r.class_roll_no || null,
-        father_name:  r.father_name  || null,
+        father_name:  formatPersonNameOrNull(r.father_name),
         father_phone: r.father_phone || null,
         father_email: r.father_email || null,
         father_occupation: r.father_occupation || null,
         father_qualification: r.father_qualification || null,
         father_income: r.father_income || null,
         father_aadhar: r.father_aadhar || null,
-        mother_name:  r.mother_name  || null,
+        mother_name:  formatPersonNameOrNull(r.mother_name),
         mother_phone: r.mother_phone || null,
         mother_email: r.mother_email || null,
         mother_occupation: r.mother_occupation || null,
         mother_aadhar: r.mother_aadhar || null,
-        guardian_name:  r.guardian_name || r.father_name || null,
+        guardian_name:  formatPersonNameOrNull(r.guardian_name || r.father_name),
         guardian_phone: r.guardian_phone || r.father_phone || r.mother_phone || null,
         address: r.address || null,
         city: r.city || null,

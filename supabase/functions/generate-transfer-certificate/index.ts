@@ -12,6 +12,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PDFDocument, PDFFont, PDFImage, PDFPage, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
 import { uploadToR2 } from "../_shared/r2.ts";
+import { formatPersonName } from "../_shared/personName.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -182,9 +183,9 @@ Deno.serve(async (req) => {
     const dobFig = fmtDate(dob);
     const dobWords = v("dobWords") || dateInWords(dob);
     const fields: [string, string][] = [
-      ["Name of the Pupil", v("name") || student?.name || ""],
-      ["Mother's Name", v("motherName")],
-      ["Father's / Guardian's Name", v("fatherName")],
+      ["Name of the Pupil", formatPersonName(v("name") || student?.name) || ""],
+      ["Mother's Name", formatPersonName(v("motherName"))],
+      ["Father's / Guardian's Name", formatPersonName(v("fatherName"))],
       ["Nationality", v("nationality")],
       ["Whether belongs to SC / ST / OBC", v("category")],
       ["Date of first admission in the school with class", v("firstAdmissionDateClass")],

@@ -22,6 +22,7 @@ import { usePermissions } from "@/contexts/PermissionContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { exportRowsCsv } from "@/lib/xlsxExport";
 import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
+import { formatPersonName } from "@/lib/personName";
 
 interface StudentRow {
   id: string;
@@ -493,7 +494,7 @@ const Students = () => {
       exportRowsCsv(filtered.map((student) => ({
         "Admission No": student.admission_no || "",
         "Pre Admission No": student.pre_admission_no || "",
-        Name: student.name,
+        Name: formatPersonName(student.name),
         Status: student.status,
         Phone: student.phone || "",
         "Student Email": student.student_email || student.email || "",
@@ -509,11 +510,11 @@ const Students = () => {
         Section: getSectionLabel(student) || student.section || "",
         "Admission Date": student.admission_date || "",
         "Joining Academic Year": student.joining_academic_year || "",
-        "Father Name": student.father_name || "",
+        "Father Name": formatPersonName(student.father_name) || "",
         "Father Phone": student.father_phone || "",
-        "Mother Name": student.mother_name || "",
+        "Mother Name": formatPersonName(student.mother_name) || "",
         "Mother Phone": student.mother_phone || "",
-        "Guardian Name": student.guardian_name || "",
+        "Guardian Name": formatPersonName(student.guardian_name) || "",
         "Guardian Phone": student.guardian_phone || "",
         Address: [student.address, student.city, student.state, student.pincode].filter(Boolean).join(", "),
         "Photo URL": student.photo_url || "",
@@ -706,14 +707,14 @@ const Students = () => {
               <Link key={student.id} to={`/students/${displayNo(student)}`}
                 className="flex items-center gap-4 p-4 hover:bg-muted/30 transition-colors group">
                 {student.photo_url ? (
-                  <img src={student.photo_url} alt={student.name} className="h-10 w-10 rounded-xl border border-border object-cover shrink-0" />
+                  <img src={student.photo_url} alt={formatPersonName(student.name)} className="h-10 w-10 rounded-xl border border-border object-cover shrink-0" />
                 ) : (
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-sm font-bold text-primary shrink-0">
                     {initialsForName(student.name)}
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground">{student.name}</p>
+                  <p className="text-sm font-medium text-foreground">{formatPersonName(student.name)}</p>
                   <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-0.5 text-[12px] text-muted-foreground">
                     <span className="font-mono">{displayNo(student)}</span>
                     {isSchoolStudent(student) ? (

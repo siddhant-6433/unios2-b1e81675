@@ -6,6 +6,7 @@ import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Upload, FileText, CheckCircle, XCircle, Download, AlertTriangle, School } from "lucide-react";
+import { formatPersonName, formatPersonNameOrNull } from "@/lib/personName";
 
 interface Course { id: string; name: string; code: string; }
 interface Campus { id: string; name: string; }
@@ -207,7 +208,7 @@ export function BulkBeaconStudentImportDialog({ open, onOpenChange, onSuccess }:
 
     for (let i = 0; i < valid.length; i += 50) {
       const batch = valid.slice(i, i + 50).map(r => ({
-        name: r.name,
+        name: formatPersonName(r.name),
         dob: r.dob || null,
         gender: r.gender || null,
         course_id: r.course_id,
@@ -217,11 +218,11 @@ export function BulkBeaconStudentImportDialog({ open, onOpenChange, onSuccess }:
         school_admission_no: r.admission_no || null,
         pre_admission_no: r.admission_no ? null : `BSAV-${Date.now().toString(36).toUpperCase()}-${i}`,
         section: r.section || null,
-        father_name: r.father_name || null,
+        father_name: formatPersonNameOrNull(r.father_name),
         father_phone: r.father_phone || null,
-        mother_name: r.mother_name || null,
+        mother_name: formatPersonNameOrNull(r.mother_name),
         mother_phone: r.mother_phone || null,
-        guardian_name: r.father_name || null,
+        guardian_name: formatPersonNameOrNull(r.father_name),
         guardian_phone: r.father_phone || null,
         fee_structure_version: r.fee_version,
         status: "active",

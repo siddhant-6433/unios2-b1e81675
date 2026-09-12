@@ -14,6 +14,7 @@ import {
   receiptCourseMigrationNote,
   resolveReceiptCourseName,
 } from "../_shared/receiptCourseMigration.ts";
+import { formatPersonName } from "../_shared/personName.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -629,7 +630,7 @@ Deno.serve(async (req) => {
     }
 
     const rows: [string, string][] = [
-      ["Name",  app?.full_name || lead?.name || stu?.name || "—"],
+      ["Name",  formatPersonName(app?.full_name || lead?.name || stu?.name) || "—"],
       ["Phone", app?.phone || lead?.phone || stu?.phone || "—"],
     ];
     if (app?.email || lead?.email || stu?.email) rows.push(["Email", app?.email || lead?.email || stu?.email]);

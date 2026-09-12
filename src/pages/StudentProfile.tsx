@@ -25,6 +25,7 @@ import { TransferCertificateSection } from "@/components/students/TransferCertif
 import { findApplicationPhotoDoc, getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 import { isSchoolSessionYear } from "@/lib/sessionYears";
 import { reviseStudentReceiptPdfs } from "@/lib/reviseStudentReceipts";
+import { formatPersonName, isPersonNameField } from "@/lib/personName";
 
 interface StudentDocument {
   id: string;
@@ -1125,8 +1126,9 @@ const StudentProfile = () => {
 
     EDIT_FIELDS.forEach((field) => {
       const previous = valueForAudit(student[field.key as keyof StudentRecord]).trim();
-      const next = editForm[field.key].trim();
-      if (previous !== next) {
+      const nextRaw = editForm[field.key].trim();
+      if (previous !== nextRaw) {
+        const next = isPersonNameField(field.key) ? formatPersonName(nextRaw) : nextRaw;
         changes[field.key] = next || null;
         auditEvents.push({
           event_type: "profile_update",
@@ -1221,7 +1223,7 @@ const StudentProfile = () => {
         <div className="flex items-center gap-4">
           <div className="relative shrink-0">
             {profilePhotoUrl ? (
-              <img src={profilePhotoUrl} alt={student.name} className="h-16 w-16 rounded-2xl border border-border object-cover" />
+              <img src={profilePhotoUrl} alt={formatPersonName(student.name)} className="h-16 w-16 rounded-2xl border border-border object-cover" />
             ) : (
               <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-xl font-bold text-primary">
                 {initials}
@@ -1250,7 +1252,7 @@ const StudentProfile = () => {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-foreground">{student.name}</h1>
+              <h1 className="text-xl font-bold text-foreground">{formatPersonName(student.name)}</h1>
               {(student as { refunded_at?: string | null }).refunded_at ? (
                 <span className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive">
                   <Banknote className="h-3 w-3" /> Refunded
@@ -1452,10 +1454,10 @@ const StudentProfile = () => {
             <div className="rounded-xl bg-card card-shadow p-5 space-y-4 md:col-span-2">
               <h3 className="text-sm font-semibold text-foreground">Personal Information</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-y-3 gap-x-4 text-sm">
-                <Detail label="Full Name" value={student.name || "—"} />
-                <Detail label="First Name" value={student.first_name || "—"} />
-                <Detail label="Middle Name" value={student.middle_name || "—"} />
-                <Detail label="Last Name" value={student.last_name || "—"} />
+                <Detail label="Full Name" value={formatPersonName(student.name) || "—"} />
+                <Detail label="First Name" value={formatPersonName(student.first_name) || "—"} />
+                <Detail label="Middle Name" value={formatPersonName(student.middle_name) || "—"} />
+                <Detail label="Last Name" value={formatPersonName(student.last_name) || "—"} />
                 <Detail label="Date of Birth" value={fmtDate(student.dob)} />
                 <Detail label="Gender" value={student.gender || "—"} />
                 <Detail label="Blood Group" value={student.blood_group || "—"} />
@@ -1507,7 +1509,7 @@ const StudentProfile = () => {
             <div className="rounded-xl bg-card card-shadow p-5 space-y-4">
               <h3 className="text-sm font-semibold text-foreground">Father's Information</h3>
               <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
-                <Detail label="Father Name" value={student.father_name || "—"} />
+                <Detail label="Father Name" value={formatPersonName(student.father_name) || "—"} />
                 <Detail label="Father Phone" value={student.father_phone || "—"} />
                 <Detail label="Father WhatsApp" value={student.father_whatsapp || "—"} />
                 <Detail label="Father Email" value={student.father_email || "—"} />
@@ -1536,7 +1538,7 @@ const StudentProfile = () => {
             <div className="rounded-xl bg-card card-shadow p-5 space-y-4">
               <h3 className="text-sm font-semibold text-foreground">Mother's Information</h3>
               <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
-                <Detail label="Mother Name" value={student.mother_name || "—"} />
+                <Detail label="Mother Name" value={formatPersonName(student.mother_name) || "—"} />
                 <Detail label="Mother Phone" value={student.mother_phone || "—"} />
                 <Detail label="Mother WhatsApp" value={student.mother_whatsapp || "—"} />
                 <Detail label="Mother Email" value={student.mother_email || "—"} />
@@ -1562,7 +1564,7 @@ const StudentProfile = () => {
             <div className="rounded-xl bg-card card-shadow p-5 space-y-4 md:col-span-2">
               <h3 className="text-sm font-semibold text-foreground">Guardian Information</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-y-3 gap-x-4 text-sm">
-                <Detail label="Guardian Name" value={student.guardian_name || "—"} />
+                <Detail label="Guardian Name" value={formatPersonName(student.guardian_name) || "—"} />
                 <Detail label="Guardian Phone" value={student.guardian_phone || "—"} />
               </div>
               {canRequestContactChange && (
@@ -1598,7 +1600,7 @@ const StudentProfile = () => {
                         <tr key={sib.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                           <td className="px-4 py-2.5">
                             <Link to={`/students/${sib.admission_no || sib.pre_admission_no}`} className="font-medium text-primary hover:underline">
-                              {sib.name}
+                              {formatPersonName(sib.name)}
                             </Link>
                           </td>
                           <td className="px-4 py-2.5 text-muted-foreground">{sib.courses?.name || "—"}</td>
@@ -2188,7 +2190,7 @@ const StudentProfile = () => {
       {canRefund && student?.id && (
         <RefundDialog
           studentId={student.id}
-          studentName={student.name}
+          studentName={formatPersonName(student.name)}
           open={refundOpen}
           onOpenChange={setRefundOpen}
           onDone={() => { fetchStudent(true); }}

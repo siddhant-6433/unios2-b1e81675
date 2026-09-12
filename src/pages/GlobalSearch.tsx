@@ -5,6 +5,7 @@ import { Search as SearchIcon, User, FileText, GraduationCap, Phone, Hash } from
 import { Card, CardContent } from "@/components/ui/card";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
+import { formatPersonName } from "@/lib/personName";
 
 interface SearchResult {
   type: "lead" | "student";
@@ -43,7 +44,7 @@ const GlobalSearch = () => {
 
     (leadsRes.data || []).forEach((l) => {
       allResults.push({
-        type: "lead", id: l.id, name: l.name, phone: l.phone,
+        type: "lead", id: l.id, name: formatPersonName(l.name), phone: l.phone,
         identifier: l.application_id || l.pre_admission_no || l.admission_no || undefined,
         identifierLabel: l.admission_no ? "AN" : l.pre_admission_no ? "PAN" : l.application_id ? "App" : undefined,
         stage: l.stage,
@@ -54,7 +55,7 @@ const GlobalSearch = () => {
       // Avoid duplicates if same person exists as lead and student
       if (!allResults.find(r => r.type === "student" && r.name === s.name && r.phone === s.phone)) {
         allResults.push({
-          type: "student", id: s.id, name: s.name, phone: s.phone || "",
+          type: "student", id: s.id, name: formatPersonName(s.name), phone: s.phone || "",
           identifier: s.admission_no || s.pre_admission_no || undefined,
           identifierLabel: s.admission_no ? "AN" : s.pre_admission_no ? "PAN" : undefined,
           status: s.status,

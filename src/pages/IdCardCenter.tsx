@@ -21,6 +21,7 @@ import { SelectField } from "@/components/ui/state-fields";
 import { whiteBgCutout } from "@/lib/whiteBgCutout";
 import { QRCodeSVG } from "qrcode.react";
 import { brandForStudentOwner, MIRAI_BRAND, NIMT_EDU_BRAND, type StudentBrand } from "@/lib/studentBranding";
+import { formatPersonName } from "@/lib/personName";
 import miraiLogoRed from "@/assets/mirai-logo-red.svg";
 import { PhotoDayAssigneesPanel } from "@/components/admin/PhotoDayAssigneesPanel";
 
@@ -341,7 +342,7 @@ const IdCardCenter = () => {
       return {
         id: student.id,
         type: "students",
-        name: student.name || "Unnamed student",
+        name: formatPersonName(student.name) || "Unnamed student",
         primaryNo: displayNo(student.admission_no, student.pre_admission_no),
         secondaryNo: student.admission_no && student.pre_admission_no ? student.pre_admission_no : "",
         subtitle: `${grade}${section}`,
@@ -355,9 +356,9 @@ const IdCardCenter = () => {
         photoProcessedUrl: student.photo_processed_url || null,
         extraLabel: "Batch",
         extraValue: batch,
-        fatherName: student.father_name || "-",
+        fatherName: formatPersonName(student.father_name) || "-",
         fatherPhone: student.father_phone || "-",
-        motherName: student.mother_name || "-",
+        motherName: formatPersonName(student.mother_name) || "-",
         motherPhone: student.mother_phone || "-",
         dob: student.dob || "",
         studentType,
