@@ -143,6 +143,7 @@ const FeeNotifications = () => {
     FALLBACK_FEE_TERMS.map((t) => ({ value: t, label: feeTermLabel(t) })),
   );
   const [expiryDate, setExpiryDate] = useState<string>(defaultExpiryDate());
+  const [neverExpires, setNeverExpires] = useState(false);
   const [purposeLabel, setPurposeLabel] = useState<string>("Fee due");
 
   const [previewing, setPreviewing] = useState(false);
@@ -328,7 +329,8 @@ const FeeNotifications = () => {
     ...(campusId ? { campus_id: campusId } : {}),
     ...(batchId ? { batch_id: batchId } : {}),
     fee_term: feeTerm,
-    expires_days: expiresDays(),
+    expires_days: neverExpires ? 0 : expiresDays(),
+    never_expires: neverExpires,
     purpose_label: purposeLabel.trim() || "Fee due",
     dry_run: dryRun,
   });
@@ -474,14 +476,24 @@ const FeeNotifications = () => {
             placeholder="All batches"
           />
 
-          <FieldShell label="Link valid until">
-            <Input
-              type="date"
-              value={expiryDate}
-              onChange={(e) => { setExpiryDate(e.target.value); setPreview(null); }}
-              min={new Date().toISOString().slice(0, 10)}
-            />
-          </FieldShell>
+          <div className="space-y-2">
+            <FieldShell label="Link valid until">
+              <Input
+                type="date"
+                value={expiryDate}
+                onChange={(e) => { setExpiryDate(e.target.value); setPreview(null); }}
+                min={new Date().toISOString().slice(0, 10)}
+                disabled={neverExpires}
+              />
+            </FieldShell>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Checkbox
+                checked={neverExpires}
+                onCheckedChange={(v) => { setNeverExpires(v === true); setPreview(null); }}
+              />
+              Keep link active indefinitely
+            </label>
+          </div>
 
           <div className="sm:col-span-2 lg:col-span-2">
             <FieldShell label="Message label">
@@ -786,7 +798,7 @@ const FeeNotifications = () => {
             <AlertDialogTitle>Send to {preview?.total ?? 0} students?</AlertDialogTitle>
             <AlertDialogDescription>
               Each student will receive a WhatsApp message with a personalised payment link for
-              their current due amount. This cannot be undone.
+              their current due amount{neverExpires ? ". Links stay active until the fee is paid" : ""}. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
