@@ -1,51 +1,71 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { callingReportByCounsellor, callingReportCalledCount, callingReportLastCallAt } from "@/lib/callingReportStats";
-import { callingReportPreviousCounsellors } from "@/lib/listAssignmentOwners";
+import {
+  callingReportByCounsellor,
+  callingReportCalledCount,
+  callingReportLastCallAt,
+  callingReportLatestPerLead,
+} from "@/lib/callingReportStats";
 import { readMigration } from "./readMigration";
 
 const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
 
 describe("calling report counsellor chips", () => {
-  it("lists every counsellor who appears on the assignment report, not just members.assigned_to", () => {
-    const stats = callingReportByCounsellor([
-      { assigned_to: "ashraf", assigned_to_name: "MD. Ashraf Ali", latest_call_at: null },
-      { assigned_to: "rahul", assigned_to_name: "Rahul Bhati", latest_call_at: "2026-09-10T09:19:00Z", latest_call_disposition: "answered" },
-      { assigned_to: "niharika", assigned_to_name: "Niharika Sharma", latest_call_at: "2026-09-10T10:22:00Z", latest_call_disposition: "answered" },
-      { assigned_to: "rahul", assigned_to_name: "Rahul Bhati", latest_call_at: null },
+  it("keeps the latest list assignment per lead so chips are this list's split", () => {
+    const latest = callingReportLatestPerLead([
+      {
+        lead_id: "l1",
+        assigned_to: "ashraf",
+        assigned_to_name: "MD. Ashraf Ali",
+        assigned_at: "2026-09-01T10:00:00Z",
+        latest_call_at: null,
+      },
+      {
+        lead_id: "l1",
+        assigned_to: "rahul",
+        assigned_to_name: "Rahul Bhati",
+        assigned_at: "2026-09-10T07:33:00Z",
+        latest_call_at: "2026-09-10T09:19:00Z",
+        latest_call_disposition: "answered",
+      },
+      {
+        lead_id: "l2",
+        assigned_to: "niharika",
+        assigned_to_name: "Niharika Sharma",
+        assigned_at: "2026-09-10T07:33:00Z",
+        latest_call_at: "2026-09-10T10:22:00Z",
+        latest_call_disposition: "answered",
+      },
+      {
+        lead_id: "l3",
+        assigned_to: "ashraf",
+        assigned_to_name: "MD. Ashraf Ali",
+        assigned_at: "2026-09-10T07:33:00Z",
+        latest_call_at: null,
+      },
     ]);
+    expect(latest).toHaveLength(3);
+    expect(latest.find((r) => r.lead_id === "l1")?.assigned_to).toBe("rahul");
+    const stats = callingReportByCounsellor(latest);
     expect(stats.map((s) => s.counsellor_name).sort()).toEqual([
       "MD. Ashraf Ali",
       "Niharika Sharma",
       "Rahul Bhati",
     ]);
-    expect(stats.find((s) => s.counsellor_id === "rahul")).toMatchObject({ total: 2, worked: 1, pending: 1 });
+    expect(stats.find((s) => s.counsellor_id === "rahul")).toMatchObject({ total: 1, worked: 1 });
     expect(stats.find((s) => s.counsellor_id === "ashraf")).toMatchObject({ total: 1, worked: 0, pending: 1 });
-    expect(callingReportCalledCount([
-      { lead_id: "l1", assigned_to: "rahul", assigned_to_name: "Rahul Bhati", latest_call_at: "2026-09-10T09:19:00Z" },
-      { lead_id: "l1", assigned_to: "rahul", assigned_to_name: "Rahul Bhati", latest_call_at: "2026-09-10T09:20:00Z" },
-      { lead_id: "l2", assigned_to: "niharika", assigned_to_name: "Niharika Sharma", latest_call_at: "2026-09-10T10:22:00Z" },
-    ])).toBe(2);
-    expect(callingReportLastCallAt([
-      { assigned_to: "rahul", assigned_to_name: "Rahul Bhati", latest_call_at: "2026-09-10T09:19:00Z" },
-      { assigned_to: "niharika", assigned_to_name: "Niharika Sharma", latest_call_at: "2026-09-10T10:22:00Z" },
-    ])).toBe(new Date("2026-09-10T10:22:00Z").toISOString());
-    expect(callingReportPreviousCounsellors([
-      { previous_counsellor_name: "Rahul Bhati" },
-      { previous_counsellor_name: "Rahul Bhati" },
-      { previous_counsellor_name: "MD. Ashraf Ali" },
-      { previous_counsellor_name: null },
-    ])).toEqual([
-      { name: "Rahul Bhati", count: 2 },
-      { name: "MD. Ashraf Ali", count: 1 },
-    ]);
+    expect(callingReportCalledCount(latest)).toBe(2);
+    expect(callingReportLastCallAt(latest)).toBe(new Date("2026-09-10T10:22:00Z").toISOString());
   });
 
-  it("builds the Calling Report chips from the assignment report rows", () => {
+  it("builds the Calling Report chips from this list's current assignees and filters the table", () => {
+    expect(leadLists).toContain("callingReportLatestPerLead");
     expect(leadLists).toContain("callingReportByCounsellor");
     expect(leadLists).toContain("reportCounsellorStats");
-    expect(leadLists).toContain("reportPreviousCounsellors");
-    expect(leadLists).toContain("callingReportPreviousCounsellors");
+    expect(leadLists).toContain("Assigned on this list");
+    expect(leadLists).toContain("r.assigned_to === reportCounsellorFilter");
+    expect(leadLists).not.toContain("callingReportPreviousCounsellors");
+    expect(leadLists).not.toContain("reportPreviousFilter");
   });
 
   it("attributes call_list_progress counsellor chips from list assignment history", () => {
@@ -55,5 +75,12 @@ describe("calling report counsellor chips", () => {
     expect(migration).toContain("latest_list_assignee");
     expect(migration).toContain("lead_assignment_history");
     expect(migration).toContain("COALESCE(la.assigned_to, m2.assigned_to)");
+  });
+
+  it("returns one calling-report row per lead from the latest list assignment", () => {
+    const migration = readMigration("calling_report_latest_list_assignment");
+    expect(migration).toContain("CREATE OR REPLACE FUNCTION public.get_lead_list_assignment_report");
+    expect(migration).toContain("DISTINCT ON (h.lead_id)");
+    expect(migration).toContain("ORDER BY h.lead_id, h.created_at DESC");
   });
 });
