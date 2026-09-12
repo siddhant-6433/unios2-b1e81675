@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 // Mirrors the DB predicate can_create_cash_receipt() so a cash receipt shows the
-// reason (outside 9 AM–6 PM, or the day is closed for the campus) up front,
-// instead of failing on the insert. The BEFORE INSERT trigger is the real gate;
-// this only fails open for UX, so a query hiccup never wrongly blocks a receipt.
+// reason (outside 9 AM–6 PM with no after-hours exception, or the day is closed
+// for the campus) up front, instead of failing on the insert. The BEFORE INSERT
+// trigger is the real gate; this only fails open for UX, so a query hiccup never
+// wrongly blocks a receipt.
 export function useCashReceiptGate(
   open: boolean,
   leadId: string | null | undefined,

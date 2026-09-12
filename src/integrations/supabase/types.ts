@@ -4634,6 +4634,45 @@ export type Database = {
           },
         ]
       }
+      cash_window_exceptions: {
+        Row: {
+          allowed_date: string
+          campus_id: string | null
+          granted_at: string
+          granted_by: string | null
+          id: string
+        }
+        Insert: {
+          allowed_date: string
+          campus_id?: string | null
+          granted_at?: string
+          granted_by?: string | null
+          id?: string
+        }
+        Update: {
+          allowed_date?: string
+          campus_id?: string | null
+          granted_at?: string
+          granted_by?: string | null
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cash_window_exceptions_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "campuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cash_window_exceptions_granted_by_fkey"
+            columns: ["granted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       class_merge_groups: {
         Row: {
           created_at: string
@@ -35516,6 +35555,14 @@ export type Database = {
         Args: { p_date_from?: string; p_date_to?: string }
         Returns: Json
       }
+      allow_after_hours_cash: {
+        Args: { _all?: boolean; _campus_ids?: string[]; _date?: string }
+        Returns: {
+          allowed_date: string
+          campus_id: string | null
+          campus_name: string | null
+        }[]
+      }
       application_branch_campus_id: {
         Args: { _course_selections: Json; _lead_id: string }
         Returns: string
@@ -37023,6 +37070,10 @@ export type Database = {
         Args: { _profile_id: string }
         Returns: boolean
       }
+      is_after_hours_cash_allowed: {
+        Args: { _campus_id?: string; _date?: string }
+        Returns: boolean
+      }
       is_bpt_or_bmrit_course: {
         Args: { p_course_id: string }
         Returns: boolean
@@ -37386,6 +37437,14 @@ export type Database = {
       library_user_has_any_assignment: {
         Args: { _action?: string; _user_id: string }
         Returns: boolean
+      }
+      list_after_hours_cash: {
+        Args: { _date?: string }
+        Returns: {
+          allowed_date: string
+          campus_id: string | null
+          campus_name: string | null
+        }[]
       }
       list_pending_an_generation: {
         Args: never
@@ -37958,6 +38017,14 @@ export type Database = {
       review_student_contact_change_request: {
         Args: { _decision: string; _notes?: string; _request_id: string }
         Returns: Json
+      }
+      revoke_after_hours_cash: {
+        Args: { _all?: boolean; _campus_ids?: string[]; _date?: string }
+        Returns: {
+          allowed_date: string
+          campus_id: string | null
+          campus_name: string | null
+        }[]
       }
       revoke_application_edit_unlock: {
         Args: { _application_id: string }

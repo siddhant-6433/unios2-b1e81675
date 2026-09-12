@@ -20,6 +20,7 @@ import { LateFeeConfigPanel } from "@/components/finance/LateFeeConfigPanel";
 import { PaymentAuditLog } from "@/components/finance/PaymentAuditLog";
 import { FeeDueDefaultReport } from "@/components/finance/FeeDueDefaultReport";
 import { DayCloserDialog } from "@/components/finance/DayCloserDialog";
+import { AfterHoursCashDialog } from "@/components/finance/AfterHoursCashDialog";
 import FeeCollections from "./FeeCollections";
 import { CashierConsole } from "@/components/finance/CashierConsole";
 import { CustomFeeHeadsPanel } from "@/components/finance/CustomFeeHeadsPanel";
@@ -74,6 +75,8 @@ const Finance = () => {
   const canCloseDay = isSuperAdmin || role === "accountant" || role === "office_admin";
   const [dayCloserOpen, setDayCloserOpen] = useState(false);
   const [dayClosed, setDayClosed] = useState(false);
+  const [afterHoursOpen, setAfterHoursOpen] = useState(false);
+  const [afterHoursOn, setAfterHoursOn] = useState(false);
   // Date range scopes the Receipts collection cards (collections are a flow);
   // Due/Overdue/Concession stay current snapshots. Defaults to today.
   const [preset, setPreset] = useState<DatePreset>("today");
@@ -118,11 +121,13 @@ const Finance = () => {
 
   const fetchAll = async () => {
     setLoading(true);
-    // Cash-desk closed state for the current campus scope, so the header can
-    // show "Day Closed" instead of an active Close Day button. Re-runs after a
-    // close (onClosed=fetchAll) and on campus change.
-    (supabase.rpc as any)("is_day_closed", { _campus_id: selectedCampusId ?? null })
+    const campusArg = selectedCampusId && selectedCampusId !== "all" ? selectedCampusId : null;
+    // Cash-desk closed / after-hours state for the current campus scope.
+    // Re-runs after a close or grant (onClosed/onChanged=fetchAll) and on campus change.
+    (supabase.rpc as any)("is_day_closed", { _campus_id: campusArg })
       .then(({ data }: { data: boolean | null }) => setDayClosed(!!data));
+    (supabase.rpc as any)("is_after_hours_cash_allowed", { _campus_id: campusArg })
+      .then(({ data }: { data: boolean | null }) => setAfterHoursOn(!!data));
     const [ledgerRes, paymentsRes, structRes, waiverRes, concessionRes] = await Promise.all([
       supabase.from("fee_ledger").select("*, students:student_id(name, admission_no, pre_admission_no, campus_id, course_id), fee_codes:fee_code_id(code, name, category)").order("due_date", { ascending: true }).limit(200),
       // v_all_payments unifies pre-admission lead_payments (token / application
@@ -215,6 +220,7 @@ const Finance = () => {
   return (
     <>
     {canCloseDay && <DayCloserDialog open={dayCloserOpen} onOpenChange={setDayCloserOpen} onClosed={fetchAll} />}
+    {isSuperAdmin && <AfterHoursCashDialog open={afterHoursOpen} onOpenChange={setAfterHoursOpen} onChanged={fetchAll} />}
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
@@ -225,6 +231,20 @@ const Finance = () => {
           {tab !== "refunds" && (tab === "ledger" || tab === "receipts") && (
             <Button variant="outline" className="gap-2" onClick={exportCsv}>
               <Download className="h-4 w-4" /> Export
+            </Button>
+          )}
+          {isSuperAdmin && (
+            <Button
+              variant="outline"
+              className={afterHoursOn
+                ? "gap-2 border-amber-300 bg-amber-50 text-amber-800 opacity-100 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+                : "gap-2"}
+              onClick={() => setAfterHoursOpen(true)}
+              title={afterHoursOn
+                ? "After-hours cash is allowed today for this campus"
+                : "Allow cash receipts outside 9 AM–6 PM on a specific date"}
+            >
+              <Clock className="h-4 w-4" /> {afterHoursOn ? "After hours on" : "After hours"}
             </Button>
           )}
           {canCloseDay && (
