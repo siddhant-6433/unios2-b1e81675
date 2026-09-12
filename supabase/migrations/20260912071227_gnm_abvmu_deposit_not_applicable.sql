@@ -1,3 +1,4 @@
+-- keep-migration-version: already recorded on production schema_migrations
 -- GNM university-deposit challan is optional. Direct admits (no counselling)
 -- do not pay UPSMF/ABVMU separately; the seat-reservation amount stays inside
 -- Year-1 college tuition. Counselling admits still record the challan.

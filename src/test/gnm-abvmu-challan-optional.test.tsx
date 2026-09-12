@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -6,10 +6,11 @@ import { AbvmuInlineControls } from "@/components/finance/AbvmuInlineControls";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { isGnmCourseName } from "@/lib/examRegistration";
 
-const migration = readFileSync(
-  "supabase/migrations/20260912054908_gnm_abvmu_deposit_not_applicable.sql",
-  "utf8",
+const migrationFile = readdirSync("supabase/migrations").find((f) =>
+  f.endsWith("_gnm_abvmu_deposit_not_applicable.sql"),
 );
+if (!migrationFile) throw new Error("GNM ABVMU not-applicable migration is missing");
+const migration = readFileSync(`supabase/migrations/${migrationFile}`, "utf8");
 const inline = readFileSync("src/components/finance/AbvmuInlineControls.tsx", "utf8");
 const panel = readFileSync("src/components/finance/StudentFeePanel.tsx", "utf8");
 const hook = readFileSync("src/components/finance/useAbvmuDeposit.ts", "utf8");
