@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { ListPlus } from "lucide-react";
+import { insertLeadListMembers, uniqueLeadIds } from "@/lib/leadListMembers";
 
 interface AddToListDialogProps {
   open: boolean;
@@ -49,22 +50,23 @@ export function AddToListDialog({ open, onOpenChange, leadIds, onSuccess }: AddT
     fetchCounsellors();
   }, [open]);
 
-  // Same role/profile shape as TransferLeadDialog.fetchCounsellors.
+  // Same RPC as LeadLists — assign_lead_list_round_robin only accepts the
+  // counsellor role, so mixing in admission heads / admins 400s the hand-off.
   const fetchCounsellors = async () => {
-    const { data: roleData } = await supabase
-      .from("user_roles")
-      .select("user_id")
-      .in("role", ["counsellor", "admission_head", "campus_admin", "super_admin"]);
-    if (roleData && roleData.length > 0) {
-      const userIds = roleData.map((r) => r.user_id);
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("id, display_name")
-        .in("user_id", userIds)
-        .eq("login_disabled", false);
-      setCounsellors(profiles || []);
+    const { data, error } = await supabase.rpc("assignable_counsellors" as any);
+    if (error) {
+      console.error("Could not load counsellors:", error);
+      setCounsellors([]);
+      return;
     }
+    const rows = Array.isArray(data) ? data : [];
+    setCounsellors(rows.map((item: any) => ({
+      id: item.id,
+      display_name: item.name || item.display_name || "Unnamed",
+    })));
   };
+
+  const uniqueCount = uniqueLeadIds(leadIds).length;
 
   const toggleCounsellor = (id: string) =>
     setAssignCounsellorIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -75,8 +77,10 @@ export function AddToListDialog({ open, onOpenChange, leadIds, onSuccess }: AddT
       toast({ title: "Name required", description: "Give the list a name first.", variant: "destructive" });
       return;
     }
-    if (leadIds.length === 0) {
-      toast({ title: "No leads to add", description: "The current view has no leads.", variant: "destructive" });
+
+    const targetIds = uniqueLeadIds(leadIds);
+    if (targetIds.length === 0) {
+      toast({ title: "No leads to add", description: "The current view has no CRM leads to put on a list.", variant: "destructive" });
       return;
     }
 
@@ -94,7 +98,7 @@ export function AddToListDialog({ open, onOpenChange, leadIds, onSuccess }: AddT
         .insert({
           name: listName,
           source: "manual",
-          description: `Saved from WhatsApp inbox — ${leadIds.length} lead${leadIds.length === 1 ? "" : "s"}`,
+          description: `Saved from WhatsApp inbox — ${targetIds.length} lead${targetIds.length === 1 ? "" : "s"}`,
           created_by: profileId,
         })
         .select("id, name")
@@ -108,24 +112,30 @@ export function AddToListDialog({ open, onOpenChange, leadIds, onSuccess }: AddT
 
       const listId = (list as any).id as string;
 
-      // Brand-new list — all ids are fresh, so a plain chunked insert is safe
-      // (the (list_id, lead_id) unique index is partial and can't be an upsert
-      // conflict target; see Admissions.tsx:1148-1157).
-      const members = leadIds.map((lead_id) => ({ list_id: listId, lead_id }));
-      let memberErrors = 0;
-      for (let i = 0; i < members.length; i += 500) {
-        const { error: memberErr } = await supabase
-          .from("lead_list_members" as any)
-          .insert(members.slice(i, i + 500));
-        if (memberErr) {
-          memberErrors++;
-          console.error("List member insert failed:", memberErr);
+      // Prefer the server helper (uniques + lead/contact split + skip bad ids).
+      // Fall back to the client insert if the RPC is not on this database yet.
+      let added = 0;
+      let memberErrorMessage = "";
+      const { data: rpcData, error: rpcErr } = await supabase.rpc("add_lead_list_members" as any, {
+        _list_id: listId,
+        _target_ids: targetIds,
+      });
+      if (!rpcErr) {
+        const payload = typeof rpcData === "string" ? JSON.parse(rpcData) : rpcData;
+        added = Number(payload?.added || 0);
+      } else {
+        try {
+          const result = await insertLeadListMembers(supabase, listId, targetIds);
+          added = result.added;
+          memberErrorMessage = result.error || rpcErr.message;
+        } catch (insertErr) {
+          memberErrorMessage = insertErr instanceof Error ? insertErr.message : rpcErr.message;
         }
       }
-      if (memberErrors > 0) {
+      if (added === 0) {
         toast({
           title: "List partially created",
-          description: `"${listName}" saved, but up to ${memberErrors * 500} lead(s) could not be added. Check console.`,
+          description: `"${listName}" saved, but no leads could be added${memberErrorMessage ? `: ${memberErrorMessage}` : "."}`,
           variant: "destructive",
         });
         setSaving(false);
@@ -140,6 +150,7 @@ export function AddToListDialog({ open, onOpenChange, leadIds, onSuccess }: AddT
           _only_unassigned: false,
           _priority_note: assignNote.trim() || null,
           _due_date: assignDueDate || null,
+          _include_terminal: false,
         });
         if (assignErr) {
           toast({ title: "List created, assignment failed", description: assignErr.message, variant: "destructive" });
@@ -154,7 +165,7 @@ export function AddToListDialog({ open, onOpenChange, leadIds, onSuccess }: AddT
       } else {
         toast({
           title: "List created",
-          description: `"${listName}" — ${leadIds.length} lead${leadIds.length === 1 ? "" : "s"} added.`,
+          description: `"${listName}" — ${added} lead${added === 1 ? "" : "s"} added.`,
         });
       }
 
@@ -177,7 +188,7 @@ export function AddToListDialog({ open, onOpenChange, leadIds, onSuccess }: AddT
             Create List
           </DialogTitle>
           <DialogDescription>
-            Group {leadIds.length} lead{leadIds.length === 1 ? "" : "s"} from the current view into a named
+            Group {uniqueCount} lead{uniqueCount === 1 ? "" : "s"} from the current view into a named
             list. This does not change who each lead is assigned to — it keeps the batch together.
           </DialogDescription>
         </DialogHeader>
