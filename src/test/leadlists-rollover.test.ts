@@ -10,6 +10,7 @@ describe("lead list archive + roll-forward", () => {
     expect(leadLists).toContain('.not("archived_at", "is", null)');
     // The query changes with the segment, so the effect has to refetch.
     expect(leadLists).toContain("[role, showArchived]");
+    expect(leadLists).toContain('useState<"all" | "calling" | "mine" | "archived">("calling")');
   });
 
   it("archives through the permission-checked RPC, not a bare update", () => {
@@ -48,5 +49,17 @@ describe("lead list archive + roll-forward", () => {
     expect(marketing).toContain(".range(from, from + PAGE - 1)");
     expect(marketing).toContain("fetchAllLists");
     expect(leadLists).toContain(".range(from, from + PAGE - 1)");
+  });
+
+  it("shows due date, creator, and assignees on each list row", () => {
+    expect(leadLists).toContain(">Due</th>");
+    expect(leadLists).toContain(">Created by</th>");
+    expect(leadLists).toContain(">Assigned to</th>");
+    expect(leadLists).toContain("creatorNames");
+    expect(leadLists).toContain("fetchListReportAssignees");
+    expect(leadLists).toContain("table-fixed");
+    expect(leadLists).toContain("overflow-hidden");
+    expect(leadLists).not.toContain("overflow-x-auto");
+    expect(leadLists).toContain("colSpan={6}");
   });
 });

@@ -7,6 +7,7 @@ import { WhatsAppTemplatePicker } from "@/components/leads/WhatsAppTemplatePicke
 import {
   TEMPLATES, useWhatsAppTemplates, renderTemplatePreview, sendWhatsAppTemplate,
 } from "@/components/leads/whatsappTemplates";
+import { formatWhatsAppPreview, useLeadWhatsAppPreview } from "@/hooks/useLeadWhatsAppPreview";
 import type { QueueLead } from "@/lib/dialerQueue";
 
 interface Props {
@@ -27,6 +28,11 @@ export function WhatsAppTab({ lead, active }: Props) {
   const [sent, setSent] = useState(false);
 
   const { allowedKeys, visibleTemplates, templateComponentsByKey } = useWhatsAppTemplates(active);
+  const { data: recent = [] } = useLeadWhatsAppPreview({
+    leadId: lead.kind === "contact" ? null : lead.id,
+    phone: lead.phone,
+    enabled: active,
+  });
   const selectedTmpl = visibleTemplates.find(t => t.key === selectedTemplate) || TEMPLATES.find(t => t.key === selectedTemplate);
   const previewText = renderTemplatePreview(selectedTmpl, lead, lead.course_name, lead.campus_name);
 
@@ -51,6 +57,22 @@ export function WhatsAppTab({ lead, active }: Props) {
 
   return (
     <div className="space-y-3">
+      {recent.length > 0 && (
+        <div className="rounded-md border border-border bg-muted/30 px-2.5 py-2">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Recent thread</p>
+          <ul className="space-y-1">
+            {recent.map((m) => (
+              <li key={m.id} className="text-[11px] leading-snug">
+                <span className={`mr-1 font-medium ${m.direction === "inbound" ? "text-info-foreground" : "text-success"}`}>
+                  {m.direction === "inbound" ? "They" : "Us"}:
+                </span>
+                <span className="text-foreground">{formatWhatsAppPreview(m)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <p className="text-[11px] text-muted-foreground">
         Sending to <span className="font-medium text-foreground">{lead.name}</span>
         <span className="ml-1 font-mono">{lead.phone}</span>
