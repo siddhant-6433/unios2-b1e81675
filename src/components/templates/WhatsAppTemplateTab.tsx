@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2, MessageSquare, RefreshCw, Send, Search, CheckCircle, Clock, XCircle, AlertTriangle, Eye, EyeOff, ChevronDown } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
@@ -42,6 +43,7 @@ interface WaTemplateRow {
   quality_score: string | null;
   submitted_at: string | null;
   status_updated_at?: string | null;
+  waba_id?: string | null;
 }
 
 type TemplateButtonComponent = WhatsAppTemplateButtonComponent;
@@ -131,6 +133,24 @@ function formatMetaDate(value?: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+const ALL_WABAS = "all";
+const DEFAULT_WABA = "default";
+
+function rowMatchesWaba(
+  row: Pick<WaTemplateRow, "waba_id">,
+  filter: string,
+  defaultWabaId: string | null,
+): boolean {
+  if (filter === ALL_WABAS) return true;
+  if (filter === DEFAULT_WABA) return !row.waba_id || (!!defaultWabaId && row.waba_id === defaultWabaId);
+  return row.waba_id === filter;
+}
+
+function wabaLabelFor(row: Pick<WaTemplateRow, "waba_id">, options: WabaOption[]): string {
+  if (!row.waba_id) return options.find((w) => w.is_default)?.label || "NIMT (default)";
+  return options.find((w) => w.waba_id === row.waba_id)?.label || row.waba_id;
 }
 
 function edgeErrorMessage(error: any, data?: any) {
@@ -274,12 +294,14 @@ function TemplatePreviewPanel({
   onDelete,
   visible,
   onToggleVisible,
+  wabaLabel,
 }: {
   template: WaTemplateRow | null;
   deleting: string | null;
   onDelete: (template: WaTemplateRow) => void;
   visible?: string;
   onToggleVisible?: (next: string) => void;
+  wabaLabel?: string;
 }) {
   if (!template) {
     return (
@@ -304,6 +326,9 @@ function TemplatePreviewPanel({
             <p className="mt-1 font-mono text-[11px] text-muted-foreground">
               Meta ID: {template.meta_template_id || "Not returned yet"}
             </p>
+            {wabaLabel && (
+              <p className="mt-1 text-[11px] text-muted-foreground">{wabaLabel}</p>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {onToggleVisible && (
@@ -395,6 +420,7 @@ export function WhatsAppTemplateTab({
   const [initialForm, setInitialForm] = useState<{ name?: string; category?: string; body?: string } | undefined>();
   const [selectedApprovedId, setSelectedApprovedId] = useState<string | null>(null);
   const [approvedSearch, setApprovedSearch] = useState("");
+  const [approvedWabaFilter, setApprovedWabaFilter] = useState(ALL_WABAS);
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -436,6 +462,7 @@ export function WhatsAppTemplateTab({
         quality_score: local?.quality_score || null,
         submitted_at: local?.submitted_at || null,
         status_updated_at: local?.status_updated_at || new Date().toISOString(),
+        waba_id: template.waba_id ?? local?.waba_id ?? null,
       };
     });
 
@@ -524,10 +551,29 @@ export function WhatsAppTemplateTab({
   const existingNames = new Set(rows.map((r) => r.name));
   const pendingSuggested = SUGGESTED_TEMPLATES.filter((s) => !existingNames.has(s.name));
   const approvedRows = rows.filter((r) => r.status === "APPROVED");
+  const defaultWabaId = wabaOptions.find((w) => w.is_default)?.waba_id || null;
+  const approvedWabaOptions = useMemo(() => {
+    const opts: Array<{ value: string; label: string }> = [{ value: ALL_WABAS, label: "All accounts" }];
+    const seen = new Set<string>([ALL_WABAS]);
+    for (const w of wabaOptions) {
+      const value = w.is_default ? DEFAULT_WABA : w.waba_id;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      opts.push({ value, label: w.label });
+    }
+    for (const row of approvedRows) {
+      const value = row.waba_id || DEFAULT_WABA;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      opts.push({ value, label: wabaLabelFor(row, wabaOptions) });
+    }
+    return opts;
+  }, [wabaOptions, approvedRows]);
   const filteredApprovedRows = useMemo(() => {
+    const byWaba = approvedRows.filter((row) => rowMatchesWaba(row, approvedWabaFilter, defaultWabaId));
     const q = approvedSearch.trim().toLowerCase();
-    if (!q) return approvedRows;
-    return approvedRows.filter((row) => {
+    if (!q) return byWaba;
+    return byWaba.filter((row) => {
       const body = templateBody(row).toLowerCase();
       const header = (templateHeader(row)?.text || "").toLowerCase();
       return (
@@ -539,7 +585,7 @@ export function WhatsAppTemplateTab({
         || header.includes(q)
       );
     });
-  }, [approvedRows, approvedSearch]);
+  }, [approvedRows, approvedSearch, approvedWabaFilter, defaultWabaId]);
   const submittedRows = rows.filter((r) => r.status !== "APPROVED" && r.status !== "REJECTED");
   const attentionRows = rows.filter((r) => r.status === "REJECTED");
   const metaBackedCount = rows.filter((r) => r.meta_template_id).length;
@@ -654,23 +700,39 @@ export function WhatsAppTemplateTab({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <SectionHeader
             title="Approved Templates"
-            count={approvedSearch.trim() ? filteredApprovedRows.length : approvedRows.length}
+            count={approvedWabaFilter !== ALL_WABAS || approvedSearch.trim() ? filteredApprovedRows.length : approvedRows.length}
             description={
-              approvedSearch.trim()
+              approvedWabaFilter !== ALL_WABAS || approvedSearch.trim()
                 ? `Showing ${filteredApprovedRows.length} of ${approvedRows.length} approved templates.`
                 : "Ready for one-to-one sends, automations, and bulk campaigns."
             }
           />
           {approvedRows.length > 0 && (
-            <div className="relative w-full sm:max-w-xs shrink-0">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={approvedSearch}
-                onChange={(e) => setApprovedSearch(e.target.value)}
-                placeholder="Search name, body, category, Meta ID…"
-                className="h-9 pl-9 text-sm"
-                aria-label="Search approved templates"
-              />
+            <div className="flex w-full flex-col gap-2 sm:max-w-xl sm:flex-row sm:items-center shrink-0">
+              {approvedWabaOptions.length > 1 && (
+                <Select value={approvedWabaFilter} onValueChange={setApprovedWabaFilter}>
+                  <SelectTrigger className="h-9 sm:w-[240px]" aria-label="Filter approved templates by WhatsApp account">
+                    <SelectValue placeholder="All accounts" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {approvedWabaOptions.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={approvedSearch}
+                  onChange={(e) => setApprovedSearch(e.target.value)}
+                  placeholder="Search name, body, category, Meta ID…"
+                  className="h-9 pl-9 text-sm"
+                  aria-label="Search approved templates"
+                />
+              </div>
             </div>
           )}
         </div>
@@ -686,7 +748,9 @@ export function WhatsAppTemplateTab({
               <div className="max-h-[70vh] overflow-y-auto p-2">
                 {filteredApprovedRows.length === 0 ? (
                   <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-                    No approved templates match “{approvedSearch.trim()}”.
+                    {approvedSearch.trim()
+                      ? `No approved templates match “${approvedSearch.trim()}”.`
+                      : "No approved templates on this WhatsApp account."}
                   </div>
                 ) : (
                   filteredApprovedRows.map((template) => {
@@ -707,7 +771,10 @@ export function WhatsAppTemplateTab({
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="truncate font-mono text-sm font-semibold text-foreground">{template.name}</p>
-                          <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                          <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                            {wabaLabelFor(template, wabaOptions)}
+                          </p>
+                          <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
                             {template.meta_template_id || "No Meta ID"}
                           </p>
                         </div>
@@ -742,6 +809,7 @@ export function WhatsAppTemplateTab({
                 onDelete={deleteTemplate}
                 visible={visibilityByKey?.[selectedApproved.name] || "hidden"}
                 onToggleVisible={onToggleVisibility ? (next) => onToggleVisibility(selectedApproved.name, next) : undefined}
+                wabaLabel={wabaLabelFor(selectedApproved, wabaOptions)}
               />
             ) : (
               <div className="flex items-center justify-center p-8 text-sm text-muted-foreground">
