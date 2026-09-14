@@ -8,7 +8,7 @@ const admissions = readFileSync("src/pages/Admissions.tsx", "utf8");
 const leadDetail = readFileSync("src/pages/LeadDetail.tsx", "utf8");
 const appLayout = readFileSync("src/components/layout/AppLayout.tsx", "utf8");
 const mergeMigration = readFileSync(
-  "supabase/migrations/20260914131851_merge_direct_walkin_into_walk_in.sql",
+  "supabase/migrations/20260914142123_merge_direct_walkin_into_walk_in.sql",
   "utf8",
 );
 
