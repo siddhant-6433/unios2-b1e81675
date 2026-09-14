@@ -1294,12 +1294,6 @@ const AdminPanel = () => {
               <Suspense fallback={null}>
                 <TransferAccountDialog
                   source={transferTarget}
-                  allUsers={users.filter((u) => u.role && !["super_admin", "student", "parent"].includes(u.role)).map((u) => ({
-                    profile_id: u.profile_id,
-                    user_id: u.user_id,
-                    name: u.display_name || "Unnamed",
-                    role: u.role,
-                  }))}
                   onClose={() => setTransferTarget(null)}
                   onDone={() => { setTransferTarget(null); fetchUsers(); fetchCounts(); }}
                 />

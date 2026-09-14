@@ -33,6 +33,11 @@ describe("multi-counsellor account transfer", () => {
     expect(dialog).toContain("withTimeout");
     // 0-lead / single-target uses simpler RPC
     expect(dialog).toContain('transfer_counsellor_account"');
+    // Staff picker must not reuse the paginated/searched Users & Roles page.
+    expect(dialog).toContain('admin_user_directory"');
+    expect(dialog).toContain('_category: "employees"');
+    expect(dialog).toContain('_status: "active"');
+    expect(dialog).not.toContain("allUsers");
   });
 });
 

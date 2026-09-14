@@ -12,12 +12,23 @@ interface StaffOption {
   role: string | null;
 }
 
+interface DirectoryStaffRow {
+  profile_id: string;
+  user_id: string;
+  display_name: string | null;
+  role: string | null;
+  login_disabled?: boolean | null;
+}
+
 interface Props {
   source: { profileId: string; userId: string; name: string } | null;
-  allUsers: StaffOption[];
   onClose: () => void;
   onDone: () => void;
 }
+
+const EXCLUDED_TRANSFER_ROLES = new Set(["super_admin", "student", "parent"]);
+/** Matches PostgREST's db-max-rows cap; employees are well under this. */
+const STAFF_FETCH_LIMIT = 1000;
 
 type TransferMode = "round_robin" | "coursewise";
 
@@ -73,7 +84,7 @@ function parseTransferResult(data: TransferResult | string | null | undefined): 
   return data;
 }
 
-export function TransferAccountDialog({ source, allUsers, onClose, onDone }: Props) {
+export function TransferAccountDialog({ source, onClose, onDone }: Props) {
   const { toast } = useToast();
   const sourceProfileId = source?.profileId;
   const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
@@ -85,10 +96,23 @@ export function TransferAccountDialog({ source, allUsers, onClose, onDone }: Pro
   const [uncategorizedLeadCount, setUncategorizedLeadCount] = useState(0);
   const [loadingCount, setLoadingCount] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [staff, setStaff] = useState<StaffOption[]>([]);
+  const [loadingStaff, setLoadingStaff] = useState(false);
+  const [staffQuery, setStaffQuery] = useState("");
 
-  const targets = allUsers.filter(
-    (u) => u.profile_id !== source?.profileId && !u.name.startsWith("Guardian of")
+  const targets = useMemo(
+    () => staff.filter(
+      (u) => u.profile_id !== source?.profileId && !u.name.startsWith("Guardian of")
+    ),
+    [staff, source?.profileId],
   );
+  const visibleTargets = useMemo(() => {
+    const q = staffQuery.trim().toLowerCase();
+    if (!q) return targets;
+    return targets.filter((target) =>
+      target.name.toLowerCase().includes(q) || (target.role || "").replace(/_/g, " ").toLowerCase().includes(q)
+    );
+  }, [staffQuery, targets]);
   const selectedTargets = useMemo(
     () => targets.filter((target) => selectedTargetIds.includes(target.profile_id)),
     [selectedTargetIds, targets]
@@ -106,7 +130,10 @@ export function TransferAccountDialog({ source, allUsers, onClose, onDone }: Pro
     setCourseSummaries([]);
     setUncategorizedLeadCount(0);
     setSaving(false);
+    setStaff([]);
+    setStaffQuery("");
     setLoadingCount(true);
+    setLoadingStaff(true);
 
     (async () => {
       try {
@@ -162,6 +189,46 @@ export function TransferAccountDialog({ source, allUsers, onClose, onDone }: Pro
       }
     })();
 
+    // Load every active employee, not the directory page currently on screen.
+    // Searching/paginating Users & Roles otherwise empties this picker.
+    (async () => {
+      try {
+        const { data, error } = await supabase.rpc("admin_user_directory", {
+          _show_archived: false,
+          _category: "employees",
+          _status: "active",
+          _limit: STAFF_FETCH_LIMIT,
+          _offset: 0,
+        });
+
+        if (cancelled) return;
+
+        if (error) {
+          toast({ title: "Could not load staff", description: error.message, variant: "destructive" });
+          setStaff([]);
+          return;
+        }
+
+        const mapped = ((data || []) as DirectoryStaffRow[])
+          .filter((row) => row.role && !EXCLUDED_TRANSFER_ROLES.has(row.role) && !row.login_disabled)
+          .map((row) => ({
+            profile_id: row.profile_id,
+            user_id: row.user_id,
+            name: row.display_name || "Unnamed",
+            role: row.role,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setStaff(mapped);
+      } catch (e: unknown) {
+        if (cancelled) return;
+        const message = e instanceof Error ? e.message : "Failed to load staff";
+        toast({ title: "Could not load staff", description: message, variant: "destructive" });
+        setStaff([]);
+      } finally {
+        if (!cancelled) setLoadingStaff(false);
+      }
+    })();
+
     return () => {
       cancelled = true;
     };
@@ -199,7 +266,7 @@ export function TransferAccountDialog({ source, allUsers, onClose, onDone }: Pro
   };
 
   const handleTransfer = async () => {
-    if (!source || selectedTargetIds.length === 0 || saving || loadingCount) return;
+    if (!source || selectedTargetIds.length === 0 || saving || loadingCount || loadingStaff) return;
 
     const courseTargetMap = transferMode === "coursewise"
       ? Object.entries(courseTargetIds)
@@ -331,29 +398,48 @@ export function TransferAccountDialog({ source, allUsers, onClose, onDone }: Pro
                 <span className="text-xs text-muted-foreground">{selectedTargetIds.length} selected</span>
               )}
             </div>
+            {targets.length > 8 && (
+              <input
+                type="search"
+                value={staffQuery}
+                onChange={(e) => setStaffQuery(e.target.value)}
+                placeholder="Search staff…"
+                className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+              />
+            )}
             <div className="max-h-44 overflow-y-auto rounded-lg border border-input bg-card">
-              {targets.map((target) => {
-                const checked = selectedTargetIds.includes(target.profile_id);
-                return (
-                  <label
-                    key={target.profile_id}
-                    className="flex cursor-pointer items-center gap-3 border-b border-border/60 px-3 py-2 text-sm last:border-b-0 hover:bg-muted/60"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => toggleTarget(target.profile_id, e.target.checked)}
-                      className="h-4 w-4 rounded border-input accent-primary"
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium text-foreground">{target.name}</span>
-                      {target.role && <span className="block text-xs text-muted-foreground">{target.role.replace(/_/g, " ")}</span>}
-                    </span>
-                  </label>
-                );
-              })}
-              {targets.length === 0 && (
-                <div className="px-3 py-4 text-sm text-muted-foreground">No eligible staff members found.</div>
+              {loadingStaff ? (
+                <div className="flex items-center gap-2 px-3 py-4 text-sm text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading staff…
+                </div>
+              ) : (
+                <>
+                  {visibleTargets.map((target) => {
+                    const checked = selectedTargetIds.includes(target.profile_id);
+                    return (
+                      <label
+                        key={target.profile_id}
+                        className="flex cursor-pointer items-center gap-3 border-b border-border/60 px-3 py-2 text-sm last:border-b-0 hover:bg-muted/60"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => toggleTarget(target.profile_id, e.target.checked)}
+                          className="h-4 w-4 rounded border-input accent-primary"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium text-foreground">{target.name}</span>
+                          {target.role && <span className="block text-xs text-muted-foreground">{target.role.replace(/_/g, " ")}</span>}
+                        </span>
+                      </label>
+                    );
+                  })}
+                  {visibleTargets.length === 0 && (
+                    <div className="px-3 py-4 text-sm text-muted-foreground">
+                      {staffQuery.trim() ? "No staff matching that search." : "No eligible staff members found."}
+                    </div>
+                  )}
+                </>
               )}
             </div>
             {selectedTargetIds.length > 0 && (
@@ -436,7 +522,7 @@ export function TransferAccountDialog({ source, allUsers, onClose, onDone }: Pro
           <button
             type="button"
             onClick={handleTransfer}
-            disabled={saving || selectedTargetIds.length === 0 || loadingCount}
+            disabled={saving || selectedTargetIds.length === 0 || loadingCount || loadingStaff}
             className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
           >
             {saving && <ButtonOrb state="working" onFilled />}
