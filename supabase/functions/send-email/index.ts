@@ -75,9 +75,10 @@ Deno.serve(async (req) => {
     // through. Resend free tier supports up to 40 MB; we don't enforce here
     // since payment receipts are <100 KB.
 
+    const adminCheck = createClient(supabaseUrl, serviceRoleKey);
+
     // Block emails to DNC leads
     if (lead_id) {
-      const adminCheck = createClient(supabaseUrl, serviceRoleKey);
       const { data: leadCheck } = await adminCheck.from("leads").select("stage").eq("id", lead_id).single();
       if (leadCheck?.stage === "dnc") {
         return new Response(JSON.stringify({ error: "Lead is DNC — email not sent" }), {
@@ -89,6 +90,15 @@ Deno.serve(async (req) => {
     if (!to_email) {
       return new Response(JSON.stringify({ error: "to_email is required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Login-disabled / archived / deleted students: skip candidate emails only.
+    // Staff internal mail still goes out when the destination is not theirs.
+    const { data: emailBlocked } = await adminCheck.rpc("email_comms_suppressed", { _email: to_email });
+    if (emailBlocked) {
+      return new Response(JSON.stringify({ error: "Student login is disabled — email not sent" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 

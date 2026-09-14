@@ -609,6 +609,17 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Login-disabled / archived / deleted students: never message the candidate
+    // phone. Staff phone overrides pass because they are not on the student row.
+    if (phone) {
+      const { data: phoneBlocked } = await admin.rpc("phone_comms_suppressed", { _phone: phone });
+      if (phoneBlocked) {
+        return new Response(JSON.stringify({ error: "Student login is disabled — message not sent" }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     if (!template_key || !phone) {
       return new Response(
         JSON.stringify({ error: "template_key and phone are required" }),

@@ -119,6 +119,21 @@ async function isLoginDisabled(admin: SupabaseClient, userId: string): Promise<b
   return !!stu;
 }
 
+// Phone-level gate for student + applicant login. Matches login-disabled,
+// archived, or deleted students even when the stored phone formatting differs
+// from the OTP input. Without this, verify fell through to the alumni/
+// applicant success path and ApplyPortal still opened.
+async function isCandidateLoginBlocked(
+  admin: SupabaseClient,
+  phone: string | null | undefined,
+): Promise<boolean> {
+  if (!phone) return false;
+  const { data } = await admin.rpc("phone_comms_suppressed", { _phone: phone });
+  return !!data;
+}
+
+const LOGIN_DISABLED_ERROR = "This account's login has been disabled. Please contact the office.";
+
 // Indexed, uncapped lookup of an existing auth user by email.
 //
 // This used to be auth.admin.listUsers({ page: 1, perPage: 1000 }) scanned in
@@ -416,8 +431,11 @@ Deno.serve(async (req) => {
           .eq("id", intent.id);
       }
 
-      if (await isLoginDisabled(adminClient, userId)) {
-        const error = "This account's login has been disabled. Please contact the office.";
+      if (
+        await isCandidateLoginBlocked(adminClient, intent.sender_phone) ||
+        await isLoginDisabled(adminClient, userId)
+      ) {
+        const error = LOGIN_DISABLED_ERROR;
         await adminClient
           .from("whatsapp_login_intents")
           .update({ status: "failed", error })
@@ -484,6 +502,13 @@ Deno.serve(async (req) => {
         return new Response(
           JSON.stringify({ error: "Valid phone number required" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (await isCandidateLoginBlocked(adminClient, normalizedPhone)) {
+        return new Response(
+          JSON.stringify({ error: LOGIN_DISABLED_ERROR }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
@@ -630,6 +655,16 @@ Deno.serve(async (req) => {
         );
       }
 
+      // Block student AND applicant (apply-portal) login. ApplyPortal is
+      // session-less and only needs { success, verified }, so the alumni
+      // fallback below must never succeed for a disabled candidate.
+      if (await isCandidateLoginBlocked(adminClient, normalizedPhone)) {
+        return new Response(
+          JSON.stringify({ error: LOGIN_DISABLED_ERROR }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       await adminClient.from("whatsapp_otps").update({ verified: true }).eq("id", otpRecord.id);
 
       // ── 1. Staff login: check profiles ────────────────────────────────────
@@ -641,7 +676,7 @@ Deno.serve(async (req) => {
 
       if (profile?.user_id) {
         if (await isLoginDisabled(adminClient, profile.user_id)) {
-          return new Response(JSON.stringify({ error: "This account's login has been disabled. Please contact the office." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          return new Response(JSON.stringify({ error: LOGIN_DISABLED_ERROR }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
         const token = await createSession(adminClient, profile.user_id);
         if (!token) {
@@ -661,7 +696,7 @@ Deno.serve(async (req) => {
 
       if (studentSelf) {
         if (studentSelf.login_disabled) {
-          return new Response(JSON.stringify({ error: "This account's login has been disabled. Please contact the office." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          return new Response(JSON.stringify({ error: LOGIN_DISABLED_ERROR }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
         let userId = studentSelf.user_id;
 

@@ -71,6 +71,20 @@ Deno.serve(async (req) => {
     if (wErr || !waiver) return json({ error: wErr?.message || "Waiver not found" }, 404);
     if (waiver.status !== "pending") return json({ error: `Waiver is already ${waiver.status}` }, 409);
 
+    if (waiver.offer_letter_id) {
+      const { data: offer } = await admin
+        .from("offer_letters")
+        .select("lead_id")
+        .eq("id", waiver.offer_letter_id)
+        .maybeSingle();
+      if (offer?.lead_id) {
+        const { data: hidden } = await admin.rpc("lead_hidden_from_staff_queues", { _lead_id: offer.lead_id });
+        if (hidden) {
+          return json({ error: "Student is archived, deleted, or login-disabled — waiver cannot be decided" }, 403);
+        }
+      }
+    }
+
     const { data: callerProf } = await admin
       .from("profiles").select("display_name").eq("user_id", callerId).maybeSingle();
 

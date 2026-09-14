@@ -267,10 +267,18 @@ function computeNextAction(p: LifecycleProps, currentKey: string | undefined, al
         tone: "border-warning/20 bg-warning/5/60", iconCls: "text-warning-foreground", titleCls: "text-warning-foreground dark:text-warning/40",
       };
     case "admitted":
+      if (p.docs.total > 0 && (p.docs.pending > 0 || p.docs.rejected > 0)) {
+        return {
+          Icon: GraduationCap,
+          title: "Admission number held — documents",
+          body: "Fee threshold is waiting on document verification. Finish review in Inbox → Pending AN Generation, or open document review on this application.",
+          tone: "border-warning/20 bg-warning/5/60", iconCls: "text-warning-foreground", titleCls: "text-warning-foreground dark:text-warning/40",
+        };
+      }
       return {
         Icon: GraduationCap,
         title: "Awaiting balance to 25%",
-        body: "Pre-admitted. Once total fees paid reach 25% of year-1, the Admission Number is auto-issued and the student is enrolled.",
+        body: "Pre-admitted. Once total fees paid reach 25% of year-1 and mandatory documents are verified, the Admission Number is auto-issued and the student is enrolled.",
         tone: "border-warning/20 bg-warning/5/60", iconCls: "text-warning-foreground", titleCls: "text-warning-foreground dark:text-warning/40",
       };
     default:

@@ -11,6 +11,14 @@ import { cn } from "@/lib/utils";
 import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
 import { feeTermLabel } from "@/lib/feeTermLabels";
 import { exportRowsCsv } from "@/lib/xlsxExport";
+import { pendingAnDocSummary, type PendingAnDocStatus } from "@/lib/pendingAnGeneration";
+import {
+  fetchHiddenLeadIds,
+  fetchHiddenStudentIds,
+  isHiddenFromStaffQueues,
+  nestedOfferLeadId,
+  nestedStudent,
+} from "@/lib/staffQueueVisibility";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -67,16 +75,6 @@ interface HrDocumentApprovalItem {
 }
 
 // Paid students whose admission number is held by the mandatory-document gate.
-type PendingAnDocState = "verified" | "rejected" | "pending" | "missing";
-interface PendingAnDocStatus {
-  complete?: boolean;
-  required_total?: number;
-  verified?: number;
-  rejected?: number;
-  pending?: number;
-  missing?: number;
-  docs?: { key: string; label: string; state: PendingAnDocState }[];
-}
 interface PendingAnItem {
   id: string; // lead_id (row key)
   lead_id: string;
@@ -452,7 +450,7 @@ export default function Inbox() {
       isSuperAdmin
         ? supabase
             .from("offer_waivers")
-            .select("id")
+            .select("id, offer_letters(lead_id)")
             .eq("status", "pending")
         : Promise.resolve({ count: 0 }),
 
@@ -460,7 +458,7 @@ export default function Inbox() {
       isSuperAdmin
         ? supabase
             .from("abvmu_deposit_claims" as any)
-            .select("id")
+            .select("id, lead_id")
             .eq("status", "pending")
         : Promise.resolve({ count: 0 }),
 
@@ -468,7 +466,7 @@ export default function Inbox() {
       isApprover
         ? supabase
             .from("offer_letters")
-            .select("id")
+            .select("id, lead_id")
             .eq("approval_status", "pending_principal")
         : Promise.resolve({ count: 0 }),
 
@@ -476,7 +474,7 @@ export default function Inbox() {
       (isSuperAdmin || isPrincipal)
         ? supabase
             .from("student_contact_change_requests" as any)
-            .select("id")
+            .select("id, student_id")
             .eq("status", "pending")
         : Promise.resolve({ count: 0 }),
 
@@ -484,7 +482,7 @@ export default function Inbox() {
       isAdmissions
         ? supabase
             .from("applications" as any)
-            .select("id")
+            .select("id, lead_id")
             .eq("status", "submitted")
         : Promise.resolve({ count: 0 }),
 
@@ -536,7 +534,7 @@ export default function Inbox() {
       isSuperAdmin
         ? supabase
             .from("concessions")
-            .select("id")
+            .select("id, student_id")
             .in("status", ["pending_principal", "pending_super_admin"])
         : Promise.resolve({ count: 0 }),
 
@@ -549,7 +547,7 @@ export default function Inbox() {
       isSuperAdmin
         ? supabase
             .from("offer_letter_edit_requests" as any)
-            .select("id")
+            .select("id, offer_letters(lead_id)")
             .eq("status", "pending")
         : Promise.resolve({ count: 0 }),
 
@@ -567,21 +565,52 @@ export default function Inbox() {
       if (r.status === "fulfilled") return (r.value as any).count ?? (r.value as any).data?.length ?? 0;
       return 0;
     };
+    const rowsOf = (i: number): any[] => {
+      const r = results[i];
+      if (r.status !== "fulfilled") return [];
+      return (r.value as any)?.data || [];
+    };
+
+    const waiverRows = rowsOf(0);
+    const abvmuRows = rowsOf(1);
+    const offerApprovalRows = rowsOf(2);
+    const contactRows = rowsOf(3);
+    const applicationRows = rowsOf(4);
+    const concessionRows = rowsOf(10);
+    const offerEditRows = rowsOf(12);
+
+    const hiddenLeads = await fetchHiddenLeadIds([
+      ...waiverRows.map(nestedOfferLeadId),
+      ...abvmuRows.map((r) => r.lead_id),
+      ...offerApprovalRows.map((r) => r.lead_id),
+      ...applicationRows.map((r) => r.lead_id),
+      ...offerEditRows.map(nestedOfferLeadId),
+    ]);
+    const hiddenStudents = await fetchHiddenStudentIds([
+      ...contactRows.map((r) => r.student_id),
+      ...concessionRows.map((r) => r.student_id),
+    ]);
 
     setCounts({
-      offer_waivers: get(0),
-      abvmu_deposits: get(1),
-      offer_approvals: get(2),
-      contact_changes: get(3),
-      applications: get(4),
+      offer_waivers: waiverRows.filter((r) => {
+        const leadId = nestedOfferLeadId(r);
+        return leadId && !hiddenLeads.has(leadId);
+      }).length,
+      abvmu_deposits: abvmuRows.filter((r) => r.lead_id && !hiddenLeads.has(r.lead_id)).length,
+      offer_approvals: offerApprovalRows.filter((r) => r.lead_id && !hiddenLeads.has(r.lead_id)).length,
+      contact_changes: contactRows.filter((r) => r.student_id && !hiddenStudents.has(r.student_id)).length,
+      applications: applicationRows.filter((r) => !r.lead_id || !hiddenLeads.has(r.lead_id)).length,
       followups: get(5),
       whatsapp: get(6),
       video_approvals: get(7),
       voice_messages: get(8),
       certificate_approvals: get(9),
-      fee_concessions: get(10),
+      fee_concessions: concessionRows.filter((r) => r.student_id && !hiddenStudents.has(r.student_id)).length,
       pending_an_generation: get(11),
-      offer_edits: get(12),
+      offer_edits: offerEditRows.filter((r) => {
+        const leadId = nestedOfferLeadId(r);
+        return leadId && !hiddenLeads.has(leadId);
+      }).length,
       hr_document_approvals: get(13),
     });
   }, [role, isSuperAdmin, isPrincipal, isApprover, isAdmissions, profile?.id]);
@@ -632,9 +661,12 @@ export default function Inbox() {
             for (const c of (courses || []) as any[]) coursesById.set(c.id, c.name);
           }
         }
+        const hiddenLeads = await fetchHiddenLeadIds(leadIds);
         commitItems(
           cat,
-          rows.map((r) => {
+          rows
+            .filter((r) => r.lead_id && !hiddenLeads.has(r.lead_id))
+            .map((r) => {
             const lead = leadsById.get(r.lead_id);
             return {
               id: r.id,
@@ -702,10 +734,18 @@ export default function Inbox() {
           for (const course of (courseRes.data || []) as any[]) coursesById.set(course.id, course);
         }
 
+        const hiddenLeads = await fetchHiddenLeadIds(
+          Array.from(offersById.values()).map((offer: any) => offer.lead_id),
+        );
+        const visibleWaiverRows = waiverRows.filter((w) => {
+          const offer = offersById.get(w.offer_letter_id);
+          return offer?.lead_id && !hiddenLeads.has(offer.lead_id);
+        });
+
         // Resolve gross year fee per (course, session, term) from active fee
         // structures so the detail card can show Amount + Applicable-after-waiver.
         const offerKeys = new Set<string>();
-        for (const w of waiverRows) {
+        for (const w of visibleWaiverRows) {
           const offer = offersById.get(w.offer_letter_id);
           const c = offer?.course_id;
           const s = offer?.session_id;
@@ -740,7 +780,7 @@ export default function Inbox() {
           }
         }
 
-        const flatWaivers = waiverRows.map((w: any) => {
+        const flatWaivers = visibleWaiverRows.map((w: any) => {
             const offer = offersById.get(w.offer_letter_id);
             const lead = offer?.lead_id ? leadsById.get(offer.lead_id) : null;
             const course = offer?.course_id ? coursesById.get(offer.course_id) : null;
@@ -809,7 +849,10 @@ export default function Inbox() {
           .order("created_at", { ascending: false });
 
         if (error) throw error;
-        const nextItems = (data || []).map((o: any) => ({
+        const hiddenLeads = await fetchHiddenLeadIds((data || []).map((o: any) => o.lead_id));
+        const nextItems = (data || [])
+          .filter((o: any) => o.lead_id && !hiddenLeads.has(o.lead_id))
+          .map((o: any) => ({
             id: o.id,
             lead_id: o.lead_id,
             lead_name: o.leads?.name || "—",
@@ -836,7 +879,10 @@ export default function Inbox() {
           .order("created_at", { ascending: false });
 
         if (error) throw error;
-        const nextItems = (data || []).map((r: any) => ({
+        const hiddenLeads = await fetchHiddenLeadIds((data || []).map((r: any) => r.offer_letters?.lead_id));
+        const nextItems = (data || [])
+          .filter((r: any) => r.offer_letters?.lead_id && !hiddenLeads.has(r.offer_letters.lead_id))
+          .map((r: any) => ({
             id: r.id,
             offer_letter_id: r.offer_letter_id,
             lead_id: r.offer_letters?.lead_id || "",
@@ -856,14 +902,16 @@ export default function Inbox() {
           .from("concessions")
           .select(`
             id, student_id, type, value, reason, created_at,
-            students:student_id(name, admission_no, pre_admission_no),
+            students:student_id(name, admission_no, pre_admission_no, login_disabled, archived_at, deleted_at),
             fee_ledger:fee_ledger_id(term, total_amount, fee_codes:fee_code_id(code, name)),
             requester:requested_by(display_name)
           `)
           .in("status", ["pending_principal", "pending_super_admin"])
           .order("created_at", { ascending: true });
         if (error) throw error;
-        const nextItems = ((data || []) as any[]).map((c: any) => ({
+        const nextItems = ((data || []) as any[])
+          .filter((c: any) => !isHiddenFromStaffQueues(nestedStudent(c.students)))
+          .map((c: any) => ({
             id: c.id,
             student_id: c.student_id,
             student_name: c.students?.name || "—",
@@ -973,14 +1021,16 @@ export default function Inbox() {
           .select(`
             id, student_id, field_name, old_value, new_value, reason,
             requested_by_name, requested_by_role, created_at,
-            students!student_id ( name, admission_no, pre_admission_no )
+            students!student_id ( name, admission_no, pre_admission_no, login_disabled, archived_at, deleted_at )
           `)
           .eq("status", "pending")
           .order("created_at", { ascending: false })
           .limit(100);
 
         if (error) throw error;
-        const nextItems = (data || []).map((r: any) => ({
+        const nextItems = (data || [])
+          .filter((r: any) => !isHiddenFromStaffQueues(nestedStudent(r.students)))
+          .map((r: any) => ({
             id: r.id,
             student_id: r.student_id,
             student_name: r.students?.name || "—",
@@ -997,13 +1047,16 @@ export default function Inbox() {
       } else if (cat === "applications") {
         const { data, error } = await (supabase as any)
           .from("applications")
-          .select("id, application_id, status, created_at, submitted_at, course_selections, full_name, phone, leads!lead_id ( name, phone )")
+          .select("id, lead_id, application_id, status, created_at, submitted_at, course_selections, full_name, phone, leads!lead_id ( name, phone )")
           .eq("status", "submitted")
           .order("submitted_at", { ascending: false })
           .limit(100);
 
         if (error) throw error;
-        const nextItems = (data || []).map((a: any) => ({
+        const hiddenLeads = await fetchHiddenLeadIds((data || []).map((a: any) => a.lead_id));
+        const nextItems = (data || [])
+          .filter((a: any) => !a.lead_id || !hiddenLeads.has(a.lead_id))
+          .map((a: any) => ({
             id: a.id,
             application_id: a.application_id,
             lead_name: a.leads?.name || a.full_name || "—",
@@ -1675,8 +1728,7 @@ export default function Inbox() {
 
     if (selected === "pending_an_generation") {
       const p = item as PendingAnItem;
-      const ds = p.doc_status || {};
-      const outstanding = (ds.missing || 0) + (ds.rejected || 0) + (ds.pending || 0);
+      const summary = pendingAnDocSummary(p.doc_status);
       return (
         <button key={p.id} className={baseClass} onClick={() => setSelectedItem(p)}>
           <div className="flex items-start justify-between gap-2">
@@ -1684,11 +1736,9 @@ export default function Inbox() {
               <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
               <p className="text-xs text-muted-foreground truncate">{p.pre_admission_no || "PAN pending"} · {p.course || "—"}</p>
             </div>
-            <span className="text-[10px] text-amber-600 font-medium shrink-0">{ds.verified ?? 0}/{ds.required_total ?? 0} verified</span>
+            <span className="text-[10px] text-amber-600 font-medium shrink-0">{summary.ratio}</span>
           </div>
-          <p className="text-[10px] text-muted-foreground/60 mt-1">
-            {outstanding > 0 ? `${outstanding} document${outstanding === 1 ? "" : "s"} pending` : "Documents complete"}
-          </p>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">{summary.caption}</p>
         </button>
       );
     }
@@ -2272,6 +2322,7 @@ export default function Inbox() {
       const p = selectedItem as PendingAnItem;
       const ds = p.doc_status || {};
       const docs = ds.docs || [];
+      const summary = pendingAnDocSummary(p.doc_status);
       return (
         <div className="p-5 space-y-5">
           <div>
@@ -2281,11 +2332,15 @@ export default function Inbox() {
 
           <div className="rounded-xl border border-border bg-card p-3">
             <p className="text-xs font-medium text-muted-foreground mb-2">
-              Mandatory documents — {ds.verified ?? 0} of {ds.required_total ?? 0} verified
+              Mandatory documents — {summary.hasBreakdown ? `${ds.verified ?? 0} of ${ds.required_total ?? 0} verified` : "status unavailable"}
             </p>
             <div className="space-y-1.5">
               {docs.length === 0 && (
-                <p className="text-xs text-muted-foreground">No mandatory-document breakdown available.</p>
+                <p className="text-xs text-muted-foreground">
+                  {summary.hasBreakdown
+                    ? "No outstanding mandatory documents."
+                    : "Couldn't load the mandatory-document breakdown. Open document review to check which files still need verification."}
+                </p>
               )}
               {docs.map((d) => (
                 <div key={d.key} className="flex items-center justify-between text-sm">
