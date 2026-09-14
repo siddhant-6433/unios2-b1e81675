@@ -8,6 +8,8 @@ const accessPolicy = readFileSync("src/lib/accessPolicy.ts", "utf8");
 const walkInDialog = readFileSync("src/components/visits/WalkInDialog.tsx", "utf8");
 const todayBoard = readFileSync("src/components/visits/TodayVisitBoard.tsx", "utf8");
 const postVisitQueue = readFileSync("src/components/visits/PostVisitQueue.tsx", "utf8");
+const visitCenterPage = readFileSync("src/pages/VisitCenter.tsx", "utf8");
+const walkInsBoard = readFileSync("src/components/visits/WalkInsBoard.tsx", "utf8");
 const mobileWork = readFileSync("mobile/app/(staff)/(tabs)/work.tsx", "utf8");
 const mobileIndex = readFileSync("mobile/app/(staff)/(tabs)/index.tsx", "utf8");
 const mobileLayout = readFileSync("mobile/app/(staff)/work/_layout.tsx", "utf8");
@@ -78,6 +80,13 @@ describe("Visit Center desktop wiring", () => {
     expect(postVisitQueue).toContain('.not("visit_id", "is", null)');
     expect(postVisitQueue).toContain('.eq("status", "pending")');
     expect(postVisitQueue).toContain('status: "completed", completed_at:');
+  });
+
+  it("lists recorded and previous walk-ins on a Walk-ins tab", () => {
+    expect(visitCenterPage).toContain('key: "walkins"');
+    expect(visitCenterPage).toContain("<WalkInsBoard");
+    expect(walkInsBoard).toContain('.eq("visit_type", "walk_in")');
+    expect(walkInsBoard).toContain("Recorded at the desk and previous walk-ins");
   });
 });
 

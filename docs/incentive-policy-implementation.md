@@ -67,7 +67,7 @@ The policy leaves these ambiguous; the system enforces one specific reading:
   Forgotten checkouts are closed three ways: opening another lead's page redirects the counsellor
   to the Visit Center until their visitor is checked out; logging a new outbound call on the lead
   auto-checks-out the open visit; and a 6 PM IST pg_cron sweep (`visit-auto-checkout`) closes
-  anything left. Walk-ins can be recorded as `walk_in` or `direct_walkin` (different incentive %).
+  anything left. Walk-ins are recorded as `walk_in` (Direct Walk-In was merged into Walk-in).
 
 - **The 70% cliff**: below 70% pays ₹0. A counsellor at 60% on the 25th has zero incentive to close
   anything this month — the rational move is to sandbag. The clustering flag catches the symptom;

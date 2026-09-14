@@ -4,7 +4,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
-import { LEAD_SOURCES } from "@/config/leadSources";
+import { canonicalizeLeadSource, LEAD_SOURCES } from "@/config/leadSources";
 import { Badge } from "@/components/ui/badge";
 import { Upload, FileText, CheckCircle, XCircle, Download, ArrowRight, ArrowLeft } from "lucide-react";
 
@@ -245,7 +245,8 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
       const name = get("name");
       const phone = get("phone");
       const email = get("email") || undefined;
-      const source = get("source") || undefined;
+      const rawSource = get("source") || undefined;
+      const source = rawSource ? canonicalizeLeadSource(rawSource) : undefined;
       const guardian_name = get("guardian_name") || undefined;
       const guardian_phone = get("guardian_phone") || undefined;
       // Multi-column notes win over single-column mapping. Each picked column
@@ -431,7 +432,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
           _guardian_name: l.guardian_name || null,
           _guardian_phone: l.guardian_phone || null,
           // Manual override wins over CSV. Falls back to CSV value, then "other".
-          _source: sourceOverride || l.source || "other",
+          _source: canonicalizeLeadSource(sourceOverride || l.source || "other"),
           _notes: notes,
         });
         return { l, id: (data as string) || null, error };

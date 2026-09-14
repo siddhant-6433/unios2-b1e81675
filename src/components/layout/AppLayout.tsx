@@ -19,11 +19,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { isPortalRole } from "@/lib/accessPolicy";
 import { CAHET_SPRINT_OPEN, UPDELED_SPRINT_OPEN } from "@/lib/deadlineRollover";
 import { CounsellorFilterProvider } from "@/contexts/CounsellorFilterContext";
-import { useEffect, useState, lazy } from "react";
-import { Footprints } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { WalkInDialog } from "@/components/visits/WalkInDialog";
-import { supabase } from "@/integrations/supabase/client";
+import { useEffect, useState } from "react";
+import { HeaderWalkIns } from "@/components/layout/HeaderWalkIns";
 
 const pageTitles: Record<string, string> = {
   "/": "Dashboard",
@@ -144,7 +141,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const title = pageTitles[location.pathname] || "NIMT UniOs";
   const { profile, role } = useAuth();
   const [deferredShellReady, setDeferredShellReady] = useState(false);
-  const [showWalkIn, setShowWalkIn] = useState(false);
   const showWalkInBtn = role === "counsellor" || role === "admission_head" || role === "super_admin" || role === "campus_admin" || role === "principal";
   // Active-users widget: super_admin sees everyone; campus_admin/principal/
   // admission_head see only members of teams they lead (scoped in the RPC).
@@ -191,11 +187,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
               <div className="flex flex-shrink-0 items-center gap-1 sm:gap-1.5">
-                {showWalkInBtn && (
-                  <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => setShowWalkIn(true)}>
-                    <Footprints className="h-3.5 w-3.5" /> Record Walk-in
-                  </Button>
-                )}
+                {showWalkInBtn && <HeaderWalkIns />}
                 {!isPortal && <HeaderSearch />}
                 {deferredShellReady && <HeaderFeedbackWidget />}
                 {deferredShellReady && !isPortal && <WhatsAppPanel />}
@@ -226,27 +218,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </SidebarProvider>
     </div>
-    {showWalkIn && (
-      <Suspense fallback={null}>
-        <NavbarWalkInDialog open={showWalkIn} onOpenChange={setShowWalkIn} />
-      </Suspense>
-    )}
     </CounsellorFilterProvider>
   );
-}
-
-function NavbarWalkInDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const [courses, setCourses] = useState<{ id: string; name: string }[]>([]);
-  const [campuses, setCampuses] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => {
-    if (!open) return;
-    Promise.all([
-      supabase.from("courses").select("id, name").order("name"),
-      supabase.from("campuses").select("id, name").order("name"),
-    ]).then(([c, camp]) => {
-      if (c.data) setCourses(c.data);
-      if (camp.data) setCampuses(camp.data);
-    });
-  }, [open]);
-  return <WalkInDialog open={open} onOpenChange={onOpenChange} courses={courses} campuses={campuses} />;
 }

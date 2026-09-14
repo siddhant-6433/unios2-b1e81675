@@ -9,13 +9,14 @@ import { Button } from "@/components/ui/button";
 import { TodayVisitBoard } from "@/components/visits/TodayVisitBoard";
 import { PostVisitQueue } from "@/components/visits/PostVisitQueue";
 import { OnCampusBoard } from "@/components/visits/OnCampusBoard";
+import { WalkInsBoard } from "@/components/visits/WalkInsBoard";
 import { WalkInDialog } from "@/components/visits/WalkInDialog";
 import { Footprints, Calendar, Clock, DoorOpen } from "lucide-react";
 
 interface Course { id: string; name: string }
 interface Campus { id: string; name: string }
 
-type Tab = "today" | "on_campus" | "post_visit";
+type Tab = "today" | "on_campus" | "walkins" | "post_visit";
 
 export default function VisitCenter() {
   const [tab, setTab] = useState<Tab>("today");
@@ -40,6 +41,7 @@ export default function VisitCenter() {
   const TABS: { key: Tab; label: string; icon: typeof Calendar }[] = [
     { key: "today", label: "Today & Upcoming", icon: Calendar },
     { key: "on_campus", label: "On Campus", icon: DoorOpen },
+    { key: "walkins", label: "Walk-ins", icon: Footprints },
     { key: "post_visit", label: "Post-Visit Queue", icon: Clock },
   ];
 
@@ -87,6 +89,8 @@ export default function VisitCenter() {
         <TodayVisitBoard campusId={campusId || undefined} refreshKey={refreshKey} onChanged={bump} />
       ) : tab === "on_campus" ? (
         <OnCampusBoard campusId={campusId || undefined} refreshKey={refreshKey} onChanged={bump} />
+      ) : tab === "walkins" ? (
+        <WalkInsBoard campusId={campusId || undefined} refreshKey={refreshKey} />
       ) : (
         <PostVisitQueue refreshKey={refreshKey} onChanged={bump} />
       )}

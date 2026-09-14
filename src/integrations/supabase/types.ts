@@ -36092,6 +36092,7 @@ export type Database = {
           _phone: string
           _purpose?: string
           _source?: Database["public"]["Enums"]["lead_source"]
+          _already_left?: boolean
         }
         Returns: Json
       }

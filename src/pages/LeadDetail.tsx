@@ -60,7 +60,7 @@ const RecordPaymentDialog          = lazy(() => import("@/components/admissions/
 const SendPaymentLinkDialog        = lazy(() => import("@/components/finance/SendPaymentLinkDialog").then(m => ({ default: m.SendPaymentLinkDialog })));
 const OfflinePaymentDialog         = lazy(() => import("@/components/finance/OfflinePaymentDialog").then(m => ({ default: m.OfflinePaymentDialog })));
 const SendEmailDialog              = lazy(() => import("@/components/leads/SendEmailDialog").then(m => ({ default: m.SendEmailDialog })));
-const DirectDialGuardDialog        = lazy(() => import("@/components/admissions/DirectDialGuardDialog").then(m => ({ default: m.DirectDialGuardDialog })));
+const WalkInDialog = lazy(() => import("@/components/visits/WalkInDialog").then(m => ({ default: m.WalkInDialog })));
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { useCallQueue } from "@/hooks/useCallQueue";
 import { useQueryClient } from "@tanstack/react-query";
@@ -69,6 +69,7 @@ import { STAGE_LABELS, shouldAutoAdvance } from "@/lib/leadStages";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import { completeCampusVisit } from "@/lib/visitCompletion";
+import { completeWalkIn, walkInElapsed } from "@/lib/liveWalkIns";
 
 // Score points for each disposition (mirrors DB trigger)
 const DISPOSITION_POINTS: Record<string, { points: number; label: string }> = {
@@ -164,7 +165,8 @@ const LeadDetail = () => {
   const [showRecordPayment, setShowRecordPayment] = useState(false);
   const [showSendPaymentLink, setShowSendPaymentLink] = useState(false);
   const [showTokenOverride, setShowTokenOverride] = useState(false);
-  const [showWalkinCompletion, setShowWalkinCompletion] = useState(false);
+  const [showRecordWalkIn, setShowRecordWalkIn] = useState(false);
+  const [completingLiveWalkIn, setCompletingLiveWalkIn] = useState(false);
   const [showSendEmail, setShowSendEmail] = useState(false);
   const [paymentRefreshKey, setPaymentRefreshKey] = useState(0);
   // When the fee ledger has no activity it renders nothing; we surface the
@@ -1291,6 +1293,45 @@ const LeadDetail = () => {
         </div>
       )}
 
+      {/* On campus now — live walk-in for this lead. */}
+      {(() => {
+        const liveWalkIn = visits.find((v: any) => v.visit_type === "walk_in" && v.checked_in_at && !v.checked_out_at);
+        if (!liveWalkIn) return null;
+        const liveCampus = campuses.find((c: any) => c.id === liveWalkIn.campus_id);
+        const code = liveCampus?.code || liveCampus?.name;
+        return (
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-success/30 bg-success/5 px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">On campus now</p>
+              <p className="text-xs text-muted-foreground">
+                {code ? `${code} · ` : ""}{walkInElapsed(liveWalkIn.checked_in_at)}
+                {liveWalkIn.purpose ? ` · ${liveWalkIn.purpose}` : ""}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              className="shrink-0 gap-1.5"
+              disabled={completingLiveWalkIn}
+              onClick={async () => {
+                setCompletingLiveWalkIn(true);
+                try {
+                  await completeWalkIn(liveWalkIn.id);
+                  toast({ title: "Walk-in completed", description: `${lead.name} has left.` });
+                  fetchAll(true);
+                } catch (err: any) {
+                  toast({ title: "Could not complete walk-in", description: err?.message, variant: "destructive" });
+                } finally {
+                  setCompletingLiveWalkIn(false);
+                }
+              }}
+            >
+              {completingLiveWalkIn ? <ButtonOrb state="working" onFilled /> : <Footprints className="h-3.5 w-3.5" />}
+              Complete
+            </Button>
+          </div>
+        );
+      })()}
+
       {/* Quick action icon bar */}
       {(() => {
         const canCreateProposal = role === "super_admin" || role === "principal" || role === "counsellor" || role === "admission_head" || role === "campus_admin";
@@ -1312,7 +1353,7 @@ const LeadDetail = () => {
           { icon: WhatsAppIcon, label: "WhatsApp", color: "text-success bg-success/10 dark:bg-success/80/30", action: () => setShowWhatsApp(true) },
           { icon: Clock, label: "Follow Up", color: "text-warning-foreground bg-warning/10 dark:bg-warning/80/30", action: () => setShowFollowup(true) },
           { icon: MapPin, label: "Schedule Visit", color: "text-primary bg-primary/10 dark:bg-primary/80/30", action: () => setShowScheduleVisit(true) },
-          { icon: Footprints, label: "Log Walk-In", color: "text-success bg-success/10 dark:bg-success/80/30", action: () => setShowWalkinCompletion(true) },
+          { icon: Footprints, label: "Record Walk-in", color: "text-success bg-success/10 dark:bg-success/80/30", action: () => setShowRecordWalkIn(true) },
           { icon: Mail, label: "Email", color: "text-sky-600 bg-sky-100 dark:bg-sky-900/30", action: () => setShowSendEmail(true) },
           ...(isSuperAdmin ? [{
             icon: Bot, label: "AI Call", color: "text-warning-foreground bg-warning/10 dark:bg-warning/80/30", action: triggerAiCall, disabled: aiCalling,
@@ -1601,8 +1642,6 @@ const LeadDetail = () => {
             leadId={id!}
             userId={user?.id || null}
             onRefresh={() => fetchAll(true)}
-            showWalkin={showWalkinCompletion}
-            onCloseWalkin={() => setShowWalkinCompletion(false)}
           />
 
           {/* Previous Call Notes */}
@@ -1771,6 +1810,23 @@ const LeadDetail = () => {
         requireScreenshot
         title="Manual Override — Token Paid"
       />
+
+      {/* Record Walk-in — check-in so they appear on the navbar live list. */}
+      <Suspense fallback={null}>
+        <WalkInDialog
+          open={showRecordWalkIn}
+          onOpenChange={setShowRecordWalkIn}
+          defaults={{
+            name: lead.name,
+            phone: lead.phone,
+            email: lead.email || undefined,
+            courseId: lead.course_id || undefined,
+            campusId: lead.campus_id || undefined,
+          }}
+          lockIdentity
+          onRecorded={() => fetchAll(true)}
+        />
+      </Suspense>
 
       {/* Schedule Visit Dialog */}
       <ScheduleVisitDialog
@@ -1978,16 +2034,13 @@ const LeadDetail = () => {
 };
 
 // ── Scheduled Visits Section with Completion Dialog ──────────────────
-function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment, leadId, userId, onRefresh, showWalkin, onCloseWalkin }: {
+function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment, leadId, userId, onRefresh }: {
   visits: any[]; campuses: any[]; courses: any[];
   coursesByDepartment: { department: string; courses: { id: string; name: string; code: string; institution_type: string }[] }[];
   leadId: string; userId: string | null; onRefresh: () => void;
-  showWalkin?: boolean; onCloseWalkin?: () => void;
 }) {
   const { toast } = useToast();
   const [completingVisitId, setCompletingVisitId] = useState<string | null>(null);
-  const [isWalkin, setIsWalkin] = useState(false);
-  const [walkinCampusId, setWalkinCampusId] = useState(campuses[0]?.id || "");
   const [feedback, setFeedback] = useState("");
   const [courseInterest, setCourseInterest] = useState("");
   const [courseInterestId, setCourseInterestId] = useState("");
@@ -2006,19 +2059,9 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
   const [noShowAction, setNoShowAction] = useState<"followup" | "reschedule">("followup");
   const [noShowDate, setNoShowDate] = useState("");
 
-  // Open walk-in dialog when triggered from parent
-  useEffect(() => {
-    if (showWalkin) {
-      setIsWalkin(true);
-      setCompletingVisitId("walkin");
-      setFeedback(""); setCourseInterest(""); setCourseInterestId(""); setSchoolAdmissionType(""); setExpectedAdmissionDate(""); setFollowupDate("");
-      setWalkinCampusId(campuses[0]?.id || "");
-    }
-  }, [showWalkin]);
-
   const scheduled = visits.filter((v: any) => ["scheduled", "confirmed"].includes(v.status));
 
-  const completingVisit = completingVisitId && completingVisitId !== "walkin"
+  const completingVisit = completingVisitId
     ? visits.find((v: any) => v.id === completingVisitId)
     : null;
 
@@ -2038,17 +2081,13 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
     // Get counsellor name and campus name for activity log
     const { data: myProfile } = await supabase.from("profiles").select("display_name").eq("user_id", userId).single();
     const counsellorLabel = myProfile?.display_name || "Counsellor";
-    const walkinCampus = campuses.find((c: any) => c.id === walkinCampusId);
-    const visitCampus = completingVisit ? campuses.find((c: any) => c.id === completingVisit.campus_id) : walkinCampus;
+    const visitCampus = completingVisit ? campuses.find((c: any) => c.id === completingVisit.campus_id) : null;
     const campusLabel = visitCampus?.name || "Campus";
 
-    // Shared with the Cloud Dialer's inline "Log walk-in" action so the two
-    // surfaces can't write different rows for the same event.
     await completeCampusVisit({
       leadId,
       userId,
-      visitId: isWalkin ? null : completingVisitId,
-      campusId: walkinCampusId,
+      visitId: completingVisitId,
       campusLabel,
       counsellorLabel,
       feedback,
@@ -2058,12 +2097,10 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
       followupDate,
     });
 
-    toast({ title: isWalkin ? "Walk-in visit recorded" : "Visit completed", description: "Follow-up scheduled." });
+    toast({ title: "Visit completed", description: "Follow-up scheduled." });
     setSaving(false);
     setCompletingVisitId(null);
-    setIsWalkin(false);
     setFeedback(""); setCourseInterest(""); setCourseInterestId(""); setSchoolAdmissionType(""); setExpectedAdmissionDate(""); setFollowupDate("");
-    if (onCloseWalkin) onCloseWalkin();
     onRefresh();
   };
 
@@ -2114,24 +2151,15 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
       </div>
 
       {/* Visit Completion Dialog */}
-      <Dialog open={!!completingVisitId} onOpenChange={(o) => { if (!o) { setCompletingVisitId(null); setIsWalkin(false); setCourseInterestId(""); setSchoolAdmissionType(""); if (onCloseWalkin) onCloseWalkin(); } }}>
+      <Dialog open={!!completingVisitId} onOpenChange={(o) => { if (!o) { setCompletingVisitId(null); setCourseInterestId(""); setSchoolAdmissionType(""); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              {isWalkin ? <Footprints className="h-4 w-4 text-success" /> : <CheckCircle className="h-4 w-4 text-success" />}
-              {isWalkin ? "Log Walk-in Visit" : "Complete Visit"}
+              <CheckCircle className="h-4 w-4 text-success" />
+              Complete Visit
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            {/* Campus selector for walk-ins */}
-            {isWalkin && campuses.length > 0 && (
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Campus *</label>
-                <select value={walkinCampusId} onChange={(e) => setWalkinCampusId(e.target.value)} className={inputCls}>
-                  {campuses.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-            )}
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Candidate Feedback *</label>
               <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} rows={2}
@@ -2222,7 +2250,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
             <Button variant="outline" onClick={() => setCompletingVisitId(null)}>Cancel</Button>
             <Button onClick={handleComplete} disabled={!followupDate || saving} className="gap-2 bg-success hover:bg-success/90">
               {saving ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />}
-              {isWalkin ? "Save Walk-in & Schedule Follow-up" : "Complete & Schedule Follow-up"}
+              Complete & Schedule Follow-up
             </Button>
           </DialogFooter>
         </DialogContent>

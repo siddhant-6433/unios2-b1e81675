@@ -12,7 +12,7 @@ const ACTIONS: { key: DialerAction; label: string; icon: typeof FileText }[] = [
   { key: "apply", label: "Login link", icon: FileText },
   { key: "visit", label: "Schedule visit", icon: Calendar },
   { key: "proposal", label: "Fee proposal", icon: FileText },
-  { key: "walkin", label: "Log walk-in", icon: Footprints },
+  { key: "walkin", label: "Log a Previous Walk-In", icon: Footprints },
 ];
 
 /** How many actions stay inline before the rest fold into "More". */

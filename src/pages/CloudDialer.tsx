@@ -13,7 +13,7 @@ import {
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
   Calendar, AlertCircle, Volume2, Pencil, Check, X, Search,
   FileText, PhoneIncoming, ArrowRight, PhoneCall, ChevronDown,
-  MessageCircle, ChevronRight, IndianRupee, Footprints, ListChecks, RefreshCw,
+  MessageCircle, ChevronRight, IndianRupee, ListChecks, RefreshCw,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useSidebar } from "@/components/ui/sidebar";
@@ -38,7 +38,7 @@ import {
   useCloudDialerBootstrap, useCloudDialerCampaignQueue, useCloudDialerListQueue,
   useCloudDialerQueue, useCampuses, useMyCallLists, useMyProfileId,
 } from "@/hooks/useAdmissionsData";
-import { completeCampusVisit } from "@/lib/visitCompletion";
+import { PreviousWalkInDialog } from "@/components/visits/PreviousWalkInDialog";
 import { isBscNursingCourse } from "@/lib/bscNursing";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
 import { isLeadCallDisposition, resolveCallDispositionTransition, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
@@ -251,10 +251,6 @@ export default function CloudDialer() {
   const [showWhatsApp, setShowWhatsApp] = useState(false);
   const [showApplyLink, setShowApplyLink] = useState(false);
   const [showWalkin, setShowWalkin] = useState(false);
-  const [walkinCampusId, setWalkinCampusId] = useState("");
-  const [walkinFeedback, setWalkinFeedback] = useState("");
-  const [walkinFollowupDate, setWalkinFollowupDate] = useState("");
-  const [walkinSaving, setWalkinSaving] = useState(false);
   const { data: campuses = [] } = useCampuses();
 
   // Toolbar: dial-pad + incoming lookup share one popover.
@@ -1505,33 +1501,6 @@ export default function CloudDialer() {
       }
     }
     return true;
-  };
-
-  const saveWalkin = async () => {
-    if (!currentLead || !walkinFollowupDate) {
-      toast({ title: "Follow-up required", description: "Pick a post-visit follow-up date.", variant: "destructive" });
-      return;
-    }
-    setWalkinSaving(true);
-    try {
-      await completeCampusVisit({
-        leadId: currentLead.id,
-        userId: user?.id || null,
-        visitId: null,
-        campusId: walkinCampusId || null,
-        campusLabel: campuses.find(c => c.id === walkinCampusId)?.name || currentLead.campus_name,
-        counsellorLabel: counsellorDisplayName,
-        feedback: walkinFeedback,
-        followupDate: walkinFollowupDate,
-      });
-      toast({ title: "Walk-in recorded", description: "Post-visit follow-up scheduled." });
-      setShowWalkin(false);
-      setWalkinFeedback(""); setWalkinFollowupDate("");
-    } catch (e: any) {
-      toast({ title: "Could not save walk-in", description: e?.message || "Try again.", variant: "destructive" });
-    } finally {
-      setWalkinSaving(false);
-    }
   };
 
   const skipLead = () => {
@@ -2871,48 +2840,17 @@ export default function CloudDialer() {
         </Suspense>
       )}
 
-      {/* Walk-in: a completed campus_visits row + the mandatory post-visit
-          follow-up, written through the same helper the lead page uses. */}
       {showWalkin && currentLead && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => !walkinSaving && setShowWalkin(false)}>
-          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-4 space-y-3"
-            onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-foreground">Log walk-in — {currentLead.name}</h3>
-              <button onClick={() => setShowWalkin(false)} className="text-muted-foreground hover:text-foreground">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Campus</label>
-              <select value={walkinCampusId} onChange={e => setWalkinCampusId(e.target.value)}
-                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs">
-                <option value="">Select campus…</option>
-                {campuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Feedback</label>
-              <textarea value={walkinFeedback} onChange={e => setWalkinFeedback(e.target.value)} rows={2}
-                placeholder="What did they say on campus?"
-                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Post-visit follow-up <span className="text-destructive">*</span>
-              </label>
-              <input type="date" value={walkinFollowupDate} onChange={e => setWalkinFollowupDate(e.target.value)}
-                min={new Date().toISOString().slice(0, 10)}
-                max={new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10)}
-                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs" />
-            </div>
-            <Button size="sm" className="w-full h-8 text-xs" onClick={saveWalkin} disabled={walkinSaving || !walkinFollowupDate}>
-              {walkinSaving ? <ButtonOrb state="connecting" onFilled /> : <Footprints className="h-3 w-3 mr-1" />}
-              Record walk-in
-            </Button>
-          </div>
-        </div>
+        <PreviousWalkInDialog
+          open={showWalkin}
+          onOpenChange={setShowWalkin}
+          leadId={currentLead.id}
+          leadName={currentLead.name}
+          userId={user?.id || null}
+          counsellorLabel={counsellorDisplayName}
+          campuses={campuses}
+          defaultCampusId={(currentLead as any).campus_id || undefined}
+        />
       )}
     </div>
   );

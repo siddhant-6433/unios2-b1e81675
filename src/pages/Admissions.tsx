@@ -10,7 +10,7 @@ import { useCampus } from "@/contexts/CampusContext";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
-import { Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload, Eye, MoreHorizontal, Users, TrendingUp, ArrowUpRight, Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus, Bell, Download, Share2 } from "lucide-react";
+import { Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload, Eye, MoreHorizontal, Users, TrendingUp, ArrowUpRight, Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus, Bell, Download, Share2, Footprints } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,8 @@ import {
 
 const AddLeadDialog = lazy(() =>
   import("@/components/admissions/AddLeadDialog").then((m) => ({ default: m.AddLeadDialog })));
+const WalkInDialog = lazy(() =>
+  import("@/components/visits/WalkInDialog").then((m) => ({ default: m.WalkInDialog })));
 const LeadDraftsPanel = lazy(() =>
   import("@/components/admissions/LeadDraftsPanel").then((m) => ({ default: m.LeadDraftsPanel })));
 const BulkLeadImportDialog = lazy(() =>
@@ -307,6 +309,7 @@ const Admissions = () => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showAddLead, setShowAddLead] = useState(false);
+  const [showRecordWalkIn, setShowRecordWalkIn] = useState(false);
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>();
   const [draftsRefreshKey, setDraftsRefreshKey] = useState(0);
   const [showBulkImport, setShowBulkImport] = useState(false);
@@ -2067,6 +2070,7 @@ const Admissions = () => {
             </Button>
           )}
           <Button variant="pill-outline" size="pill" onClick={() => setShowBulkImport(true)} className="gap-2"><Upload className="h-4 w-4" />Import CSV</Button>
+          <Button variant="pill-outline" size="pill" onClick={() => setShowRecordWalkIn(true)} className="gap-2"><Footprints className="h-4 w-4" />Record Walk-in</Button>
           <Button variant="pill" size="pill" onClick={() => { setResumeDraftId(undefined); setShowAddLead(true); }} className="gap-2"><Plus className="h-4 w-4" />Add Lead</Button>
         </div>
       </div>
@@ -3193,6 +3197,16 @@ const Admissions = () => {
             onSuccess={fetchLeads}
             resumeDraftId={resumeDraftId}
             onDraftChange={() => setDraftsRefreshKey(k => k + 1)}
+            onRecordWalkIn={() => setShowRecordWalkIn(true)}
+          />
+        </Suspense>
+      )}
+      {showRecordWalkIn && (
+        <Suspense fallback={null}>
+          <WalkInDialog
+            open={showRecordWalkIn}
+            onOpenChange={setShowRecordWalkIn}
+            onRecorded={fetchLeads}
           />
         </Suspense>
       )}

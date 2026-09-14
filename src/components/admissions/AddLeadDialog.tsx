@@ -6,11 +6,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { TextField, SelectField, TextAreaField } from "@/components/ui/state-fields";
-import { Plus, CloudUpload, CheckCircle2 } from "lucide-react";
+import { Plus, CloudUpload, CheckCircle2, Footprints } from "lucide-react";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { DuplicateLeadWarning } from "@/components/admissions/DuplicateLeadWarning";
-import { LEAD_SOURCES } from "@/config/leadSources";
+import { MANUAL_ENTRY_SOURCES } from "@/config/leadSources";
 import { isBscNursingCourse } from "@/lib/bscNursing";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
 
@@ -22,6 +22,8 @@ interface AddLeadDialogProps {
   resumeDraftId?: string;
   /** Fired after a draft is saved/updated, so the parent can refresh its drafts list. */
   onDraftChange?: () => void;
+  /** Student at the desk — close this form and open Record Walk-in instead. */
+  onRecordWalkIn?: () => void;
 }
 
 const EMPTY_FORM = {
@@ -31,7 +33,7 @@ const EMPTY_FORM = {
   cahet_registered: "" as "" | "yes" | "no",
 };
 
-export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, onDraftChange }: AddLeadDialogProps) {
+export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, onDraftChange, onRecordWalkIn }: AddLeadDialogProps) {
   const { user } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
@@ -229,6 +231,20 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 mt-2">
+          {onRecordWalkIn && (
+            <button
+              type="button"
+              onClick={() => { onOpenChange(false); onRecordWalkIn(); }}
+              className="flex w-full items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-left text-sm text-foreground hover:bg-primary/10"
+            >
+              <Footprints className="h-4 w-4 text-primary shrink-0" />
+              <span>
+                <span className="font-medium">Student at the desk?</span>
+                {" "}
+                <span className="text-muted-foreground">Record a walk-in instead of adding a lead.</span>
+              </span>
+            </button>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <TextField
               value={form.name}
@@ -269,7 +285,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
                 source: value,
                 consultant_id: value === "consultant" ? p.consultant_id : "",
               }))}
-              options={LEAD_SOURCES.map(s => ({ value: s.value, label: s.label }))}
+              options={MANUAL_ENTRY_SOURCES.map(s => ({ value: s.value, label: s.label }))}
               label="Source"
               required
               placeholder="Select source"
