@@ -296,6 +296,22 @@ Deno.serve(async (req) => {
         skipped++;
         continue;
       }
+      const destEmail = r.to_email || lead.email || "";
+      const [{ data: emailBlocked }, { data: leadBlocked }] = await Promise.all([
+        destEmail
+          ? admin.rpc("email_comms_suppressed", { _email: destEmail })
+          : Promise.resolve({ data: false } as { data: boolean }),
+        r.lead_id
+          ? admin.rpc("lead_comms_suppressed", { _lead_id: r.lead_id })
+          : Promise.resolve({ data: false } as { data: boolean }),
+      ]);
+      if (emailBlocked || leadBlocked) {
+        await admin.from("email_campaign_recipients")
+          .update({ status: "skipped", error_message: "Student login is disabled — email not sent" })
+          .eq("id", r.id);
+        skipped++;
+        continue;
+      }
       // Academic-partner private leads are never part of NIMT outreach.
       if (lead.shared_with_nimt === false) {
         await admin.from("email_campaign_recipients")

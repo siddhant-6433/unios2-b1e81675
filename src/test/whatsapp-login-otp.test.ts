@@ -36,6 +36,22 @@ describe("WhatsApp login OTP edge function", () => {
     expect(whatsappOtp).toContain("listUsers({ page, perPage: 1000 })");
   });
 
+  it("blocks OTP send and verify for login-disabled students and applicants", () => {
+    expect(whatsappOtp).toContain("async function isCandidateLoginBlocked");
+    expect(whatsappOtp).toContain('admin.rpc("phone_comms_suppressed"');
+
+    const sendIndex = whatsappOtp.indexOf('if (action === "send")');
+    const verifyIndex = whatsappOtp.indexOf('if (action === "verify")');
+    const sendBlock = whatsappOtp.indexOf("isCandidateLoginBlocked", sendIndex);
+    const verifyBlock = whatsappOtp.indexOf("isCandidateLoginBlocked", verifyIndex);
+
+    expect(sendIndex).toBeGreaterThan(-1);
+    expect(verifyIndex).toBeGreaterThan(sendIndex);
+    expect(sendBlock).toBeGreaterThan(sendIndex);
+    expect(sendBlock).toBeLessThan(verifyIndex);
+    expect(verifyBlock).toBeGreaterThan(verifyIndex);
+  });
+
   it("never resolves the provisioning lookup by phone", () => {
     // The synthetic emails are role-scoped, and one number legitimately fronts
     // several accounts — a phone match would return the student account for an

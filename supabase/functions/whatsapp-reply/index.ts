@@ -118,6 +118,13 @@ Deno.serve(async (req) => {
       }
     }
 
+    const { data: phoneBlocked } = await admin.rpc("phone_comms_suppressed", { _phone: phone });
+    if (phoneBlocked) {
+      return new Response(JSON.stringify({ error: "Student login is disabled — message not sent" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const waPhone = digits(phone);
     const sendResult = media_url
       ? await sendWhatsAppMedia(admin, channelHint, waPhone, (media_type || "image") as WhatsAppMediaType, media_url, message || undefined)

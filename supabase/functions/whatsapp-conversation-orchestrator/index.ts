@@ -235,6 +235,26 @@ Deno.serve(async (req) => {
       });
     }
 
+    {
+      const { data: phoneBlocked } = await admin.rpc("phone_comms_suppressed", { _phone: phone });
+      if (phoneBlocked) {
+        await logWhatsAppAutomationEvent(admin, {
+          phone,
+          businessNumber,
+          provider,
+          leadId,
+          messageId,
+          eventType: "skip_reply",
+          decision: "skip_reply",
+          reason: "login_disabled",
+        });
+        return new Response(JSON.stringify({ ok: true, decision: "skip_reply", reason: "login_disabled" }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     if (messageType === "text" && content.trim() && DNC_PATTERNS.test(content.trim())) {
       const { data: leadForNotification } = leadId
         ? await admin.from("leads").select("name,counsellor_id,stage").eq("id", leadId).maybeSingle()

@@ -113,6 +113,11 @@ export type DocState = 'verified' | 'rejected' | 'pending' | 'missing';
 
 export interface MergedDoc { doc_key: string; review_status?: string }
 
+/** School photo uploads are stored as passport_photo; the required key is student_photo. */
+export function canonicalDocKey(key: string): string {
+  return key === 'passport_photo' ? 'student_photo' : key;
+}
+
 export function computeAdmissionDocStatus(
   required: DocSpec[],
   uploaded: MergedDoc[],
@@ -121,9 +126,10 @@ export function computeAdmissionDocStatus(
   const byKey = new Map<string, string[]>();
   for (const d of uploaded) {
     if (!d?.doc_key) continue;
-    const arr = byKey.get(d.doc_key) || [];
+    const key = canonicalDocKey(d.doc_key);
+    const arr = byKey.get(key) || [];
     arr.push(d.review_status || 'pending');
-    byKey.set(d.doc_key, arr);
+    byKey.set(key, arr);
   }
 
   const docs = mandatory.map(spec => {
