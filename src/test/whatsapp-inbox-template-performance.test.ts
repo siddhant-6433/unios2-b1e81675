@@ -112,7 +112,7 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(inbox).toContain("primaryInboxLabel");
     expect(inbox).toContain("All WhatsApp numbers");
     expect(inbox).toContain('businessNumber === "all"');
-    expect(inbox).toContain('select("business_phone_number_id, business_phone_number")');
+    expect(inbox).toContain('rpc("whatsapp_inbox_channel_keys"');
     expect(inbox).not.toContain('from("whatsapp_conversations" as any)');
     expect(inbox).toContain('from("whatsapp_messages" as any)');
     expect(inbox).toContain("isHrBusinessChannel");
