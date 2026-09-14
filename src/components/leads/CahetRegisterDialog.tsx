@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { CheckCircle2, Upload } from "lucide-react";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 export interface CahetRegisterTarget {
   lead_id: string;
@@ -27,6 +28,7 @@ interface Props {
 
 export function CahetRegisterDialog({ target, onClose, onSaved }: Props) {
   const { toast } = useToast();
+  const showPhone = useDisplayPhone();
   const [regNo, setRegNo] = useState("");
   const [notes, setNotes] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -92,7 +94,7 @@ export function CahetRegisterDialog({ target, onClose, onSaved }: Props) {
           <DialogDescription>
             {target.lead_name}
             {target.course_name ? ` · ${target.course_name}` : ""}
-            {target.phone ? ` · ${target.phone}` : ""}
+            {target.phone ? ` · ${showPhone(target.phone)}` : ""}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">

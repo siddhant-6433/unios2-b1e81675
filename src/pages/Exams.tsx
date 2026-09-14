@@ -13,6 +13,7 @@ import {
 } from "@/lib/examRegistration";
 import { signExamRegistrationDoc } from "@/lib/examRegistrationClient";
 import { exportRowsCsv, formatExportDateTime } from "@/lib/xlsxExport";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -54,6 +55,7 @@ type ExamFilter = ExamCode | "all";
 
 const Exams = () => {
   const { role } = useAuth();
+  const showPhone = useDisplayPhone();
   const { toast } = useToast();
   const [rows, setRows] = useState<ExamRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -251,7 +253,7 @@ const Exams = () => {
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">{EXAM_SHORT_LABELS[r.exam_code]}</TableCell>
                     <TableCell>{r.lead_name}</TableCell>
-                    <TableCell className="whitespace-nowrap">{r.phone}</TableCell>
+                    <TableCell className="whitespace-nowrap">{showPhone(r.phone)}</TableCell>
                     <TableCell>{r.course_name}</TableCell>
                     <TableCell>{r.campus_name}</TableCell>
                     <TableCell>{r.counsellor_name}</TableCell>

@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, IndianRupee, Search } from "lucide-react";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 interface PaymentRow {
   lead_id: string;
@@ -30,6 +31,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 export function PaymentReconciliation() {
+  const showPhone = useDisplayPhone();
   const navigate = useNavigate();
   const [rows, setRows] = useState<PaymentRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -145,7 +147,7 @@ export function PaymentReconciliation() {
                 >
                   <td className="px-4 py-3">
                     <div className="font-medium text-foreground">{r.name}</div>
-                    <div className="text-xs text-muted-foreground">{r.phone}</div>
+                    <div className="text-xs text-muted-foreground">{showPhone(r.phone)}</div>
                   </td>
                   <td className="px-4 py-3">
                     <Badge variant="outline" className="text-[10px]">{STAGE_LABELS[r.stage] || r.stage}</Badge>

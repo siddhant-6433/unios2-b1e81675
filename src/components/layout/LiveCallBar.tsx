@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { Phone, Volume2, Loader2, PhoneMissed, Clock, PhoneIncoming } from "lucide-react";
 
@@ -48,6 +49,7 @@ const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().p
 
 export function LiveCallBar() {
   const { user, role } = useAuth();
+  const showPhone = useDisplayPhone();
   const isTeamLeader = useIsTeamLeader();
   const [calls, setCalls] = useState<ActiveCall[]>([]);
   const [now, setNow] = useState(Date.now());
@@ -191,7 +193,7 @@ export function LiveCallBar() {
         // Browser notification
         if ("Notification" in window && Notification.permission === "granted") {
           new Notification(`Incoming call from ${ic.lead_name}`, {
-            body: `${ic.lead_phone} — ${ic.lead_stage || "Lead"}`,
+            body: `${showPhone(ic.lead_phone)} — ${ic.lead_stage || "Lead"}`,
             icon: "/favicon.ico",
             tag: ic.call_uuid,
           });
@@ -339,7 +341,7 @@ export function LiveCallBar() {
               </p>
               <p className="text-base font-bold text-foreground truncate">{ic.lead_name}</p>
               <p className="text-xs text-muted-foreground">
-                {ic.lead_phone}
+                {showPhone(ic.lead_phone)}
                 {ic.lead_course ? ` · ${ic.lead_course}` : ""}
                 {" · "}
                 {formatTime(Math.floor((now - new Date(ic.created_at).getTime()) / 1000))}

@@ -16,6 +16,7 @@ import { useEffect, useState, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
@@ -69,6 +70,7 @@ function formatTime(d: Date): string {
 
 export default function MissedCalls() {
   const { user, role, profile } = useAuth();
+  const showPhone = useDisplayPhone();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [calls, setCalls] = useState<MissedCall[]>([]);
@@ -506,7 +508,7 @@ export default function MissedCalls() {
                           className="text-sm font-mono font-semibold text-success hover:underline shrink-0"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {mc.lead_phone}
+                          {showPhone(mc.lead_phone)}
                         </a>
                       </div>
                       <div className="mt-1.5 flex items-center gap-2 flex-wrap">

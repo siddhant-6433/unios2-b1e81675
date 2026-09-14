@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Phone, MessageSquare, ChevronRight, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ActionLead } from "@/hooks/useActionCenter";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 export type BucketVariant =
   | "overdue"
@@ -95,6 +96,7 @@ function ContextBadge({ lead, variant }: { lead: ActionLead; variant: BucketVari
 
 export function ActionLeadRow({ lead, variant, onCall, onCompleteVisit }: ActionLeadRowProps) {
   const navigate = useNavigate();
+  const showPhone = useDisplayPhone();
 
   const handleWhatsApp = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -125,7 +127,7 @@ export function ActionLeadRow({ lead, variant, onCall, onCompleteVisit }: Action
           <ContextBadge lead={lead} variant={variant} />
         </div>
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <span>{lead.phone}</span>
+          <span>{showPhone(lead.phone)}</span>
           {lead.course_name && lead.course_name !== "—" && (
             <>
               <span className="text-border">·</span>

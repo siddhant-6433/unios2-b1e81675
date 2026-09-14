@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -57,6 +58,7 @@ const formatReadableDate = (iso: string) =>
 export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campusName, courseDuration, courseType, courseId, onSuccess }: SendWhatsAppDialogProps) {
   const { toast } = useToast();
   const { profile } = useAuth();
+  const showPhone = useDisplayPhone();
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -198,7 +200,7 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
             <p className="text-[11px] text-muted-foreground">Sending to</p>
             <p className="text-sm font-medium text-foreground">{lead.name}</p>
           </div>
-          <p className="text-sm text-muted-foreground font-mono">{lead.phone}</p>
+          <p className="text-sm text-muted-foreground font-mono">{showPhone(lead.phone)}</p>
         </div>
 
         <WhatsAppTemplatePicker

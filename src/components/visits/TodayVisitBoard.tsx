@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { VisitCompleteDialog } from "./VisitCompleteDialog";
 import { Calendar, MapPin, UserCheck, CheckCircle2, XCircle, Footprints, ChevronRight, RefreshCw } from "lucide-react";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 interface VisitRow {
   id: string;
@@ -48,6 +49,7 @@ interface Props {
 }
 
 export function TodayVisitBoard({ campusId, refreshKey, onChanged }: Props) {
+  const showPhone = useDisplayPhone();
   const { toast } = useToast();
   const [visits, setVisits] = useState<VisitRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,7 +152,7 @@ export function TodayVisitBoard({ campusId, refreshKey, onChanged }: Props) {
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{fmtTime(v.visit_date)}</span>
                     <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{v.campus_name}</span>
-                    {v.lead_phone && <span>{v.lead_phone}</span>}
+                    {v.lead_phone && <span>{showPhone(v.lead_phone)}</span>}
                     {v.purpose && <span className="italic">{v.purpose}</span>}
                   </div>
                 </div>

@@ -10,6 +10,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { CheckCircle2, Upload } from "lucide-react";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 export interface UpdeledRegisterTarget {
   lead_id: string;
@@ -40,6 +41,7 @@ const updeledRpc = supabase as unknown as UpdeledRegistrationRpc;
 
 export function UpdeledRegisterDialog({ target, onClose, onSaved }: Props) {
   const { toast } = useToast();
+  const showPhone = useDisplayPhone();
   const [regNo, setRegNo] = useState("");
   const [notes, setNotes] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -105,7 +107,7 @@ export function UpdeledRegisterDialog({ target, onClose, onSaved }: Props) {
           <DialogDescription>
             {target.lead_name}
             {target.course_name ? ` · ${target.course_name}` : ""}
-            {target.phone ? ` · ${target.phone}` : ""}
+            {target.phone ? ` · ${showPhone(target.phone)}` : ""}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">

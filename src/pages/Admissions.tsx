@@ -41,6 +41,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ChevronDown } from "lucide-react";
 import { groupCourses, type CourseLike } from "@/lib/courseSort";
 import { exportRowsCsv, formatExportDateTime } from "@/lib/xlsxExport";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import type { DatePreset } from "@/lib/datePresets";
 import {
   ADMISSIONS_LEAD_LIST_SELECT,
@@ -267,6 +268,7 @@ const Admissions = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { role, realRole, profile, user } = useAuth();
+  const showPhone = useDisplayPhone();
   const { selectedCampusId, campuses } = useCampus();
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
@@ -2978,7 +2980,7 @@ const Admissions = () => {
                           </div>
                           <p className="text-[11px] text-muted-foreground mt-1">{lead.campus_name}</p>
                           <div className="flex items-center gap-3 mt-3 text-[11px] text-muted-foreground">
-                            <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{lead.phone.slice(-4)}</span>
+                            <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{showPhone(lead.phone)}</span>
                             {lead.application_id && <span className="font-mono text-primary/70">{lead.application_id}</span>}
                             <AppProgressBadge pct={lead.app_completion_pct} paymentStatus={lead.app_payment_status} />
                           </div>
@@ -3114,7 +3116,7 @@ const Admissions = () => {
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] text-muted-foreground truncate">{lead.phone}{lead.city ? ` · ${lead.city}` : ""}</div>
+                      <div className="text-[11px] text-muted-foreground truncate">{showPhone(lead.phone)}{lead.city ? ` · ${lead.city}` : ""}</div>
                       {summary && (
                         <div
                           className="mt-1 text-[11px] italic text-foreground/70 line-clamp-2 leading-snug"

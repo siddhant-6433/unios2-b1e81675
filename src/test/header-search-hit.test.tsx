@@ -45,4 +45,20 @@ describe("HeaderSearchHit", () => {
     expect(screen.queryByText(/PAN:/)).toBeNull();
     expect(screen.getByText("Student")).toBeInTheDocument();
   });
+
+  it("masks the phone as first3****last3 for non-super-admin viewers", () => {
+    render(
+      <HeaderSearchHit
+        result={{
+          type: "lead",
+          id: "l1",
+          name: "Amit Kumar",
+          phone: "9812345892",
+        }}
+        onClick={() => {}}
+      />,
+    );
+    expect(screen.getByText(/981\*\*\*\*892/)).toBeInTheDocument();
+    expect(screen.queryByText("9812345892")).toBeNull();
+  });
 });

@@ -29,6 +29,7 @@ import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { MessageCircle, CalendarDays, ExternalLink } from "lucide-react";
 import { feeTermLabelLong } from "@/lib/feeTermLabels";
 import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 interface Props {
   open: boolean;
@@ -60,6 +61,7 @@ const fmtDateHuman = (iso: string) => {
 export function NudgePaymentDialog({ open, onClose, candidate }: Props) {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const showPhone = useDisplayPhone();
 
   const [dueDate, setDueDate] = useState<string>("");
   const [loadingDate, setLoadingDate] = useState(false);
@@ -174,7 +176,7 @@ export function NudgePaymentDialog({ open, onClose, candidate }: Props) {
             </div>
             <div className="flex items-center justify-between px-3 py-2">
               <span className="text-xs text-muted-foreground">Phone</span>
-              <span className="text-sm font-mono tabular-nums">{candidate.phone || "—"}</span>
+              <span className="text-sm font-mono tabular-nums">{showPhone(candidate.phone) || "—"}</span>
             </div>
           </div>
 

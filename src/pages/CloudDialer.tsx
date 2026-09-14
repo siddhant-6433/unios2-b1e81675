@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } fro
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -158,6 +159,7 @@ const BUCKET_META: Record<string, { key: string; color: string; uiLabel: string 
 
 export default function CloudDialer() {
   const { user, role, profile } = useAuth();
+  const showPhone = useDisplayPhone();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [missedCount, setMissedCount] = useState(0);
@@ -1928,7 +1930,7 @@ export default function CloudDialer() {
                                 }`}>
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-medium text-foreground truncate">{lead.name}</p>
-                                  <p className="text-xs text-muted-foreground truncate">{lead.course_name} · {lead.phone.slice(-4)}</p>
+                                  <p className="text-xs text-muted-foreground truncate">{lead.course_name} · {showPhone(lead.phone)}</p>
                                 </div>
                                 <Badge className="text-[11px] border-0 bg-muted text-muted-foreground shrink-0">{lead.bucket}</Badge>
                                 {idx < currentIdx && <CheckCircle className="h-4 w-4 text-success shrink-0" />}

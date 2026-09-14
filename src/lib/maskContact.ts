@@ -1,13 +1,14 @@
-// Partial masking of phone numbers and emails for exports (and, later, list
-// views). Only super_admins download real values; everyone else sees masked
-// data. Single source of truth — mirror of the edge-side maskPhoneForLog
+// Partial masking of phone numbers and emails for CRM display and exports.
+// Only super_admins see real values; everyone else sees masked data. Single
+// source of truth — mirror of the edge-side maskPhoneForLog
 // (supabase/functions/_shared/phone.ts) and the LeadBuckets frontend pattern.
 
 export function maskPhone(value: string | null | undefined): string {
   const digits = String(value ?? "").replace(/\D/g, "");
   const last10 = digits.length > 10 ? digits.slice(-10) : digits; // drop +91 country code
-  if (last10.length <= 4) return last10 ? "****" : "";
-  return last10.slice(0, 2) + "*".repeat(last10.length - 4) + last10.slice(-2);
+  if (last10.length < 6) return last10 ? "****" : "";
+  // 10-digit mobiles: 981****892 (first 3 + last 3, four middle digits hidden).
+  return `${last10.slice(0, 3)}****${last10.slice(-3)}`;
 }
 
 export function maskEmail(value: string | null | undefined): string {
@@ -17,6 +18,18 @@ export function maskEmail(value: string | null | undefined): string {
   const local = s.slice(0, at);
   const domain = s.slice(at); // includes the "@"
   return (local.length <= 2 ? local : local.slice(0, 2)) + "****" + domain;
+}
+
+export function canUnmaskContact(role: string | null | undefined): boolean {
+  return role === "super_admin";
+}
+
+export function displayPhone(
+  value: string | null | undefined,
+  unmask = false,
+): string {
+  if (unmask) return value == null ? "" : String(value);
+  return maskPhone(value);
 }
 
 // Decide masking by column header; an "@" in the value wins (handles Marketing's

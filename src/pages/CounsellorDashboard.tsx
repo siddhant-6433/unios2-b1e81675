@@ -13,6 +13,7 @@ import { UpdeledSprintLeaderboard } from "@/components/dashboard/UpdeledSprintLe
 import { CAHET_SPRINT_OPEN, UPDELED_SPRINT_OPEN } from "@/lib/deadlineRollover";
 import { fetchCounsellorLeaderboard } from "@/lib/counsellorLeaderboard";
 import { LeadAssignmentHistory } from "@/components/dashboard/LeadAssignmentHistory";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import { MorningBrief } from "@/components/dashboard/MorningBrief";
 import { IncentiveWidget } from "@/components/dashboard/IncentiveWidget";
 
@@ -1293,7 +1294,7 @@ const CounsellorDashboard = () => {
                                                   }}
                                                 >
                                                   <td className="px-3 py-2 font-medium text-foreground">{lead.name}</td>
-                                                  <td className="px-3 py-2 text-muted-foreground">{lead.phone}</td>
+                                                  <td className="px-3 py-2 text-muted-foreground">{showPhone(lead.phone)}</td>
                                                   <td className="px-3 py-2">
                                                     <Badge variant="outline" className="text-[9px]">{STAGE_LABELS[lead.stage] || lead.stage}</Badge>
                                                   </td>
@@ -1904,6 +1905,7 @@ const FunnelTab = ({
   range: "7d" | "30d" | "all";
   onRangeChange: (r: "7d" | "30d" | "all") => void;
 }) => {
+  const showPhone = useDisplayPhone();
   // Aggregate team-wide counts per stage across the date range.
   const teamTotals: Record<string, number> = {};
   for (const r of rows) {

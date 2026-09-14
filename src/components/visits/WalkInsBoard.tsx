@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Footprints, MapPin, RefreshCw, ChevronRight } from "lucide-react";
 import { formatWalkInWhen } from "@/lib/walkInHistory";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 interface WalkInRow {
   id: string;
@@ -27,6 +28,7 @@ interface Props {
 }
 
 export function WalkInsBoard({ campusId, refreshKey }: Props) {
+  const showPhone = useDisplayPhone();
   const [rows, setRows] = useState<WalkInRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -113,7 +115,7 @@ export function WalkInsBoard({ campusId, refreshKey }: Props) {
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                       <span>{formatWalkInWhen(v.checked_in_at || v.visit_date)}</span>
                       <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{v.campus_name}</span>
-                      {v.lead_phone && <span>{v.lead_phone}</span>}
+                      {v.lead_phone && <span>{showPhone(v.lead_phone)}</span>}
                     </div>
                     {comments && <p className="mt-1 text-xs text-foreground/80 line-clamp-2">{comments}</p>}
                   </div>
