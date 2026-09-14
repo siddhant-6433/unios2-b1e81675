@@ -208,14 +208,14 @@ export interface CloudDialerBootstrapPayload {
  * Used by transfer/edit dialogs across many pages.
  */
 export function useCampuses() {
-  return useQuery<{ id: string; name: string }[]>({
+  return useQuery<{ id: string; name: string; code: string }[]>({
     queryKey: ["ref:campuses"],
     staleTime: 10 * 60_000,
     gcTime: 60 * 60_000,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("campuses")
-        .select("id, name")
+        .select("id, name, code")
         .order("name");
       if (error) throw error;
       return data || [];

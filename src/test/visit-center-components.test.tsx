@@ -6,6 +6,8 @@ import { WalkInDialog } from "@/components/visits/WalkInDialog";
 import { VisitCompleteDialog } from "@/components/visits/VisitCompleteDialog";
 import { TodayVisitBoard } from "@/components/visits/TodayVisitBoard";
 import { PostVisitQueue } from "@/components/visits/PostVisitQueue";
+import { WalkInsBoard } from "@/components/visits/WalkInsBoard";
+import { PreviousWalkInDialog } from "@/components/visits/PreviousWalkInDialog";
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -109,6 +111,7 @@ describe("WalkInDialog", () => {
         _campus_id: null,
         _purpose: null,
         _notes: null,
+        _already_left: false,
       });
     });
 
@@ -116,6 +119,45 @@ describe("WalkInDialog", () => {
     // deduped, pre-existing) lead returned by the RPC.
     expect(await screen.findByRole("button", { name: /send token payment link/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /open candidate/i })).toHaveAttribute("href", "/admissions/lead-9");
+  });
+
+  it("records an already-left walk-in without keeping them live", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: { lead_id: "lead-9", visit_id: "visit-9", already_left: true },
+      error: null,
+    });
+
+    render(<MemoryRouter><WalkInDialog {...props} /></MemoryRouter>);
+
+    fireEvent.change(screen.getByPlaceholderText("Candidate name"), { target: { value: "Asha Verma" } });
+    fireEvent.change(screen.getByPlaceholderText("Mobile number"), { target: { value: "9876543210" } });
+    fireEvent.click(screen.getByText("Already left"));
+    fireEvent.click(screen.getByRole("button", { name: /record & mark left/i }));
+
+    await waitFor(() => {
+      expect(mocks.rpc).toHaveBeenCalledWith(
+        "create_walk_in_visit",
+        expect.objectContaining({ _already_left: true }),
+      );
+    });
+    expect(await screen.findByText(/has left/i)).toBeInTheDocument();
+  });
+
+  it("prefills and locks identity when opened from an existing lead", () => {
+    render(
+      <MemoryRouter>
+        <WalkInDialog
+          {...props}
+          defaults={{ name: "Asha Verma", phone: "9876543210", campusId: "campus-1" }}
+          lockIdentity
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByPlaceholderText("Candidate name")).toHaveValue("Asha Verma");
+    expect(screen.getByPlaceholderText("Mobile number")).toHaveValue("9876543210");
+    expect(screen.getByPlaceholderText("Candidate name")).toBeDisabled();
+    expect(screen.getByPlaceholderText("Mobile number")).toBeDisabled();
   });
 
   it("surfaces RPC failures as a destructive toast", async () => {
@@ -263,5 +305,70 @@ describe("PostVisitQueue", () => {
         scheduled_at: new Date("2026-07-10T11:00").toISOString(),
       });
     });
+  });
+});
+
+describe("WalkInsBoard", () => {
+  it("lists recorded and previous walk-ins with campus and comments", async () => {
+    mocks.from.mockImplementation(() => makeChain({
+      data: [{
+        id: "visit-w",
+        lead_id: "lead-1",
+        visit_date: "2026-09-10T06:30:00.000Z",
+        status: "completed",
+        checked_in_at: "2026-09-10T06:30:00.000Z",
+        checked_out_at: "2026-09-10T06:30:00.000Z",
+        purpose: null,
+        feedback: "Liked the hostel",
+        leads: { name: "Asha Verma", phone: "9876543210" },
+        campuses: { name: "Greater Noida", code: "GN" },
+      }],
+      error: null,
+    }));
+
+    render(<MemoryRouter><WalkInsBoard /></MemoryRouter>);
+
+    expect(await screen.findByText("Asha Verma")).toBeInTheDocument();
+    expect(screen.getByText("GN")).toBeInTheDocument();
+    expect(screen.getByText("Liked the hostel")).toBeInTheDocument();
+  });
+});
+
+describe("PreviousWalkInDialog", () => {
+  it("shows existing walk-in history and blocks logging the same date again", async () => {
+    mocks.from.mockImplementation(() => makeChain({
+      data: [{
+        id: "visit-old",
+        visit_date: "2026-09-10T06:30:00.000Z",
+        checked_in_at: "2026-09-10T06:30:00.000Z",
+        checked_out_at: "2026-09-10T06:30:00.000Z",
+        purpose: null,
+        feedback: "Campus tour",
+        status: "completed",
+        campuses: { name: "Greater Noida", code: "GN" },
+      }],
+      error: null,
+    }));
+
+    render(
+      <PreviousWalkInDialog
+        open
+        onOpenChange={vi.fn()}
+        leadId="lead-1"
+        leadName="Asha Verma"
+        userId="user-1"
+        counsellorLabel="Payal"
+        campuses={[{ id: "campus-1", name: "Greater Noida", code: "GN" }]}
+      />,
+    );
+
+    expect(await screen.findByText("Campus tour")).toBeInTheDocument();
+    expect(screen.getByText("GN")).toBeInTheDocument();
+
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement;
+    fireEvent.change(dateInput, { target: { value: "2026-09-10" } });
+
+    expect(await screen.findByText(/already logged for this date/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /log a previous walk-in/i })).toBeDisabled();
   });
 });

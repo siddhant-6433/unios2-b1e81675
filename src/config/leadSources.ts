@@ -1,6 +1,9 @@
 /** Single source of truth for all lead sources.
  *  When adding a new source, update this file AND run:
  *  ALTER TYPE lead_source ADD VALUE IF NOT EXISTS 'new_source';
+ *
+ *  Walk-in is a desk visit, not a manual Add Lead source. Direct Walk-In was
+ *  merged into Walk-in; the enum value remains for leftover rows.
  */
 export const LEAD_SOURCES = [
   { value: "website", label: "Website" },
@@ -12,7 +15,6 @@ export const LEAD_SOURCES = [
   { value: "collegehai", label: "CollegeHai" },
   { value: "salahlo", label: "Salahlo" },
   { value: "walk_in", label: "Walk-in" },
-  { value: "direct_walkin", label: "Direct Walk-In" },
   { value: "inbound_call", label: "Inbound Call" },
   { value: "dialer", label: "Cloud Dialer" },
   { value: "consultant", label: "Consultant" },
@@ -24,9 +26,21 @@ export const LEAD_SOURCES = [
   { value: "other", label: "Other" },
 ] as const;
 
-export const SOURCE_LABELS: Record<string, string> = Object.fromEntries(
-  LEAD_SOURCES.map((s) => [s.value, s.label])
-);
+/** Sources a counsellor may pick in Add Lead — walk-in goes through Record Walk-in. */
+export const MANUAL_ENTRY_SOURCES = LEAD_SOURCES.filter((s) => s.value !== "walk_in");
+
+export const SOURCE_LABELS: Record<string, string> = {
+  ...Object.fromEntries(LEAD_SOURCES.map((s) => [s.value, s.label])),
+  direct_walkin: "Walk-in",
+};
+
+export function canonicalizeLeadSource(value: string): string {
+  const lowered = value.trim().toLowerCase();
+  if (lowered === "direct_walkin" || lowered === "direct walk-in" || lowered === "direct walk in") {
+    return "walk_in";
+  }
+  return lowered;
+}
 
 export const SOURCE_BADGE_COLORS: Record<string, string> = {
   website: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200",
@@ -38,7 +52,7 @@ export const SOURCE_BADGE_COLORS: Record<string, string> = {
   collegehai: "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-200",
   salahlo: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200",
   walk_in: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200",
-  direct_walkin: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200",
+  direct_walkin: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200",
   inbound_call: "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200",
   dialer: "bg-lime-100 text-lime-800 dark:bg-lime-900/40 dark:text-lime-200",
   consultant: "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-200",

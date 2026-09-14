@@ -3,48 +3,97 @@
 // lead + checked-in campus_visits + activity atomically). On success it offers
 // an immediate "Send token payment link" (the token-at-visit moment).
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { SendPaymentLinkDialog } from "@/components/finance/SendPaymentLinkDialog";
 import { Footprints, IndianRupee, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 
 interface Course { id: string; name: string }
-interface Campus { id: string; name: string }
+interface Campus { id: string; name: string; code?: string }
+
+export interface WalkInDefaults {
+  name?: string;
+  phone?: string;
+  email?: string;
+  courseId?: string;
+  campusId?: string;
+}
 
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  courses: Course[];
-  campuses: Campus[];
+  courses?: Course[];
+  campuses?: Campus[];
   defaultCampusId?: string;
+  defaults?: WalkInDefaults;
+  lockIdentity?: boolean;
   onRecorded?: () => void;
 }
 
-export function WalkInDialog({ open, onOpenChange, courses, campuses, defaultCampusId, onRecorded }: Props) {
+export function WalkInDialog({
+  open,
+  onOpenChange,
+  courses: coursesProp,
+  campuses: campusesProp,
+  defaultCampusId,
+  defaults,
+  lockIdentity,
+  onRecorded,
+}: Props) {
   const { toast } = useToast();
+  const [fetchedCourses, setFetchedCourses] = useState<Course[]>([]);
+  const [fetchedCampuses, setFetchedCampuses] = useState<Campus[]>([]);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [courseId, setCourseId] = useState("");
-  const [campusId, setCampusId] = useState(defaultCampusId || "");
+  const [campusId, setCampusId] = useState("");
   const [purpose, setPurpose] = useState("");
   const [notes, setNotes] = useState("");
+  const [alreadyLeft, setAlreadyLeft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ lead_id: string; visit_id: string; name: string } | null>(null);
+  const [result, setResult] = useState<{ lead_id: string; visit_id: string; name: string; already_left: boolean; already_open: boolean } | null>(null);
   const [showSendLink, setShowSendLink] = useState(false);
 
-  const reset = () => {
-    setName(""); setPhone(""); setEmail(""); setCourseId("");
-    setCampusId(defaultCampusId || ""); setPurpose(""); setNotes("");
+  const courses = coursesProp && coursesProp.length > 0 ? coursesProp : fetchedCourses;
+  const campuses = campusesProp && campusesProp.length > 0 ? campusesProp : fetchedCampuses;
+
+  const populate = () => {
+    setName(defaults?.name ?? "");
+    setPhone(defaults?.phone ?? "");
+    setEmail(defaults?.email ?? "");
+    setCourseId(defaults?.courseId ?? "");
+    setCampusId(defaults?.campusId || defaultCampusId || "");
+    setPurpose("");
+    setNotes("");
+    setAlreadyLeft(false);
     setResult(null);
   };
+
+  useEffect(() => {
+    if (open) populate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, defaults?.name, defaults?.phone, defaults?.email, defaults?.courseId, defaults?.campusId, defaultCampusId]);
+
+  useEffect(() => {
+    if (!open) return;
+    if ((coursesProp && coursesProp.length > 0) && (campusesProp && campusesProp.length > 0)) return;
+    Promise.all([
+      supabase.from("courses").select("id, name").order("name"),
+      supabase.from("campuses").select("id, name, code").order("name"),
+    ]).then(([c, camp]) => {
+      if (c.data) setFetchedCourses(c.data);
+      if (camp.data) setFetchedCampuses(camp.data as Campus[]);
+    });
+  }, [open, coursesProp, campusesProp]);
 
   const handleSubmit = async () => {
     if (!name.trim()) { toast({ title: "Name is required", variant: "destructive" }); return; }
@@ -58,21 +107,33 @@ export function WalkInDialog({ open, onOpenChange, courses, campuses, defaultCam
       _campus_id: campusId || null,
       _purpose: purpose.trim() || null,
       _notes: notes.trim() || null,
+      _already_left: alreadyLeft,
     });
     setSubmitting(false);
     if (error) {
       toast({ title: "Could not record walk-in", description: error.message, variant: "destructive" });
       return;
     }
-    const payload = data as { lead_id: string; visit_id: string };
-    setResult({ lead_id: payload.lead_id, visit_id: payload.visit_id, name: name.trim() });
-    toast({ title: "Walk-in recorded", description: `${name.trim()} checked in.` });
+    const payload = data as { lead_id: string; visit_id: string; already_open?: boolean; already_left?: boolean };
+    setResult({
+      lead_id: payload.lead_id,
+      visit_id: payload.visit_id,
+      name: name.trim(),
+      already_left: alreadyLeft || !!payload.already_left,
+      already_open: !!payload.already_open && !alreadyLeft,
+    });
+    const desc = alreadyLeft
+      ? `${name.trim()} recorded and marked as left.`
+      : payload.already_open
+        ? `${name.trim()} is already checked in.`
+        : `${name.trim()} checked in.`;
+    toast({ title: "Walk-in recorded", description: desc });
     onRecorded?.();
   };
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
+      <Dialog open={open} onOpenChange={(v) => { if (!v) populate(); onOpenChange(v); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -84,7 +145,13 @@ export function WalkInDialog({ open, onOpenChange, courses, campuses, defaultCam
           {result ? (
             <div className="space-y-4 py-2">
               <p className="text-sm text-foreground">
-                <span className="font-semibold">{result.name}</span> is checked in. Collect the token fee now to lock the candidate in.
+                {result.already_left ? (
+                  <><span className="font-semibold">{result.name}</span> has left. Send a token link if they are still converting.</>
+                ) : result.already_open ? (
+                  <><span className="font-semibold">{result.name}</span> is already on campus.</>
+                ) : (
+                  <><span className="font-semibold">{result.name}</span> is checked in. Collect the token fee now to lock the candidate in.</>
+                )}
               </p>
               <div className="flex flex-col gap-2">
                 <Button onClick={() => setShowSendLink(true)} className="gap-2">
@@ -102,10 +169,22 @@ export function WalkInDialog({ open, onOpenChange, courses, campuses, defaultCam
             <div className="space-y-3 py-2">
               <div className="grid grid-cols-2 gap-3">
                 <FieldShell label="Name">
-                  <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Candidate name" autoFocus />
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Candidate name"
+                    autoFocus={!lockIdentity}
+                    disabled={lockIdentity}
+                  />
                 </FieldShell>
                 <FieldShell label="Phone">
-                  <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Mobile number" inputMode="tel" />
+                  <Input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="Mobile number"
+                    inputMode="tel"
+                    disabled={lockIdentity}
+                  />
                 </FieldShell>
               </div>
               <FieldShell label="Email (optional)">
@@ -122,7 +201,13 @@ export function WalkInDialog({ open, onOpenChange, courses, campuses, defaultCam
                 <SelectField
                   value={campusId}
                   onValueChange={setCampusId}
-                  options={[{ value: "", label: "Select campus" }, ...campuses.map((c) => ({ value: c.id, label: c.name }))]}
+                  options={[
+                    { value: "", label: "Select campus" },
+                    ...campuses.map((c) => ({
+                      value: c.id,
+                      label: c.code ? `${c.name} (${c.code})` : c.name,
+                    })),
+                  ]}
                   label="Campus (optional)"
                   placeholder="Select campus"
                 />
@@ -131,18 +216,29 @@ export function WalkInDialog({ open, onOpenChange, courses, campuses, defaultCam
                 <Input value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="e.g. Campus tour, fee discussion" />
               </FieldShell>
               <TextAreaField value={notes} onValueChange={setNotes} label="Notes (optional)" placeholder="Anything worth capturing" />
+              <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm">
+                <Checkbox
+                  checked={alreadyLeft}
+                  onCheckedChange={(v) => setAlreadyLeft(v === true)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium text-foreground">Already left</span>
+                  <span className="block text-xs text-muted-foreground">Record the walk-in without keeping them on the live campus list.</span>
+                </span>
+              </label>
             </div>
           )}
 
           <DialogFooter>
             {result ? (
-              <Button variant="outline" onClick={() => { reset(); onOpenChange(false); }}>Done</Button>
+              <Button variant="outline" onClick={() => { populate(); onOpenChange(false); }}>Done</Button>
             ) : (
               <>
                 <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
                 <Button onClick={handleSubmit} disabled={submitting}>
                   {submitting ? <ButtonOrb state="working" onFilled /> : null}
-                  {submitting ? "Recording…" : "Check in"}
+                  {submitting ? "Recording…" : alreadyLeft ? "Record & mark left" : "Check in"}
                 </Button>
               </>
             )}

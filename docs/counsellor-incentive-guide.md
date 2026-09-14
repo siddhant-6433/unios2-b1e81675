@@ -215,7 +215,9 @@ Every time you open your dashboard, you'll see:
 ## 8. Visit Center — Your Daily Tool
 
 The **Visit Center** is where you manage visitors:
-- **Record Walk-in** button (also in the top navbar — use it from any page)
+- **Record Walk-in** from the Admissions page, the lead page, or the navbar **Walk-ins** control
+- Navbar **Walk-ins** — live list of people who walked in and have not left (campus code + elapsed time). **Complete** when they leave
+- **Walk-ins** tab — every recorded desk walk-in and every previous walk-in logged later (last 30 days)
 - **On Campus** tab — see who's currently checked in, elapsed time, and quick actions:
   - Send a payment link
   - Create a fee proposal
@@ -223,6 +225,8 @@ The **Visit Center** is where you manage visitors:
   - Check the visitor out when they leave
 - **Today & Upcoming** — check visitors in, mark no-shows, complete visits
 - **Post-Visit Queue** — follow up after visits
+
+Do **not** log a walk-in by picking Walk-in as a source in Add Lead. Add Lead is for CRM records; someone at the desk goes through Record Walk-in.
 
 ### Check-in / Check-out Rules
 - When a visitor arrives, **check them in** (or record a walk-in, which auto-checks-in)
