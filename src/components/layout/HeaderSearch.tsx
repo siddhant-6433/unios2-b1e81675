@@ -8,18 +8,13 @@ import { StudentAvatar } from "@/components/ui/student-avatar";
 import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 import { formatPersonName } from "@/lib/personName";
 
-interface SearchResult {
+export interface HeaderSearchResult {
   type: "lead" | "student" | "application";
   id: string;
   name: string;
   phone: string;
   identifier?: string;
   identifierLabel?: string;
-  // When a row carries both an AN and a PAN, the primary badge shows the AN and
-  // this shows the PAN too — so a physical ID card printed with a PAN reconciles
-  // to the student's AN at a glance.
-  secondaryIdentifier?: string;
-  secondaryLabel?: string;
   stage?: string;
   status?: string;
   leadId?: string;
@@ -30,9 +25,22 @@ interface SearchResult {
   isSecondary?: boolean;
 }
 
-const typeLabels: Record<SearchResult["type"], string> = {
+const typeLabels: Record<HeaderSearchResult["type"], string> = {
   lead: "Lead", student: "Student", application: "Application",
 };
+
+// One badge only. AN supersedes PAN — a student who already has an admission
+// number does not need the pre-admission number crowding the row.
+export function headerSearchIdentity(row: {
+  admission_no?: string | null;
+  pre_admission_no?: string | null;
+  application_id?: string | null;
+}): Pick<HeaderSearchResult, "identifier" | "identifierLabel"> {
+  if (row.admission_no) return { identifier: row.admission_no, identifierLabel: "AN" };
+  if (row.application_id) return { identifier: row.application_id, identifierLabel: "App" };
+  if (row.pre_admission_no) return { identifier: row.pre_admission_no, identifierLabel: "PAN" };
+  return {};
+}
 
 // Compare people across leads/students/applications by their most stable keys.
 const normPhone = (p?: string | null) => (p || "").replace(/\D/g, "").slice(-10);
@@ -45,10 +53,71 @@ const stageLabels: Record<string, string> = {
   rejected: "Rejected", not_interested: "Not Int.", ineligible: "Ineligible", dnc: "DNC", deferred: "Deferred",
 };
 
+export function HeaderSearchHit({
+  result: r,
+  onClick,
+}: {
+  result: HeaderSearchResult;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full flex items-start gap-3 px-4 py-2.5 hover:bg-muted/50 transition-colors text-left ${r.isSecondary ? "opacity-60" : ""}`}
+    >
+      {r.photoUrl ? (
+        <StudentAvatar src={r.photoUrl} name={r.name} className="h-8 w-8 rounded-lg" />
+      ) : (
+        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+          r.type === "lead" ? "bg-info/10 text-info-foreground" :
+          r.type === "application" ? "bg-warning/10 text-warning-foreground" :
+          "bg-success/10 text-success"
+        }`}>
+          {r.type === "lead" ? <User className="h-3.5 w-3.5" /> :
+           r.type === "application" ? <FileText className="h-3.5 w-3.5" /> :
+           <GraduationCap className="h-3.5 w-3.5" />}
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        {/* Name + type only. Identifiers used to share this row and collapsed
+            names like "Pawan Yadav" down to "Paw..." in the 420px dropdown. */}
+        <div className="flex items-start gap-2 min-w-0">
+          <p className="text-sm font-medium text-foreground break-words min-w-0" title={r.name}>{r.name}</p>
+          <Badge className={`text-[9px] px-1 py-0 border-0 shrink-0 mt-0.5 ${
+            r.type === "lead" ? "bg-info/10 text-info-foreground" :
+            r.type === "application" ? "bg-warning/10 text-warning-foreground" :
+            "bg-success/10 text-success"
+          }`}>{typeLabels[r.type]}</Badge>
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 min-w-0">
+          <p className="text-[11px] text-muted-foreground min-w-0">
+            {r.phone}
+            {r.type === "lead" && (
+              <span className="ml-1.5 text-muted-foreground/80">
+                · Owner: <span className="font-medium text-foreground/80">{r.ownerName || "Unassigned"}</span>
+              </span>
+            )}
+          </p>
+          {r.identifierLabel && (
+            <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0">{r.identifierLabel}: {r.identifier}</Badge>
+          )}
+        </div>
+      </div>
+      {r.stage && (
+        <Badge className="text-[9px] border-0 bg-muted shrink-0">{stageLabels[r.stage] || r.stage}</Badge>
+      )}
+      {r.status && (
+        <Badge className={`text-[9px] border-0 shrink-0 ${r.status === "active" ? "bg-success/10 text-success" : "bg-muted"}`}>{r.status}</Badge>
+      )}
+    </button>
+  );
+}
+
 export function HeaderSearch() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [results, setResults] = useState<HeaderSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -109,14 +178,11 @@ export function HeaderSearch() {
       (normPhone(phone).length === 10 && studentPhones.has(normPhone(phone))) ||
       ids.some((v) => normId(v) && studentIds.has(normId(v)));
 
-    const all: SearchResult[] = [];
+    const all: HeaderSearchResult[] = [];
     (leadsRes.data || []).forEach((l: any) => {
       all.push({
         type: "lead", id: l.id, name: formatPersonName(l.name), phone: l.phone,
-        identifier: l.application_id || l.pre_admission_no || l.admission_no || undefined,
-        identifierLabel: l.admission_no ? "AN" : l.pre_admission_no ? "PAN" : l.application_id ? "App" : undefined,
-        secondaryIdentifier: l.admission_no && l.pre_admission_no ? l.pre_admission_no : undefined,
-        secondaryLabel: l.admission_no && l.pre_admission_no ? "PAN" : undefined,
+        ...headerSearchIdentity(l),
         stage: l.stage,
         ownerName: l.counsellor_profile?.display_name || undefined,
         leadId: l.id,
@@ -138,10 +204,7 @@ export function HeaderSearch() {
     (studentsRes.data || []).forEach((s: any) => {
       all.push({
         type: "student", id: s.id, name: formatPersonName(s.name), phone: s.phone || "",
-        identifier: s.admission_no || s.pre_admission_no || undefined,
-        identifierLabel: s.admission_no ? "AN" : s.pre_admission_no ? "PAN" : undefined,
-        secondaryIdentifier: s.admission_no && s.pre_admission_no ? s.pre_admission_no : undefined,
-        secondaryLabel: s.admission_no && s.pre_admission_no ? "PAN" : undefined,
+        ...headerSearchIdentity(s),
         status: s.status,
         leadId: s.lead_id || undefined,
         photoUrl: s.photo_url || undefined,
@@ -160,7 +223,7 @@ export function HeaderSearch() {
 
     // Rank: student rows first, then leads/applications, then already-a-student
     // duplicates last. Stable sort preserves the group order built above.
-    const rank = (r: SearchResult) => (r.type === "student" ? 0 : r.isSecondary ? 2 : 1);
+    const rank = (r: HeaderSearchResult) => (r.type === "student" ? 0 : r.isSecondary ? 2 : 1);
     all.sort((a, b) => rank(a) - rank(b));
 
     setResults(all);
@@ -173,7 +236,7 @@ export function HeaderSearch() {
     debounceRef.current = window.setTimeout(() => search(val), 300);
   };
 
-  const handleClick = (r: SearchResult) => {
+  const handleClick = (r: HeaderSearchResult) => {
     setOpen(false);
     setQuery("");
     setResults([]);
@@ -228,55 +291,11 @@ export function HeaderSearch() {
               <div className="py-8 text-center text-sm text-muted-foreground">No results found</div>
             ) : (
               results.map(r => (
-                <button
+                <HeaderSearchHit
                   key={`${r.type}-${r.id}`}
+                  result={r}
                   onClick={() => handleClick(r)}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-muted/50 transition-colors text-left ${r.isSecondary ? "opacity-60" : ""}`}
-                >
-                  {r.photoUrl ? (
-                    <StudentAvatar src={r.photoUrl} name={r.name} className="h-8 w-8 rounded-lg" />
-                  ) : (
-                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                      r.type === "lead" ? "bg-info/10 text-info-foreground" :
-                      r.type === "application" ? "bg-warning/10 text-warning-foreground" :
-                      "bg-success/10 text-success"
-                    }`}>
-                      {r.type === "lead" ? <User className="h-3.5 w-3.5" /> :
-                       r.type === "application" ? <FileText className="h-3.5 w-3.5" /> :
-                       <GraduationCap className="h-3.5 w-3.5" />}
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-foreground truncate">{r.name}</p>
-                      <Badge className={`text-[9px] px-1 py-0 border-0 shrink-0 ${
-                        r.type === "lead" ? "bg-info/10 text-info-foreground" :
-                        r.type === "application" ? "bg-warning/10 text-warning-foreground" :
-                        "bg-success/10 text-success"
-                      }`}>{typeLabels[r.type]}</Badge>
-                      {r.identifierLabel && (
-                        <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0">{r.identifierLabel}: {r.identifier}</Badge>
-                      )}
-                      {r.secondaryLabel && (
-                        <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0">{r.secondaryLabel}: {r.secondaryIdentifier}</Badge>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-muted-foreground truncate">
-                      {r.phone}
-                      {r.type === "lead" && (
-                        <span className="ml-1.5 text-muted-foreground/80">
-                          · Owner: <span className="font-medium text-foreground/80">{r.ownerName || "Unassigned"}</span>
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  {r.stage && (
-                    <Badge className="text-[9px] border-0 bg-muted shrink-0">{stageLabels[r.stage] || r.stage}</Badge>
-                  )}
-                  {r.status && (
-                    <Badge className={`text-[9px] border-0 shrink-0 ${r.status === "active" ? "bg-success/10 text-success" : "bg-muted"}`}>{r.status}</Badge>
-                  )}
-                </button>
+                />
               ))
             )}
           </div>
