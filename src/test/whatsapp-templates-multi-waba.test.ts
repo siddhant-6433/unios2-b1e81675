@@ -61,10 +61,16 @@ describe("whatsapp-templates multi-WABA sync", () => {
     // The sync picker and the submission picker must not drift.
     expect(tab).toContain('action: "wabas"');
     expect(form).toContain('action: "wabas"');
-    expect(form).toContain("waba_id: wabaId");
+    expect(form).toContain("waba_id: waba");
     // Sync-one is opt-in; the default button covers every account.
     expect(tab).toContain("syncFromMeta(w.waba_id)");
     expect(tab).toContain("Sync all WABAs");
+  });
+
+  it("filters approved templates by WhatsApp account", () => {
+    expect(tab).toContain("approvedWabaFilter");
+    expect(tab).toContain("Filter approved templates by WhatsApp account");
+    expect(tab).toContain("rowMatchesWaba");
   });
 
   it("surfaces the per-account outcome instead of a single-line toast", () => {
