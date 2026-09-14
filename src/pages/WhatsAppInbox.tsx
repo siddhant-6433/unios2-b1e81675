@@ -61,6 +61,9 @@ import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 import { loadWaChannelIdentities, type WaChannelIdentity } from "@/lib/waSenders";
 
 const CONVERSATION_PAGE_SIZE = 120;
+// Newest-first window, like WhatsApp Web. Older pages prepend on scroll-up.
+const THREAD_PAGE_SIZE = 50;
+const THREAD_CACHE_LIMIT = 40;
 
 /**
  * whatsapp_automation_events.reason is a JSON string for AI failures
@@ -758,6 +761,102 @@ const DEMO_MESSAGES: Record<string, Message[]> = {
 const conversationIdentityKey = (c: Conversation) =>
   `${c.phone}:${conversationBusinessKey(c) || ""}`;
 
+const conversationRecency = (c: Conversation) => new Date(c.last_message_at).getTime();
+
+const mergeConversationRows = (prev: Conversation[], incoming: Conversation[]): Conversation[] => {
+  const byKey = new Map(prev.map(c => [conversationIdentityKey(c), c]));
+  for (const row of incoming) {
+    const key = conversationIdentityKey(row);
+    const existing = byKey.get(key);
+    byKey.set(key, existing ? { ...existing, ...row } : row);
+  }
+  return [...byKey.values()].sort(
+    (a, b) => conversationRecency(b) - conversationRecency(a),
+  );
+};
+
+/** First-page poll: upsert those rows, drop threads that left the current
+ *  filter, keep older pages already loaded by infinite scroll. */
+const mergeConversationIndexPage = (prev: Conversation[], incoming: Conversation[]): Conversation[] => {
+  if (incoming.length === 0) return [];
+  const incomingKeys = new Set(incoming.map(conversationIdentityKey));
+  const cutoffAt = conversationRecency(incoming[incoming.length - 1]);
+  const cutoffPhone = incoming[incoming.length - 1].phone;
+  const older = prev.filter(c => {
+    if (incomingKeys.has(conversationIdentityKey(c))) return false;
+    const at = conversationRecency(c);
+    if (at < cutoffAt) return true;
+    if (at > cutoffAt) return false;
+    return c.phone < cutoffPhone;
+  });
+  return mergeConversationRows(older, incoming);
+};
+
+const threadMessageErrorsEqual = (a: unknown, b: unknown) => {
+  if (a == null && b == null) return true;
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+};
+
+const mergeThreadMessages = (messages: Message[], incoming: Message) => {
+  const incomingWaId = incoming.wa_message_id || null;
+  const existingIndex = messages.findIndex(message =>
+    message.id === incoming.id || (incomingWaId && message.wa_message_id === incomingWaId),
+  );
+  if (existingIndex !== -1) {
+    const existing = messages[existingIndex];
+    if (
+      existing.status === incoming.status &&
+      existing.content === incoming.content &&
+      existing.created_at === incoming.created_at &&
+      (existing.wa_message_id || null) === (incoming.wa_message_id || existing.wa_message_id || null) &&
+      threadMessageErrorsEqual(existing.status_error, incoming.status_error ?? existing.status_error)
+    ) return messages;
+    return messages.map((message, index) =>
+      index === existingIndex ? { ...message, ...incoming } : message,
+    );
+  }
+  const newest = messages[messages.length - 1]?.created_at;
+  if (!newest || incoming.created_at >= newest) return [...messages, incoming];
+  return messages;
+};
+
+const conversationIndexFingerprint = (rows: Conversation[]) =>
+  rows.map(c => `${conversationIdentityKey(c)}:${c.last_message_at}:${c.unread_count}:${c.last_direction}:${c.last_message ?? ""}`).join("\n");
+
+const threadCacheKey = (phone: string, inbox: string, primaryPnid: string | null) =>
+  `${phone}|${inbox}|${primaryPnid || ""}`;
+
+const rememberThreadCache = (
+  cache: Map<string, { messages: Message[]; hasMore: boolean }>,
+  key: string,
+  entry: { messages: Message[]; hasMore: boolean },
+) => {
+  cache.delete(key);
+  cache.set(key, entry);
+  while (cache.size > THREAD_CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (!oldest || oldest === key) break;
+    cache.delete(oldest);
+  }
+};
+
+const runWhenInboxIdle = (fn: () => void) => {
+  const ric = (window as Window & {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  }).requestIdleCallback;
+  if (typeof ric === "function") {
+    const id = ric(fn, { timeout: 1500 });
+    return () => {
+      (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(id);
+    };
+  }
+  const t = window.setTimeout(fn, 400);
+  return () => window.clearTimeout(t);
+};
+
 const replyChannelPayload = (conv: Conversation | null | undefined) => {
   const phoneNumberIdLooksLikeBusinessNumber =
     conv?.provider === "meta" && isBusinessPhoneNumberChannel(conv.business_phone_number_id);
@@ -790,6 +889,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const [hasMoreConversations, setHasMoreConversations] = useState(true);
   const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
   const [selectedCourseInfo, setSelectedCourseInfo] = useState<Record<string, string> | null>(null);
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
@@ -831,7 +932,11 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [staffConvs, setStaffConvs] = useState<Conversation[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const threadScrollRef = useRef<HTMLDivElement>(null);
   const loadingConversationsRef = useRef(false);
+  const loadingOlderMessagesRef = useRef(false);
+  const stickThreadToBottomRef = useRef(true);
+  const threadCacheRef = useRef<Map<string, { messages: Message[]; hasMore: boolean }>>(new Map());
 
   // Reply media attachment
   const [replyMedia, setReplyMedia] = useState<{ file: File; url: string; type: string } | null>(null);
@@ -1412,6 +1517,40 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       .slice(0, CONVERSATION_PAGE_SIZE);
   };
 
+  const conversationPageArgs = () => {
+    let counsellorScope: "all" | "latest" | "any" | "unassigned" = "all";
+    let counsellorId: string | null = null;
+    if (role === "counsellor" && profile?.id) {
+      counsellorScope = "any";
+      counsellorId = profile.id;
+    } else if (isAdminRole(role)) {
+      if (counsellorFilter === "unassigned") {
+        counsellorScope = "unassigned";
+      } else if (counsellorFilter !== "all") {
+        counsellorScope = "latest";
+        counsellorId = counsellorFilter;
+      }
+    }
+    const lastDirection = !isOutboundMode && replyStateFilter === "needs_reply"
+      ? "inbound"
+      : !isOutboundMode && replyStateFilter === "awaiting"
+        ? "outbound"
+        : null;
+    return {
+      p_last_direction: lastDirection,
+      p_business_keys: !isHrScope && businessNumber !== "primary" && businessNumber !== "all"
+        ? inboxBusinessKeysForNumber(businessNumber)
+        : null,
+      p_unattributed_only: !isHrScope && businessNumber === "primary",
+      p_counsellor_id: counsellorId,
+      p_counsellor_scope: counsellorScope,
+      p_archived: opsFilter === "archived",
+      // Same split the list already applied client-side, so a page of 120 is
+      // 120 visible threads rather than 120 mixed with outbound blasts.
+      p_has_inbound: isOutboundMode ? false : true,
+    };
+  };
+
   const fetchConversationPage = async (
     reset = false,
     explicitCursor: { last_message_at: string; phone: string } | null = conversationCursor,
@@ -1428,39 +1567,10 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       let rows: Conversation[] = [];
       let lastError: any = null;
 
-      // Paginated RPC, not the whatsapp_conversations view: the view's backing
-      // function builds every conversation (41k+, ~9.5s) before PostgREST
-      // .eq/.limit can apply, blowing the 8s statement timeout. Filters and
-      // LIMIT live inside the function; unread laterals run only on the page.
-      let counsellorScope: "all" | "latest" | "any" | "unassigned" = "all";
-      let counsellorId: string | null = null;
-      if (role === "counsellor" && profile?.id) {
-        counsellorScope = "any";
-        counsellorId = profile.id;
-      } else if (isAdminRole(role)) {
-        if (counsellorFilter === "unassigned") {
-          counsellorScope = "unassigned";
-        } else if (counsellorFilter !== "all") {
-          counsellorScope = "latest";
-          counsellorId = counsellorFilter;
-        }
-      }
-
-      const lastDirection = !isOutboundMode && replyStateFilter === "needs_reply"
-        ? "inbound"
-        : !isOutboundMode && replyStateFilter === "awaiting"
-          ? "outbound"
-          : null;
-
+      // Chat-index RPC (whatsapp_conversation_state), not DISTINCT ON messages
+      // and not the whatsapp_conversations view. Filter + LIMIT on ~41k rows.
       const { data, error } = await (supabase as any).rpc("whatsapp_conversations_page", {
-        p_last_direction: lastDirection,
-        p_business_keys: !isHrScope && businessNumber !== "primary" && businessNumber !== "all"
-          ? inboxBusinessKeysForNumber(businessNumber)
-          : null,
-        p_unattributed_only: !isHrScope && businessNumber === "primary",
-        p_counsellor_id: counsellorId,
-        p_counsellor_scope: counsellorScope,
-        p_archived: opsFilter === "archived",
+        ...conversationPageArgs(),
         p_cursor_at: explicitCursor?.last_message_at ?? null,
         p_cursor_phone: explicitCursor?.phone ?? null,
         p_limit: CONVERSATION_PAGE_SIZE,
@@ -1569,7 +1679,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     setConversationCursor(null);
     setHasMoreConversations(true);
     void fetchConversationPage(true, null);
-  }, [role, profile?.id, counsellorFilter, businessNumber, replyStateFilter, isCampaignEngagedInbox, opsFilter === "archived"]);
+  }, [role, profile?.id, counsellorFilter, businessNumber, replyStateFilter, isOutboundMode, isCampaignEngagedInbox, opsFilter === "archived"]);
 
   useEffect(() => {
     if (demoMode) return;
@@ -1669,27 +1779,31 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       setCategoryCounts(map);
     })();
     return () => { cancelled = true; };
-  }, [demoMode, isOutboundMode, role, profile?.id, businessNumber, isHrScope]);
+  }, [demoMode, isOutboundMode, role, profile?.id, businessNumber, isHrScope, replyStateEpoch]);
 
-  // Course list for the template course picker.
+  // Course list for the template course picker. Idle so it does not race the
+  // conversation-index RPC on first paint.
   useEffect(() => {
     if (demoMode) return;
     let cancelled = false;
-    (async () => {
-      const { data } = await supabase
-        .from("courses")
-        .select("id, name, departments(institutions(campuses(name)))")
-        .neq("is_active", false)
-        .order("name");
-      if (!cancelled && data) {
-        setCourseOptions((data as any[]).map(c => ({
-          id: c.id,
-          name: c.name,
-          campus: c.departments?.institutions?.campuses?.name ?? null,
-        })));
-      }
-    })();
-    return () => { cancelled = true; };
+    const stop = runWhenInboxIdle(() => {
+      if (cancelled) return;
+      void (async () => {
+        const { data } = await supabase
+          .from("courses")
+          .select("id, name, departments(institutions(campuses(name)))")
+          .neq("is_active", false)
+          .order("name");
+        if (!cancelled && data) {
+          setCourseOptions((data as any[]).map(c => ({
+            id: c.id,
+            name: c.name,
+            campus: c.departments?.institutions?.campuses?.name ?? null,
+          })));
+        }
+      })();
+    });
+    return () => { cancelled = true; stop(); };
   }, [demoMode]);
 
   // Load the curated Meta template catalog once. Historical message bubbles also
@@ -1697,13 +1811,16 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   useEffect(() => {
     if (demoMode) return;
     let cancelled = false;
-    (async () => {
-      const loaded = await loadWhatsAppTemplateCatalog({ curatedOnly: true });
+    const stop = runWhenInboxIdle(() => {
       if (cancelled) return;
-      setCatalogTemplates(loaded.templates);
-      setCatalogByKey(loaded.byKey);
-    })();
-    return () => { cancelled = true; };
+      void (async () => {
+        const loaded = await loadWhatsAppTemplateCatalog({ curatedOnly: true });
+        if (cancelled) return;
+        setCatalogTemplates(loaded.templates);
+        setCatalogByKey(loaded.byKey);
+      })();
+    });
+    return () => { cancelled = true; stop(); };
   }, [demoMode]);
 
   // ── Auto-reply health ─────────────────────────────────────────────────────
@@ -1713,63 +1830,60 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   useEffect(() => {
     if (demoMode) return;
     let cancelled = false;
-    (async () => {
-      const [{ data: lastSent }, { data: lastFailed }] = await Promise.all([
-        supabase.from("whatsapp_automation_events" as any)
-          .select("created_at").eq("event_type", "ai_reply_sent")
-          .order("created_at", { ascending: false }).limit(1).maybeSingle(),
-        supabase.from("whatsapp_automation_events" as any)
-          .select("created_at, reason").eq("event_type", "send_failed")
-          .order("created_at", { ascending: false }).limit(1).maybeSingle(),
-      ]);
+    const stop = runWhenInboxIdle(() => {
       if (cancelled) return;
+      void (async () => {
+        const [{ data: lastSent }, { data: lastFailed }] = await Promise.all([
+          supabase.from("whatsapp_automation_events" as any)
+            .select("created_at").eq("event_type", "ai_reply_sent")
+            .order("created_at", { ascending: false }).limit(1).maybeSingle(),
+          supabase.from("whatsapp_automation_events" as any)
+            .select("created_at, reason").eq("event_type", "send_failed")
+            .order("created_at", { ascending: false }).limit(1).maybeSingle(),
+        ]);
+        if (cancelled) return;
 
-      const failedAt = (lastFailed as any)?.created_at;
-      const sentAt = (lastSent as any)?.created_at;
-      if (!failedAt || (sentAt && sentAt >= failedAt)) {
-        setAiHealthIssue(null);
-        return;
-      }
-      // Only shout once the gap is real — a single transient failure is noise.
-      const silentMinutes = sentAt
-        ? (Date.parse(failedAt) - Date.parse(sentAt)) / 60_000
-        : Number.POSITIVE_INFINITY;
-      if (silentMinutes < 30) {
-        setAiHealthIssue(null);
-        return;
-      }
-      setAiHealthIssue({
-        since: sentAt || null,
-        reason: summariseAutomationReason((lastFailed as any)?.reason),
-      });
-    })();
-    return () => { cancelled = true; };
+        const failedAt = (lastFailed as any)?.created_at;
+        const sentAt = (lastSent as any)?.created_at;
+        if (!failedAt || (sentAt && sentAt >= failedAt)) {
+          setAiHealthIssue(null);
+          return;
+        }
+        // Only shout once the gap is real — a single transient failure is noise.
+        const silentMinutes = sentAt
+          ? (Date.parse(failedAt) - Date.parse(sentAt)) / 60_000
+          : Number.POSITIVE_INFINITY;
+        if (silentMinutes < 30) {
+          setAiHealthIssue(null);
+          return;
+        }
+        setAiHealthIssue({
+          since: sentAt || null,
+          reason: summariseAutomationReason((lastFailed as any)?.reason),
+        });
+      })();
+    });
+    return () => { cancelled = true; stop(); };
   }, [demoMode]);
 
-  // Discover all business-number channels in the background. The main inbox
-  // only loads the first page for speed, so the selector cannot depend on
-  // whichever numbers happen to appear in that first page. Read messages
-  // directly — the conversations view times out at 41k threads.
+  // Discover inbox channels from the conversation index. Scanning 5000
+  // whatsapp_messages rows on every mount was a second full-table read next to
+  // the list query; the conversations view times out at 41k threads.
   useEffect(() => {
     if (demoMode) return;
     if (role === "counsellor" && !profile?.id) return;
     let cancelled = false;
     (async () => {
-      const { data: messageChannels } = await supabase
-        .from("whatsapp_messages" as any)
-        .select("business_phone_number_id, business_phone_number")
-        .not("business_phone_number_id", "is", null)
-        .order("created_at", { ascending: false })
-        .limit(5000);
+      const { data: channelRows } = await (supabase as any).rpc("whatsapp_inbox_channel_keys");
       if (cancelled) return;
 
       const counts = new Map<string, { label: string; n: number }>();
-      for (const row of ((messageChannels || []) as any[])) {
+      for (const row of ((channelRows || []) as any[])) {
         const id = normalizeBusinessChannel(row.business_phone_number_id || row.business_phone_number);
         if (!id) continue;
         if (!isHrScope && isHrBusinessChannel(id, row.business_phone_number)) continue;
         const cur = counts.get(id) || { label: formatInboxLabel(id, row.business_phone_number), n: 0 };
-        cur.n += 1;
+        cur.n += Number(row.n) || 0;
         counts.set(id, cur);
       }
 
@@ -1786,93 +1900,99 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   useEffect(() => {
     if (demoMode) return;
     let cancelled = false;
-    (async () => {
-      const { data: staffProfiles } = await supabase
-        .from("profiles")
-        .select("phone, display_name, user_id")
-        .not("phone", "is", null);
-
-      const { data: staffRoles } = await supabase
-        .from("user_roles")
-        .select("user_id, role")
-        .in("role", ["super_admin", "campus_admin", "principal", "admission_head", "counsellor", "accountant", "faculty", "teacher", "data_entry", "office_admin", "office_assistant", "school_coordinator", "hostel_warden"]);
-
+    const stop = runWhenInboxIdle(() => {
       if (cancelled) return;
-      const staffUserIds = new Set((staffRoles || []).map((r: any) => r.user_id));
-      const nameMap: Record<string, string> = {};
-      const syntheticConvs: Conversation[] = [];
+      void (async () => {
+        const { data: staffProfiles } = await supabase
+          .from("profiles")
+          .select("phone, display_name, user_id")
+          .not("phone", "is", null);
 
-      for (const p of (staffProfiles || [])) {
-        if (!p.phone || !staffUserIds.has(p.user_id)) continue;
-        const digits = p.phone.replace(/\D/g, "");
-        if (p.display_name) nameMap[digits] = p.display_name;
-        syntheticConvs.push({
-          phone: digits,
-          lead_id: null,
-          lead_name: null,
-          lead_stage: null,
-          lead_person_role: null,
-          course_name: null,
-          last_message: null,
-          last_direction: "outbound",
-          last_message_at: "1970-01-01T00:00:00Z",
-          unread_count: 0,
-          counsellor_id: null,
-          counsellor_name: null,
-          has_inbound: false,
-          provider: null,
-          business_phone_number_id: null,
-          business_phone_number: null,
-          conversation_mode: null,
-          conversation_state: null,
-          owner_user_id: null,
-          escalation_role: null,
-          handoff_reason: null,
-          priority: null,
-          sla_due_at: null,
-          last_intent: null,
-          last_confidence: null,
-          last_bot_action: null,
-          lead_counsellor_ids: null,
-        });
-      }
+        const { data: staffRoles } = await supabase
+          .from("user_roles")
+          .select("user_id, role")
+          .in("role", ["super_admin", "campus_admin", "principal", "admission_head", "counsellor", "accountant", "faculty", "teacher", "data_entry", "office_admin", "office_assistant", "school_coordinator", "hostel_warden"]);
 
-      setStaffNames(nameMap);
-      setStaffConvs(syntheticConvs);
-    })();
-    return () => { cancelled = true; };
+        if (cancelled) return;
+        const staffUserIds = new Set((staffRoles || []).map((r: any) => r.user_id));
+        const nameMap: Record<string, string> = {};
+        const syntheticConvs: Conversation[] = [];
+
+        for (const p of (staffProfiles || [])) {
+          if (!p.phone || !staffUserIds.has(p.user_id)) continue;
+          const digits = p.phone.replace(/\D/g, "");
+          if (p.display_name) nameMap[digits] = p.display_name;
+          syntheticConvs.push({
+            phone: digits,
+            lead_id: null,
+            lead_name: null,
+            lead_stage: null,
+            lead_person_role: null,
+            course_name: null,
+            last_message: null,
+            last_direction: "outbound",
+            last_message_at: "1970-01-01T00:00:00Z",
+            unread_count: 0,
+            counsellor_id: null,
+            counsellor_name: null,
+            has_inbound: false,
+            provider: null,
+            business_phone_number_id: null,
+            business_phone_number: null,
+            conversation_mode: null,
+            conversation_state: null,
+            owner_user_id: null,
+            escalation_role: null,
+            handoff_reason: null,
+            priority: null,
+            sla_due_at: null,
+            last_intent: null,
+            last_confidence: null,
+            last_bot_action: null,
+            lead_counsellor_ids: null,
+          });
+        }
+
+        setStaffNames(nameMap);
+        setStaffConvs(syntheticConvs);
+      })();
+    });
+    return () => { cancelled = true; stop(); };
   }, []);
 
   useEffect(() => {
     if (demoMode) return;
     if (!isAdminRole(role)) { setCounsellorList([]); return; }
     let cancelled = false;
-    (async () => {
-      const { data: ccRoles } = await supabase
-        .from("user_roles")
-        .select("user_id")
-        .eq("role", "counsellor");
+    const stop = runWhenInboxIdle(() => {
+      if (cancelled) return;
+      void (async () => {
+        const { data: ccRoles } = await supabase
+          .from("user_roles")
+          .select("user_id")
+          .eq("role", "counsellor");
 
-      if (!ccRoles || ccRoles.length === 0) {
-        if (!cancelled) setCounsellorList([]);
-        return;
-      }
+        if (!ccRoles || ccRoles.length === 0) {
+          if (!cancelled) setCounsellorList([]);
+          return;
+        }
 
-      const ccUserIds = ccRoles.map((r: any) => r.user_id);
-      const { data: ccProfiles } = await supabase
-        .from("profiles")
-        .select("id, display_name")
-        .in("user_id", ccUserIds);
+        const ccUserIds = ccRoles.map((r: any) => r.user_id);
+        const { data: ccProfiles } = await supabase
+          .from("profiles")
+          .select("id, display_name")
+          .in("user_id", ccUserIds);
 
-      if (!cancelled && ccProfiles) {
-        setCounsellorList(
-          ccProfiles
-            .filter((p: any) => p.display_name)
-            .map((p: any) => ({ id: p.id, name: p.display_name }))
-        );
-      }
-    })();
-    return () => { cancelled = true; };
+        if (!cancelled && ccProfiles) {
+          setCounsellorList(
+            ccProfiles
+              .filter((p: any) => p.display_name)
+              .map((p: any) => ({ id: p.id, name: p.display_name }))
+          );
+        }
+      })();
+    });
+    return () => { cancelled = true; stop(); };
   }, [role]);
 
   // Unreplied-by-counsellor used to SELECT counsellor_id, unread_count from
@@ -1969,99 +2089,167 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     return () => { cancelled = true; };
   }, [searchParams, conversations.length, staffConvs.length]);
 
-  // Fetch messages for selected conversation
+  const applyThreadBusinessNumberFilter = (query: any, includeBusinessNumber = true) => {
+    const activePnid = businessNumber === "primary" ? primaryPnid : businessNumber;
+    if (isHrScope) return query;
+    if (businessNumber === "all") return query;
+    if (businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
+      const variants = businessChannelVariants(businessNumber);
+      return query.or(
+        (includeBusinessNumber
+          ? variants.flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
+          : variants.map(v => `business_phone_number_id.eq.${v}`))
+          .join(","),
+      );
+    }
+    if (businessNumber === "primary") {
+      if (activePnid) return query.or(`business_phone_number_id.is.null,business_phone_number_id.eq.${activePnid}`);
+      return query.is("business_phone_number_id", null);
+    }
+    return query.eq("business_phone_number_id", businessNumber);
+  };
+
+  const fetchThreadPage = async (phone: string, before?: string | null) => {
+    const buildMessageQuery = (selectColumns: string, includeBusinessNumber = true) => {
+      let query = supabase
+        .from("whatsapp_messages" as any)
+        .select(selectColumns)
+        .eq("phone", phone)
+        .order("created_at", { ascending: false })
+        .limit(THREAD_PAGE_SIZE);
+      if (before) query = query.lt("created_at", before);
+      return applyThreadBusinessNumberFilter(query, includeBusinessNumber);
+    };
+
+    const messageColumns = "id, wa_message_id, direction, content, message_type, status, template_key, media_url, created_at, business_phone_number_id, status_error";
+    const messageColumnsWithRender = `${messageColumns}, render_metadata`;
+    let q = buildMessageQuery(`${messageColumnsWithRender}, sender_user_id`);
+    let { data, error } = await q;
+    if (error && /render_metadata/i.test(error.message || "")) {
+      const fallback = await buildMessageQuery(`${messageColumns}, sender_user_id`);
+      data = fallback.data;
+      error = fallback.error;
+    }
+    if (error && /sender_user_id/i.test(error.message || "")) {
+      const fallback = await buildMessageQuery(messageColumnsWithRender);
+      data = fallback.data;
+      error = fallback.error;
+    }
+    if (error && /render_metadata/i.test(error.message || "")) {
+      const fallback = await buildMessageQuery(messageColumns);
+      data = fallback.data;
+      error = fallback.error;
+    }
+    if (error && /business_phone_number/i.test(error.message || "")) {
+      const fallback = await buildMessageQuery(messageColumns, false);
+      data = fallback.data;
+      error = fallback.error;
+    }
+    const newestFirst = (data || []) as Message[];
+    return {
+      error,
+      rows: newestFirst.slice().reverse(),
+      reachedEnd: newestFirst.length < THREAD_PAGE_SIZE,
+    };
+  };
+
+  const loadOlderMessages = async () => {
+    if (demoMode || !selectedPhone || !hasMoreMessages || loadingOlderMessagesRef.current) return;
+    const oldest = messages[0]?.created_at;
+    if (!oldest) return;
+    loadingOlderMessagesRef.current = true;
+    setLoadingOlderMessages(true);
+    stickThreadToBottomRef.current = false;
+    const scroller = threadScrollRef.current;
+    const previousHeight = scroller?.scrollHeight ?? 0;
+    try {
+      const { error, rows, reachedEnd } = await fetchThreadPage(selectedPhone, oldest);
+      if (error) {
+        toast({ title: "Couldn't load older WhatsApp messages", description: error.message, variant: "destructive" });
+        return;
+      }
+      setHasMoreMessages(!reachedEnd);
+      if (rows.length === 0) return;
+      setMessages(prev => {
+        const seen = new Set(prev.map(m => m.id));
+        const older = rows.filter(m => !seen.has(m.id));
+        return [...older, ...prev];
+      });
+      requestAnimationFrame(() => {
+        if (!scroller) return;
+        scroller.scrollTop = scroller.scrollHeight - previousHeight;
+      });
+    } finally {
+      loadingOlderMessagesRef.current = false;
+      setLoadingOlderMessages(false);
+    }
+  };
+
+  // Newest THREAD_PAGE_SIZE messages first. Older history loads on scroll-up.
+  // Keep an in-memory window per chat so switching back does not flash empty.
   useEffect(() => {
     if (demoMode) {
       if (!selectedPhone) { setMessages([]); return; }
       setMessages(DEMO_MESSAGES[selectedPhone] || []);
+      setHasMoreMessages(false);
       return;
     }
-    if (!selectedPhone) { setMessages([]); return; }
+    if (!selectedPhone) { setMessages([]); setHasMoreMessages(false); return; }
+    let cancelled = false;
+    const cacheKey = threadCacheKey(selectedPhone, businessNumber, primaryPnid);
+    const cached = threadCacheRef.current.get(cacheKey);
+    stickThreadToBottomRef.current = true;
+    if (cached) {
+      setMessages(cached.messages);
+      setHasMoreMessages(cached.hasMore);
+    } else {
+      setMessages([]);
+      setHasMoreMessages(false);
+    }
+    setConversations(prev =>
+      prev.map(c => c.phone === selectedPhone && matchesInbox(c) ? { ...c, unread_count: 0 } : c)
+    );
+    const activeConversation = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
+      || conversations.find(c => c.phone === selectedPhone);
+    void (supabase.rpc as any)("mark_whatsapp_conversation_read", {
+      p_phone: selectedPhone,
+      p_provider: businessNumber === "all" ? null : activeConversation?.provider || null,
+      p_business_phone_number_id: businessNumber === "all" ? null : activeConversation?.business_phone_number_id || null,
+      p_business_phone_number: businessNumber === "all" ? null : activeConversation?.business_phone_number || null,
+    });
     (async () => {
-      // Pick the active business pnid for filtering. "primary" matches the
-      // most-used pnid + legacy NULL rows; otherwise exact match.
-      const activePnid = businessNumber === "primary" ? primaryPnid : businessNumber;
-      const applyBusinessNumberFilter = (query: any, includeBusinessNumber = true) => {
-        if (isHrScope) {
-          // HR view shows the candidate's full thread: messages on the HR
-          // number AND any messages on the admissions number that were
-          // categorised as job-applicant — same conversation, different DID.
-          // We don't pnid-filter here; the conversation list is already
-          // scoped via matchesInbox.
-          return query;
-        }
-        if (businessNumber === "all") return query;
-        if (businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
-          const variants = businessChannelVariants(businessNumber);
-          return query.or(
-            (includeBusinessNumber
-              ? variants.flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
-              : variants.map(v => `business_phone_number_id.eq.${v}`))
-              .join(","),
-          );
-        }
-        if (businessNumber === "primary") {
-          if (activePnid) return query.or(`business_phone_number_id.is.null,business_phone_number_id.eq.${activePnid}`);
-          return query.is("business_phone_number_id", null);
-        }
-        return query.eq("business_phone_number_id", businessNumber);
-      };
-
-      const buildMessageQuery = (selectColumns: string, includeBusinessNumber = true) => {
-        const query = supabase
-          .from("whatsapp_messages" as any)
-          .select(selectColumns)
-          .eq("phone", selectedPhone)
-          .order("created_at", { ascending: true })
-          .limit(200);
-        return applyBusinessNumberFilter(query, includeBusinessNumber);
-      };
-
-      const messageColumns = "id, wa_message_id, direction, content, message_type, status, template_key, media_url, created_at, business_phone_number_id, status_error";
-      const messageColumnsWithRender = `${messageColumns}, render_metadata`;
-      let q = buildMessageQuery(`${messageColumnsWithRender}, sender_user_id`);
-      let { data, error } = await q;
-      if (error && /render_metadata/i.test(error.message || "")) {
-        const fallback = await buildMessageQuery(`${messageColumns}, sender_user_id`);
-        data = fallback.data;
-        error = fallback.error;
-      }
-      if (error && /sender_user_id/i.test(error.message || "")) {
-        const fallback = await buildMessageQuery(messageColumnsWithRender);
-        data = fallback.data;
-        error = fallback.error;
-      }
-      if (error && /render_metadata/i.test(error.message || "")) {
-        const fallback = await buildMessageQuery(messageColumns);
-        data = fallback.data;
-        error = fallback.error;
-      }
-      if (error && /business_phone_number/i.test(error.message || "")) {
-        const fallback = await buildMessageQuery(messageColumns, false);
-        data = fallback.data;
-        error = fallback.error;
-      }
+      const { error, rows, reachedEnd } = await fetchThreadPage(selectedPhone);
+      if (cancelled) return;
       if (error) {
-        toast({ title: "Couldn't load WhatsApp messages", description: error.message, variant: "destructive" });
-      } else if (data) {
-        setMessages(data as any);
+        if (!cached) {
+          toast({ title: "Couldn't load WhatsApp messages", description: error.message, variant: "destructive" });
+        }
+        return;
       }
-
-      const activeConversation = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
-        || conversations.find(c => c.phone === selectedPhone);
-      await (supabase.rpc as any)("mark_whatsapp_conversation_read", {
-        p_phone: selectedPhone,
-        p_provider: businessNumber === "all" ? null : activeConversation?.provider || null,
-        p_business_phone_number_id: businessNumber === "all" ? null : activeConversation?.business_phone_number_id || null,
-        p_business_phone_number: businessNumber === "all" ? null : activeConversation?.business_phone_number || null,
+      setMessages(prev => {
+        if (!cached || prev.length === 0) return rows;
+        let next = prev;
+        let changed = false;
+        for (const msg of rows) {
+          const merged = mergeThreadMessages(next, msg);
+          if (merged !== next) changed = true;
+          next = merged;
+        }
+        return changed ? next : prev;
       });
-
-      // Update local unread count
-      setConversations(prev =>
-        prev.map(c => c.phone === selectedPhone && matchesInbox(c) ? { ...c, unread_count: 0 } : c)
-      );
+      setHasMoreMessages(prev => (cached ? prev : !reachedEnd));
     })();
+    return () => { cancelled = true; };
   }, [selectedPhone, businessNumber, primaryPnid]);
+
+  useEffect(() => {
+    if (demoMode || !selectedPhone || messages.length === 0) return;
+    rememberThreadCache(
+      threadCacheRef.current,
+      threadCacheKey(selectedPhone, businessNumber, primaryPnid),
+      { messages, hasMore: hasMoreMessages },
+    );
+  }, [demoMode, selectedPhone, businessNumber, primaryPnid, messages, hasMoreMessages]);
 
   useEffect(() => {
     if (demoMode) {
@@ -2095,73 +2283,58 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     return () => { cancelled = true; };
   }, [messages, senderNames]);
 
-  // Scroll to bottom on new messages
+  // Scroll to bottom on new messages, but not when older history is prepended.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!stickThreadToBottomRef.current) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
   }, [messages]);
 
-  // Poll instead of unfiltered postgres_changes on whatsapp_messages.
-  // Delivery-status UPDATEs (hundreds/min) were decoded into Realtime WAL for
-  // every open inbox. New inbound still arrives via this short insert window;
-  // ticks on the open thread are refreshed separately below.
+  // Poll the chat index + the open thread. Unfiltered postgres_changes on
+  // whatsapp_messages decoded delivery-status UPDATEs (hundreds/min) into
+  // Realtime WAL for every open inbox. The list is now a cheap page on
+  // conversation_state; the thread is phone-scoped.
   useEffect(() => {
     if (demoMode) return;
     let cancelled = false;
-    let since = new Date(Date.now() - 20_000).toISOString();
-
-    const applyIncoming = (msg: any, isInsert: boolean) => {
-      if (!msg?.id) return;
-      if (msg.phone === selectedPhone) {
-        setMessages(prev => mergeMessageByIdentity(prev, msg));
-      }
-      setConversations(prev => {
-        const existing = prev.find(c => c.phone === msg.phone);
-        if (existing) {
-          return prev.map(c =>
-            c.phone === msg.phone
-              ? {
-                  ...c,
-                  ...(isInsert ? {
-                    last_message: msg.content,
-                    last_direction: msg.direction,
-                    last_message_at: msg.created_at,
-                  } : {}),
-                  unread_count: isInsert && msg.direction === "inbound" && msg.phone !== selectedPhone
-                    ? c.unread_count + 1 : c.unread_count,
-                }
-              : c
-          ).sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
-        }
-        return prev;
-      });
-    };
 
     const tickNew = async () => {
       if (document.visibilityState !== "visible") return;
-      const from = since;
-      since = new Date().toISOString();
-      const { data } = await supabase
-        .from("whatsapp_messages" as any)
-        .select("id, phone, lead_id, direction, content, created_at, status, status_error, wa_message_id, message_type, template_key, media_url, provider, business_phone_number_id, sender_user_id")
-        .gte("created_at", from)
-        .order("created_at", { ascending: true })
-        .limit(80);
-      if (cancelled || !data?.length) return;
-      for (const msg of data as any[]) applyIncoming(msg, true);
+      if (isCampaignEngagedInbox) return;
+      const { data, error } = await (supabase as any).rpc("whatsapp_conversations_page", {
+        ...conversationPageArgs(),
+        p_cursor_at: null,
+        p_cursor_phone: null,
+        p_limit: CONVERSATION_PAGE_SIZE,
+      });
+      if (cancelled || error) return;
+      const incoming = ((data || []) as any[]).map(withConversationDefaults);
+      setConversations(prev => {
+        const next = mergeConversationIndexPage(prev, incoming);
+        return conversationIndexFingerprint(next) === conversationIndexFingerprint(prev) ? prev : next;
+      });
     };
 
     const tickStatus = async () => {
       if (document.visibilityState !== "visible" || !selectedPhone) return;
-      const { data } = await supabase
-        .from("whatsapp_messages" as any)
-        .select("id, phone, direction, content, created_at, status, status_error, wa_message_id, message_type, template_key, media_url")
-        .eq("phone", selectedPhone)
-        .order("created_at", { ascending: false })
-        .limit(80);
+      const { data } = await applyThreadBusinessNumberFilter(
+        supabase
+          .from("whatsapp_messages" as any)
+          .select("id, phone, direction, content, created_at, status, status_error, wa_message_id, message_type, template_key, media_url, sender_user_id")
+          .eq("phone", selectedPhone)
+          .order("created_at", { ascending: false })
+          .limit(THREAD_PAGE_SIZE),
+      );
       if (cancelled || !data?.length) return;
-      for (const msg of data as any[]) {
-        setMessages(prev => mergeMessageByIdentity(prev, msg));
-      }
+      setMessages(prev => {
+        let next = prev;
+        let changed = false;
+        for (const msg of (data as any[]).slice().reverse()) {
+          const merged = mergeThreadMessages(next, msg);
+          if (merged !== next) changed = true;
+          next = merged;
+        }
+        return changed ? next : prev;
+      });
     };
 
     const newId = setInterval(tickNew, 20_000);
@@ -2179,7 +2352,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       clearInterval(statusId);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [selectedPhone, demoMode]);
+  }, [selectedPhone, demoMode, businessNumber, primaryPnid, counsellorFilter, replyStateFilter, opsFilter, isOutboundMode, isHrScope, isCampaignEngagedInbox, role, profile?.id]);
 
   const uploadReplyMedia = async (file: File): Promise<string | null> => {
     const ext = file.name.split(".").pop() ?? "bin";
@@ -2371,6 +2544,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         status_error: statusError || null,
         render_metadata: render,
       };
+      stickThreadToBottomRef.current = true;
       setMessages(prev => mergeMessageByIdentity(prev, localMessage));
       setConversations(prev => prev.map(c => c.phone === selectedPhone
         ? { ...c, last_message: previewText, last_direction: "outbound", last_message_at: now, unread_count: 0 }
@@ -3464,7 +3638,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                             // a glance. Read state alone was not enough: opening a
                             // thread clears unread_count for the whole conversation,
                             // so an unanswered lead looked identical to a done one.
-                            className={`w-full text-left px-3 py-2.5 border-b border-slate-100 transition-colors ${
+                            className={`w-full text-left px-3 py-2.5 border-b border-slate-100 transition-colors [content-visibility:auto] [contain-intrinsic-size:auto_72px] ${
                               selectedPhone === c.phone
                                 ? "bg-[#f0f2f5]"
                                 : isNeedsReply(c)
@@ -3960,6 +4134,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
 
                 {/* Messages */}
                 <div
+                  ref={threadScrollRef}
                   className="flex-1 overflow-y-auto px-3 py-3 sm:px-6 space-y-1.5"
                   style={{
                     backgroundColor: "#efeae2",
@@ -3967,7 +4142,27 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                       "radial-gradient(circle at 1px 1px, rgba(17, 94, 89, 0.08) 1px, transparent 0)",
                     backgroundSize: "18px 18px",
                   }}
+                  onScroll={(e) => {
+                    const el = e.currentTarget;
+                    if (el.scrollTop < 80) void loadOlderMessages();
+                    stickThreadToBottomRef.current =
+                      el.scrollHeight - el.scrollTop - el.clientHeight < 96;
+                  }}
                 >
+                  {hasMoreMessages && (
+                    <div className="flex justify-center pb-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-[10px] text-muted-foreground"
+                        disabled={loadingOlderMessages}
+                        onClick={() => void loadOlderMessages()}
+                      >
+                        {loadingOlderMessages ? "Loading earlier…" : "Load earlier messages"}
+                      </Button>
+                    </div>
+                  )}
                   {messages.map((m, i) => {
                     const prevMsg = messages[i - 1];
                     const showDateChip = !prevMsg || getMsgDateLabel(m.created_at) !== getMsgDateLabel(prevMsg.created_at);
@@ -3976,7 +4171,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                     const failedMessage = m.status === "failed";
                     const failure = failedMessage ? describeWhatsAppError(m.status_error) : null;
                     return (
-                    <div key={m.id}>
+                    <div key={m.id} className="[content-visibility:auto] [contain-intrinsic-size:auto_64px]">
                       {showDateChip && (
                         <div className="flex justify-center my-2">
                           <span className="rounded-md bg-white/80 px-3 py-1 text-[10px] font-medium text-slate-600 shadow-sm">

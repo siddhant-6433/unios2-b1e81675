@@ -272,14 +272,17 @@ describe("inbox list pagination", () => {
     // get_whatsapp_conversations() materialises 41k threads with four LATERALs
     // before PostgREST .limit(120) applies, which is the
     // "canceling statement due to statement timeout" toast on /whatsapp-inbox.
+    // The live page RPC now reads whatsapp_conversation_state (chat index).
     const pageMigration = readMigration("whatsapp_conversations_page");
+    const listIndexMigration = readMigration("whatsapp_inbox_list_from_conversation_state");
     expect(inbox).toContain('rpc("whatsapp_conversations_page"');
     expect(inbox).not.toContain('.from("whatsapp_conversations" as any)');
     expect(pageMigration).toContain("CREATE OR REPLACE FUNCTION public.whatsapp_conversations_page");
-    expect(pageMigration).toContain("LIMIT LEAST(GREATEST(COALESCE(p_limit, 120), 1), 250)");
-    expect(pageMigration).toContain("FROM public.whatsapp_messages wm");
-    expect(pageMigration).not.toContain("FROM public.whatsapp_conversations");
-    expect(pageMigration).toMatch(/\bSECURITY\s+DEFINER\b/i);
+    expect(listIndexMigration).toContain("CREATE OR REPLACE FUNCTION public.whatsapp_conversations_page");
+    expect(listIndexMigration).toContain("LIMIT LEAST(GREATEST(COALESCE(p_limit, 120), 1), 250)");
+    expect(listIndexMigration).toContain("FROM public.whatsapp_conversation_state s");
+    expect(listIndexMigration).not.toContain("FROM public.whatsapp_conversations");
+    expect(listIndexMigration).toMatch(/\bSECURITY\s+DEFINER\b/i);
   });
 
   it("opens a phone deep-link without waiting for the list page", () => {
