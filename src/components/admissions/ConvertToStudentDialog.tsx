@@ -12,6 +12,7 @@ import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 import { SCHOOL_SESSION_YEARS, isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 interface ConvertToStudentDialogProps {
   open: boolean;
@@ -28,6 +29,7 @@ interface ConvertToStudentDialogProps {
 }
 
 export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, campusName, onSuccess }: ConvertToStudentDialogProps) {
+  const showPhone = useDisplayPhone();
   const { user } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
@@ -199,7 +201,7 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
         <div className="space-y-4 mt-2">
           <div className="p-4 rounded-xl bg-muted/50">
             <p className="text-sm font-semibold text-foreground">{lead.name}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{lead.phone} · {lead.email || "No email"}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{showPhone(lead.phone)} · {lead.email || "No email"}</p>
             {lead.pre_admission_no && <Badge variant="outline" className="mt-2 text-xs text-primary border-primary/30">Existing PAN: {lead.pre_admission_no}</Badge>}
           </div>
 

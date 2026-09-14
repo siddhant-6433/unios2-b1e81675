@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Sunrise, Flame, AlarmClock, CalendarCheck, MapPin, FileText, IndianRupee, ChevronDown, ChevronUp } from "lucide-react";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 interface BriefLead {
   id: string;
@@ -66,13 +67,14 @@ function timeOf(iso: string): string {
 }
 
 function LeadLine({ lead, note }: { lead: BriefLead; note?: string }) {
+  const showPhone = useDisplayPhone();
   return (
     <Link
       to={`/admissions/${lead.id}`}
       className="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-muted/60 transition-colors"
     >
       <span className="text-xs font-medium text-foreground truncate">{lead.name}</span>
-      <span className="text-[11px] text-muted-foreground whitespace-nowrap ml-2">{note ?? lead.phone}</span>
+      <span className="text-[11px] text-muted-foreground whitespace-nowrap ml-2">{note ?? showPhone(lead.phone)}</span>
     </Link>
   );
 }

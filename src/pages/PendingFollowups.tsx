@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -71,6 +72,7 @@ const PendingFollowups = () => {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const { role, user, profile } = useAuth();
+  const showPhone = useDisplayPhone();
   const isCounsellor = role === "counsellor";
   const profileId = profile?.id || null;
   const [tab, setTab] = useState<Tab>((searchParams.get("tab") as Tab) || "overdue");
@@ -709,7 +711,7 @@ const PendingFollowups = () => {
                           />
                         </span>
                       </p>
-                      <p className="text-[10px] text-muted-foreground">{r.lead_phone}</p>
+                      <p className="text-[10px] text-muted-foreground">{showPhone(r.lead_phone)}</p>
                     </td>
                     <td className="px-3 py-2.5">
                       <Badge className={`text-[10px] border-0 ${

@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MapPin, Footprints, LogOut, IndianRupee, FileText, Banknote, ChevronRight, RefreshCw, DoorOpen } from "lucide-react";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 const SendPaymentLinkDialog = lazy(() =>
   import("@/components/finance/SendPaymentLinkDialog").then(m => ({ default: m.SendPaymentLinkDialog })));
@@ -48,6 +49,7 @@ interface Props {
 }
 
 export function OnCampusBoard({ campusId, refreshKey, onChanged }: Props) {
+  const showPhone = useDisplayPhone();
   const { toast } = useToast();
   const [rows, setRows] = useState<OnCampusRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -133,7 +135,7 @@ export function OnCampusBoard({ campusId, refreshKey, onChanged }: Props) {
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{v.campus_name}</span>
-                    {v.lead_phone && <span>{v.lead_phone}</span>}
+                    {v.lead_phone && <span>{showPhone(v.lead_phone)}</span>}
                     {v.purpose && <span className="italic">{v.purpose}</span>}
                   </div>
                 </div>

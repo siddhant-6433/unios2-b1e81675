@@ -6,6 +6,9 @@ import {
 } from "lucide-react";
 import type { CourseOption, CampusOption } from "@/hooks/useCourseCampusLink";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
+import { canUnmaskContact } from "@/lib/maskContact";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
+import { useAuth } from "@/contexts/AuthContext";
 
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
@@ -81,6 +84,9 @@ export function LeadInfoCard({
   onStageChange, onFieldUpdate, userRole, onTokenPaidOverride,
 }: LeadInfoCardProps) {
   const isSuperAdmin = userRole === "super_admin";
+  const { realRole } = useAuth();
+  const showPhone = useDisplayPhone();
+  const canEditPhone = canUnmaskContact(realRole);
   const initials = lead.name
     .split(" ")
     .map((n: string) => n[0])
@@ -100,7 +106,11 @@ export function LeadInfoCard({
           </div>
           <div className="min-w-0">
             <EditableText field="name" label="Name" value={lead.name} onSave={onFieldUpdate} className="text-lg font-bold text-foreground" />
-            <EditableText field="phone" label="Phone" value={lead.phone} onSave={onFieldUpdate} className="text-sm text-muted-foreground" />
+            {canEditPhone ? (
+              <EditableText field="phone" label="Phone" value={lead.phone} onSave={onFieldUpdate} className="text-sm text-muted-foreground" />
+            ) : (
+              <span className="text-sm text-muted-foreground">{showPhone(lead.phone) || "—"}</span>
+            )}
             {(lead.city || lead.state) && (
               <p className="text-xs text-muted-foreground/70 flex items-center gap-1 mt-0.5">
                 <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -468,6 +478,9 @@ function EditableSelectRow({ icon, iconColor, label, value, displayValue, option
 // ── Guardian row (dual fields) ──────────────────────────────
 
 function EditableGuardianRow({ lead, onSave }: { lead: any; onSave?: (field: string, value: string | null, label: string) => void }) {
+  const { realRole } = useAuth();
+  const showPhone = useDisplayPhone();
+  const canEditPhone = canUnmaskContact(realRole);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(lead.guardian_name || "");
   const [phone, setPhone] = useState(lead.guardian_phone || "");
@@ -507,11 +520,21 @@ function EditableGuardianRow({ lead, onSave }: { lead: any; onSave?: (field: str
             </div>
           </div>
         ) : (
-          <div className="group flex items-center gap-1.5 cursor-pointer mt-0.5" onClick={() => { setName(lead.guardian_name || ""); setPhone(lead.guardian_phone || ""); setEditing(true); }}>
+          <div
+            className={`group flex items-center gap-1.5 mt-0.5 ${canEditPhone ? "cursor-pointer" : "cursor-default"}`}
+            onClick={() => {
+              if (!canEditPhone) return;
+              setName(lead.guardian_name || "");
+              setPhone(lead.guardian_phone || "");
+              setEditing(true);
+            }}
+          >
             <p className="text-sm font-medium text-foreground">
-              {lead.guardian_name ? `${lead.guardian_name}${lead.guardian_phone ? ` · ${lead.guardian_phone}` : ""}` : "Not set"}
+              {lead.guardian_name
+                ? `${lead.guardian_name}${lead.guardian_phone ? ` · ${showPhone(lead.guardian_phone)}` : ""}`
+                : "Not set"}
             </p>
-            <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+            {canEditPhone && <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />}
           </div>
         )}
       </div>

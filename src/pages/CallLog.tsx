@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -120,6 +121,7 @@ interface CallLogMetrics {
 const CallLog = () => {
   const navigate = useNavigate();
   const { role, roleLoaded, user, profile } = useAuth();
+  const showPhone = useDisplayPhone();
   const isCounsellor = role === "counsellor";
   const [records, setRecords] = useState<EnrichedCallLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -558,7 +560,7 @@ const CallLog = () => {
                       onClick={() => navigate(`/admissions/${r.lead_id}`)}>
                       <td className="px-4 py-2.5">
                         <p className="font-medium text-foreground text-sm">{r.lead_name}</p>
-                        <p className="text-[10px] text-muted-foreground">{r.lead_phone}</p>
+                        <p className="text-[10px] text-muted-foreground">{showPhone(r.lead_phone)}</p>
                       </td>
                       <td className="px-3 py-2.5 text-center">
                         {/* Cloud Call badge requires a real channel attribution.

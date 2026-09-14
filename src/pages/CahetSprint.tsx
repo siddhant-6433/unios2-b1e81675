@@ -18,6 +18,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { CahetRegisterDialog, type CahetRegisterTarget } from "@/components/leads/CahetRegisterDialog";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import {
   CAHET_SPRINT_OPEN,
   effectiveCahetDeadline,
@@ -149,6 +150,7 @@ function daysRemaining(deadlineIso: string): number {
 const CahetSprint = () => {
   const navigate = useNavigate();
   const { user, profile, role } = useAuth();
+  const showPhone = useDisplayPhone();
   const { toast } = useToast();
   const isCounsellor = role === "counsellor";
   const profileId = profile?.id || null;
@@ -850,7 +852,7 @@ const CahetSprint = () => {
                         )}
                       </div>
                       <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
-                        <span>{r.phone}</span>
+                        <span>{showPhone(r.phone)}</span>
                         {r.counsellor_name && <span>· {r.counsellor_name}</span>}
                         <span>· last touch {timeAgo(r.last_touch_at)}</span>
                         {r.next_followup_at && (
@@ -977,6 +979,7 @@ function CallControlBar({
   onDispose: (d: string) => void;
   onRegister: () => void;
 }) {
+  const showPhone = useDisplayPhone();
   const { lead, status, preDisposition } = call;
   const mm = Math.floor(elapsed / 60).toString().padStart(2, "0");
   const ss = (elapsed % 60).toString().padStart(2, "0");
@@ -1008,7 +1011,7 @@ function CallControlBar({
                 {status === "saving"    && <>Saving disposition…</>}
               </div>
               <div className="text-[11px] text-muted-foreground truncate">
-                {lead.course_name ? `${lead.course_name} · ` : ""}{lead.phone}
+                {lead.course_name ? `${lead.course_name} · ` : ""}{showPhone(lead.phone)}
                 {(status === "connected" || status === "ended") && (
                   <span className="ml-2 tabular-nums font-medium text-foreground">{mm}:{ss}</span>
                 )}
@@ -1093,6 +1096,7 @@ function CahetLeadPicker({
   onPick: (leadId: string) => void;
   onRegisterDirect: (target: CahetRegisterTarget) => void;
 }) {
+  const showPhone = useDisplayPhone();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PickerRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1167,7 +1171,7 @@ function CahetLeadPicker({
                       )}
                     </div>
                     <div className="text-[11px] text-muted-foreground truncate">
-                      {r.phone || "no phone"}
+                      {showPhone(r.phone) || "no phone"}
                       {r.course_name ? ` · ${r.course_name}` : ""}
                     </div>
                   </div>

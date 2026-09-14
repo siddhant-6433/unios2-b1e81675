@@ -9,6 +9,7 @@ import {
 } from "@/components/leads/whatsappTemplates";
 import { formatWhatsAppPreview, useLeadWhatsAppPreview } from "@/hooks/useLeadWhatsAppPreview";
 import type { QueueLead } from "@/lib/dialerQueue";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 interface Props {
   lead: QueueLead;
@@ -23,6 +24,7 @@ interface Props {
  */
 export function WhatsAppTab({ lead, active }: Props) {
   const { toast } = useToast();
+  const showPhone = useDisplayPhone();
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -75,7 +77,7 @@ export function WhatsAppTab({ lead, active }: Props) {
 
       <p className="text-[11px] text-muted-foreground">
         Sending to <span className="font-medium text-foreground">{lead.name}</span>
-        <span className="ml-1 font-mono">{lead.phone}</span>
+        <span className="ml-1 font-mono">{showPhone(lead.phone)}</span>
       </p>
 
       <WhatsAppTemplatePicker

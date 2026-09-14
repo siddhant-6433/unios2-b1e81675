@@ -23,6 +23,8 @@ import type { ApplicationData } from "@/components/apply/types";
 import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
 import { fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails as CahetRegistrationDetailsType } from "@/lib/cahet";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
+import { canUnmaskContact } from "@/lib/maskContact";
 
 interface ApplicationRow {
   id: string;
@@ -291,7 +293,8 @@ function ApplicationEditDialog({ app, steps, isSchool, cahetRegistration, onClos
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { role } = useAuth();
+  const { role, realRole } = useAuth();
+  const showPhone = useDisplayPhone();
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
   const [data, setData] = useState<ApplicationData>(() => appRowToData(app));
@@ -448,7 +451,7 @@ function ApplicationEditDialog({ app, steps, isSchool, cahetRegistration, onClos
             <span>
               <span className="font-medium text-foreground">{data.full_name || "Applicant"}</span>
               {" · "}
-              <span>{app.phone}</span>
+              <span>{showPhone(app.phone)}</span>
               {app.email && <> · <span>{app.email}</span></>}
             </span>
             <Badge className={`text-[10px] border-0 ${
@@ -517,6 +520,7 @@ function ApplicationEditDialog({ app, steps, isSchool, cahetRegistration, onClos
                   onChange={onChange}
                   onNext={onNextSave("personal")}
                   saving={saving}
+                  maskPhoneDisplay={!canUnmaskContact(realRole)}
                 />
               )}
               {activeTab === "parents" && (

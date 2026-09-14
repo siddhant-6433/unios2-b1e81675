@@ -5,6 +5,7 @@ import { SelectField, FieldShell } from "@/components/ui/state-fields";
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Input } from "@/components/ui/input";
 import { Calendar, MapPin, User, CheckCircle2, XCircle, Clock, Footprints, AlertCircle, Filter, RefreshCw, ChevronRight, PhoneCall } from "lucide-react";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -371,6 +372,7 @@ function VisitTable({ rows, tab }: { rows: Visit[]; tab: Tab }) {
 }
 
 function VisitRow({ visit: v, tab }: { visit: Visit; tab: Tab }) {
+  const showPhone = useDisplayPhone();
   const sc = STATUS_CONFIG[v.status] ?? { label: v.status, color: "text-muted-foreground", bg: "bg-muted border-border" };
   const overdueDays = tab === "unmarked"
     ? Math.floor((Date.now() - new Date(v.visit_date).getTime()) / 86400_000)
@@ -382,7 +384,7 @@ function VisitRow({ visit: v, tab }: { visit: Visit; tab: Tab }) {
       <td className="px-4 py-3">
         <p className="text-sm font-medium text-foreground">{v.lead_name}</p>
         <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
-          <PhoneCall className="h-3 w-3" />{v.lead_phone}
+          <PhoneCall className="h-3 w-3" />{showPhone(v.lead_phone)}
         </p>
       </td>
 

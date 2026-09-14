@@ -3,6 +3,7 @@ import { ArrowRight, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { PhoneInput } from "@/components/ui/phone-input";
+import { maskPhone } from "@/lib/maskContact";
 import { DatePickerField, SelectField, TextField } from "@/components/ui/state-fields";
 import { ApplicationData } from "./types";
 import { validateDobEligibility, fetchEligibilityRules, EligibilityRule } from "./eligibilityRules";
@@ -15,6 +16,8 @@ interface Props {
   onNext: () => void;
   saving: boolean;
   readOnly?: boolean;
+  /** When true, the locked phone field is shown as 981****892 (CRM staff views). */
+  maskPhoneDisplay?: boolean;
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
@@ -26,7 +29,7 @@ const categoryOptions = ["General", "OBC", "SC", "ST", "EWS"].map((value) => ({ 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PIN_RE = /^\d{6}$/;
 
-export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Props) {
+export function PersonalDetails({ data, onChange, onNext, saving, readOnly, maskPhoneDisplay }: Props) {
   const address = data.address || {};
   const isSchool = data.program_category === 'school';
   const isIndian = isIndianNationality(data.nationality);
@@ -197,7 +200,16 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
         )}
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone *</label>
-          <PhoneInput value={data.phone} onChange={() => {}} disabled />
+          {maskPhoneDisplay ? (
+            <input
+              value={maskPhone(data.phone) || ""}
+              disabled
+              readOnly
+              className={`${inputCls} opacity-70`}
+            />
+          ) : (
+            <PhoneInput value={data.phone} onChange={() => {}} disabled />
+          )}
         </div>
         <TextField
           label="Email"

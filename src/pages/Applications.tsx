@@ -3,6 +3,7 @@ import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { MiniLifecycleStepper } from "@/components/admissions/MiniLifecycleStepper";
@@ -380,6 +381,7 @@ const exportFileSlug = (value: string) =>
 
 export default function Applications() {
   const { role, profile } = useAuth();
+  const showPhone = useDisplayPhone();
   const { toast } = useToast();
   const isCounsellor = role === "counsellor";
   const isSuperAdmin = role === "super_admin";
@@ -2288,7 +2290,7 @@ export default function Applications() {
                         </div>
                       )}
                     </td>
-                    <td className="px-2 py-2 text-muted-foreground text-xs">{app.phone}</td>
+                    <td className="px-2 py-2 text-muted-foreground text-xs">{showPhone(app.phone)}</td>
                     <td className="px-2 py-2 text-xs text-foreground max-w-[200px] truncate">{courses || "—"}</td>
                     {/* Form-fill progress (sections completed in apply portal) — hidden on Submitted tab. */}
                     {statusFilter !== "submitted" && (
@@ -2455,7 +2457,7 @@ export default function Applications() {
                               <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Personal Details</p>
                               <div className="space-y-1">
                                 <p><span className="text-muted-foreground">Name:</span> <span className="font-medium">{app.full_name}</span></p>
-                                <p><span className="text-muted-foreground">Phone:</span> <span className="font-medium">{app.phone}</span></p>
+                                <p><span className="text-muted-foreground">Phone:</span> <span className="font-medium">{showPhone(app.phone)}</span></p>
                                 <p><span className="text-muted-foreground">Email:</span> <span className="font-medium">{app.email || "—"}</span></p>
                                 <p><span className="text-muted-foreground">DOB:</span> <span className="font-medium">{app.dob || "—"}</span></p>
                                 <p><span className="text-muted-foreground">Gender:</span> <span className="font-medium capitalize">{app.gender || "—"}</span></p>

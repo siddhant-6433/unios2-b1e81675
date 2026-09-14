@@ -7,6 +7,7 @@ import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { StudentAvatar } from "@/components/ui/student-avatar";
 import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 import { formatPersonName } from "@/lib/personName";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 export interface HeaderSearchResult {
   type: "lead" | "student" | "application";
@@ -60,6 +61,7 @@ export function HeaderSearchHit({
   result: HeaderSearchResult;
   onClick: () => void;
 }) {
+  const showPhone = useDisplayPhone();
   return (
     <button
       type="button"
@@ -92,7 +94,7 @@ export function HeaderSearchHit({
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5 min-w-0">
           <p className="text-[11px] text-muted-foreground min-w-0">
-            {r.phone}
+            {showPhone(r.phone)}
             {r.type === "lead" && (
               <span className="ml-1.5 text-muted-foreground/80">
                 · Owner: <span className="font-medium text-foreground/80">{r.ownerName || "Unassigned"}</span>

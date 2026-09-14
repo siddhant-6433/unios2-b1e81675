@@ -8,6 +8,7 @@ import { Bot, Search, CheckCircle, Play, AlertCircle, ChevronLeft, ChevronRight,
 import { AiCallQueueStatus } from "@/components/admissions/AiCallQueueStatus";
 import { VoiceQualityDashboard } from "@/components/admissions/VoiceQualityDashboard";
 import { CallQualityRating, CallQualityMetricsChip } from "@/components/admissions/CallQualityRating";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 interface AiCallRecord {
   id: string;
@@ -81,6 +82,7 @@ const PAGE_SIZE = 50;
 
 const AiCallLog = () => {
   const navigate = useNavigate();
+  const showPhone = useDisplayPhone();
   const [records, setRecords] = useState<AiCallRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -397,7 +399,7 @@ const AiCallLog = () => {
                       onClick={() => navigate(`/admissions/${r.lead_id}`)}>
                       <td className="px-4 py-2.5">
                         <p className="font-medium text-foreground">{r.lead_name}</p>
-                        <p className="text-[10px] text-muted-foreground">{r.lead_phone}</p>
+                        <p className="text-[10px] text-muted-foreground">{showPhone(r.lead_phone)}</p>
                       </td>
                       <td className="px-4 py-2.5 text-center">
                         {r.call_type === "inbound"

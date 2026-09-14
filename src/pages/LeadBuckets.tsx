@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
 import { School, GraduationCap, Search, UserPlus, CheckCircle, AlertTriangle, ListPlus, ArrowUpDown, Bot, PhoneOff } from "lucide-react";
@@ -116,11 +117,6 @@ const STAGE_LABELS: Record<string, string> = {
   token_paid: "Token Paid", pre_admitted: "Pre-Admitted",
 };
 
-function maskPhone(phone: string): string {
-  if (!phone || phone.length < 4) return "****";
-  return "••••••" + phone.slice(-4);
-}
-
 interface SourceChipsProps {
   breakdown: { meta_ads: number; google_ads: number; website: number; web_chat: number };
   onPick: (source: string) => void;
@@ -188,6 +184,7 @@ function AiCallChips({
 
 export default function LeadBuckets() {
   const { user, role, profile } = useAuth();
+  const showPhone = useDisplayPhone();
   const { selectedCampusId } = useCampus();
   const { toast } = useToast();
 
@@ -1165,7 +1162,7 @@ export default function LeadBuckets() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground font-mono text-xs">
-                    {maskPhone(lead.phone)}
+                    {showPhone(lead.phone)}
                   </td>
                   <td className="px-4 py-3">
                     <Badge variant="secondary" className="text-[10px]">

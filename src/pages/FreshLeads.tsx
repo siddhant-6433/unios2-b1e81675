@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +42,7 @@ const SOURCE_COLORS: Record<string, string> = {
 const FreshLeads = () => {
   const navigate = useNavigate();
   const { role, profile } = useAuth();
+  const showPhone = useDisplayPhone();
   const isCounsellor = role === "counsellor";
   const profileId = profile?.id ?? null;
   const [leads, setLeads] = useState<FreshLead[]>([]);
@@ -222,7 +224,7 @@ const FreshLeads = () => {
                     <td className="px-4 py-2.5 text-center text-xs text-muted-foreground">{page * PAGE_SIZE + i + 1}</td>
                     <td className="px-4 py-2.5">
                       <p className="font-medium text-foreground">{l.name}</p>
-                      <p className="text-[10px] text-muted-foreground">{l.phone}</p>
+                      <p className="text-[10px] text-muted-foreground">{showPhone(l.phone)}</p>
                     </td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground">{l.course_name}</td>
                     <td className="px-3 py-2.5">

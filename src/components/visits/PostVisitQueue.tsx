@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Clock, CheckCircle2, CalendarClock, ChevronRight, RefreshCw } from "lucide-react";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 interface FollowupRow {
   id: string;
@@ -33,6 +34,7 @@ interface Props {
 }
 
 export function PostVisitQueue({ refreshKey, onChanged }: Props) {
+  const showPhone = useDisplayPhone();
   const { toast } = useToast();
   const [rows, setRows] = useState<FollowupRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,7 +119,7 @@ export function PostVisitQueue({ refreshKey, onChanged }: Props) {
                   </Link>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1"><CalendarClock className="h-3 w-3" />{fmtDateTime(r.scheduled_at)}</span>
-                    {r.lead_phone && <span>{r.lead_phone}</span>}
+                    {r.lead_phone && <span>{showPhone(r.lead_phone)}</span>}
                     {r.notes && <span className="italic truncate max-w-[280px]">{r.notes}</span>}
                   </div>
                   {rescheduleId === r.id && (

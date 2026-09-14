@@ -2,6 +2,7 @@ import { Pencil, Check, X } from "lucide-react";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
 import type { QueueLead } from "@/lib/dialerQueue";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 interface Props {
   lead: QueueLead;
@@ -22,6 +23,7 @@ interface Props {
 export function DialerLeadHeader({
   lead, stageLabel, editing, setEditing, editValue, setEditValue, saveLeadEdit, courseOptions,
 }: Props) {
+  const showPhone = useDisplayPhone();
   return (
     <div className="shrink-0 border-b border-border bg-card px-5 py-2.5">
       <div className="flex items-start gap-3">
@@ -45,7 +47,7 @@ export function DialerLeadHeader({
                 className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-primary">
                 <Pencil className="h-3 w-3" />
               </button>
-              <span className="ml-1 shrink-0 font-mono text-[11px] font-normal text-muted-foreground">{lead.phone}</span>
+              <span className="ml-1 shrink-0 font-mono text-[11px] font-normal text-muted-foreground">{showPhone(lead.phone)}</span>
             </h2>
           )}
 

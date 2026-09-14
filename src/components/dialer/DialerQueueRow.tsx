@@ -1,5 +1,6 @@
 import { CheckCircle, MessageCircle, Mail, Calendar, RotateCcw } from "lucide-react";
 import type { QueueLead } from "@/lib/dialerQueue";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 const BUCKET_EDGE: Record<string, string> = {
   "Pinned": "bg-foreground",
@@ -29,6 +30,7 @@ interface Props {
  * lines and the colour already carries the meaning.
  */
 export function DialerQueueRow({ lead, state, reclaimMins, onClick, disabled }: Props) {
+  const showPhone = useDisplayPhone();
   const FollowupIcon = lead.followup_type === "whatsapp" ? MessageCircle
     : lead.followup_type === "email" ? Mail
     : lead.followup_type === "visit" ? Calendar
@@ -59,7 +61,7 @@ export function DialerQueueRow({ lead, state, reclaimMins, onClick, disabled }: 
       </div>
       <div className="flex items-center gap-1 text-[10px] leading-tight text-muted-foreground">
         <span className="truncate">{lead.course_name}</span>
-        <span className="shrink-0 tabular-nums">· ••{lead.phone.slice(-4)}</span>
+        <span className="shrink-0 tabular-nums">· {showPhone(lead.phone)}</span>
         {reclaimMins !== null && reclaimMins <= 30 && (
           <span className={`ml-auto inline-flex shrink-0 items-center gap-0.5 font-medium ${
             reclaimMins <= 0 ? "text-destructive animate-pulse" : "text-destructive"

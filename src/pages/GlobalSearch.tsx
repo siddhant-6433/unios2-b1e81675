@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { formatPersonName } from "@/lib/personName";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 interface SearchResult {
   type: "lead" | "student";
@@ -24,6 +25,7 @@ const GlobalSearch = () => {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const navigate = useNavigate();
+  const showPhone = useDisplayPhone();
 
   const handleSearch = async () => {
     const q = query.trim();
@@ -131,7 +133,7 @@ const GlobalSearch = () => {
                         {r.status && <Badge className="text-[10px] border-0 bg-muted text-muted-foreground capitalize">{r.status}</Badge>}
                       </div>
                       <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{r.phone}</span>
+                        <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{showPhone(r.phone)}</span>
                         {r.identifier && (
                           <span className="flex items-center gap-1 font-mono text-primary">
                             <Hash className="h-3 w-3" />{r.identifierLabel}: {r.identifier}
