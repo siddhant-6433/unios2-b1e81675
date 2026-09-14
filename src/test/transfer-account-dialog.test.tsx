@@ -34,11 +34,32 @@ function mockLeadRows(rows: Array<{ id: string; course_id: string | null; course
   });
 }
 
-const staff = [
-  { profile_id: "source-profile", user_id: "source-user", name: "Khyati Sagar", role: "counsellor" },
-  { profile_id: "target-arushi", user_id: "user-arushi", name: "Arushi Tyagi", role: "counsellor" },
-  { profile_id: "target-neha", user_id: "user-neha", name: "Neha Garg", role: "counsellor" },
+const staffDirectory = [
+  { profile_id: "source-profile", user_id: "source-user", display_name: "Khyati Sagar", role: "counsellor", login_disabled: false },
+  { profile_id: "target-arushi", user_id: "user-arushi", display_name: "Arushi Tyagi", role: "counsellor", login_disabled: false },
+  { profile_id: "target-neha", user_id: "user-neha", display_name: "Neha Garg", role: "counsellor", login_disabled: false },
 ];
+
+const multiStaffDirectory = [
+  { profile_id: "source-profile", user_id: "source-user", display_name: "Shivam Gupta", role: "counsellor", login_disabled: false },
+  { profile_id: "target-ananya", user_id: "user-ananya", display_name: "Ananya Rao", role: "counsellor", login_disabled: false },
+  { profile_id: "target-rahul", user_id: "user-rahul", display_name: "Rahul Mehta", role: "admission_head", login_disabled: false },
+];
+
+function mockRpc(options?: {
+  staff?: typeof staffDirectory;
+  transfer?: { data: unknown; error: { message: string } | null };
+  transferReject?: Error;
+}) {
+  const staff = options?.staff ?? staffDirectory;
+  mocks.rpc.mockImplementation((fn: string) => {
+    if (fn === "admin_user_directory") {
+      return Promise.resolve({ data: staff, error: null });
+    }
+    if (options?.transferReject) return Promise.reject(options.transferReject);
+    return Promise.resolve(options?.transfer ?? { data: { leads_transferred: 3 }, error: null });
+  });
+}
 
 describe("TransferAccountDialog", () => {
   beforeEach(() => {
@@ -63,7 +84,29 @@ describe("TransferAccountDialog", () => {
         courses: { id: "course-law", name: "LLB", code: "LLB-GN" },
       },
     ], 3);
-    mocks.rpc.mockResolvedValue({ data: { leads_transferred: 3 }, error: null });
+    mockRpc({ staff: multiStaffDirectory });
+  });
+
+  it("loads every active employee instead of the current Users & Roles page", async () => {
+    render(
+      <TransferAccountDialog
+        source={{ profileId: "source-profile", userId: "source-user", name: "Rahul Bhati" }}
+        onClose={vi.fn()}
+        onDone={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByLabelText(/Ananya Rao/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Rahul Mehta/i)).toBeInTheDocument();
+    expect(screen.queryByText(/No eligible staff members found/i)).not.toBeInTheDocument();
+
+    expect(mocks.rpc).toHaveBeenCalledWith("admin_user_directory", {
+      _show_archived: false,
+      _category: "employees",
+      _status: "active",
+      _limit: 1000,
+      _offset: 0,
+    });
   });
 
   it("submits selected counsellors and course-wise routing to the multi-transfer RPC", async () => {
@@ -72,11 +115,6 @@ describe("TransferAccountDialog", () => {
     render(
       <TransferAccountDialog
         source={{ profileId: "source-profile", userId: "source-user", name: "Shivam Gupta" }}
-        allUsers={[
-          { profile_id: "source-profile", user_id: "source-user", name: "Shivam Gupta", role: "counsellor" },
-          { profile_id: "target-ananya", user_id: "user-ananya", name: "Ananya Rao", role: "counsellor" },
-          { profile_id: "target-rahul", user_id: "user-rahul", name: "Rahul Mehta", role: "admission_head" },
-        ]}
         onClose={vi.fn()}
         onDone={onDone}
       />,
@@ -84,7 +122,7 @@ describe("TransferAccountDialog", () => {
 
     expect(await screen.findByText(/3/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByLabelText(/Ananya Rao/i));
+    fireEvent.click(await screen.findByLabelText(/Ananya Rao/i));
     fireEvent.click(screen.getByLabelText(/Rahul Mehta/i));
     fireEvent.click(screen.getByRole("button", { name: /course-wise/i }));
 
@@ -108,20 +146,19 @@ describe("TransferAccountDialog", () => {
 
   it("finishes a 0-lead single-target transfer via the simple RPC", async () => {
     mockLeadRows([], 0);
-    mocks.rpc.mockResolvedValue({ data: { leads_transferred: 0 }, error: null });
+    mockRpc({ staff: staffDirectory, transfer: { data: { leads_transferred: 0 }, error: null } });
     const onDone = vi.fn();
 
     render(
       <TransferAccountDialog
         source={{ profileId: "source-profile", userId: "source-user", name: "Khyati Sagar" }}
-        allUsers={staff}
         onClose={vi.fn()}
         onDone={onDone}
       />,
     );
 
     expect(await screen.findByText(/0 leads/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText(/Arushi Tyagi/i));
+    fireEvent.click(await screen.findByLabelText(/Arushi Tyagi/i));
 
     fireEvent.click(await screen.findByRole("button", { name: /finish transfer/i }));
 
@@ -144,20 +181,19 @@ describe("TransferAccountDialog", () => {
 
   it("shows failure toast and clears spinner when RPC throws", async () => {
     mockLeadRows([], 0);
-    mocks.rpc.mockRejectedValue(new Error("network down"));
+    mockRpc({ staff: staffDirectory, transferReject: new Error("network down") });
     const onDone = vi.fn();
 
     render(
       <TransferAccountDialog
         source={{ profileId: "source-profile", userId: "source-user", name: "Khyati Sagar" }}
-        allUsers={staff}
         onClose={vi.fn()}
         onDone={onDone}
       />,
     );
 
     expect(await screen.findByText(/0 leads/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText(/Arushi Tyagi/i));
+    fireEvent.click(await screen.findByLabelText(/Arushi Tyagi/i));
     fireEvent.click(await screen.findByRole("button", { name: /finish transfer/i }));
 
     await waitFor(() => {
@@ -179,19 +215,21 @@ describe("TransferAccountDialog", () => {
 
   it("shows failure toast when RPC returns an error payload", async () => {
     mockLeadRows([], 0);
-    mocks.rpc.mockResolvedValue({ data: null, error: { message: "Only super admins can transfer accounts" } });
+    mockRpc({
+      staff: staffDirectory,
+      transfer: { data: null, error: { message: "Only super admins can transfer accounts" } },
+    });
 
     render(
       <TransferAccountDialog
         source={{ profileId: "source-profile", userId: "source-user", name: "Khyati Sagar" }}
-        allUsers={staff}
         onClose={vi.fn()}
         onDone={vi.fn()}
       />,
     );
 
     expect(await screen.findByText(/0 leads/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText(/Arushi Tyagi/i));
+    fireEvent.click(await screen.findByLabelText(/Arushi Tyagi/i));
     fireEvent.click(await screen.findByRole("button", { name: /finish transfer/i }));
 
     await waitFor(() => {
