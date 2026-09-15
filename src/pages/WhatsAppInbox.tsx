@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MessageSquare, Search, Send, User, Clock, ExternalLink, ArrowLeft, FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings, ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck, ArrowRightLeft, UserPlus, ListPlus, Pencil, Plus, Trash2, Flag, Paperclip, Image as ImageIcon, Archive } from "lucide-react";
+import { MessageSquare, Search, Send, User, Clock, ExternalLink, ArrowLeft, FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings, ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck, ArrowRightLeft, UserPlus, ListPlus, Pencil, Plus, Trash2, Flag, Paperclip, Image as ImageIcon, Archive, Copy } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -3109,6 +3109,15 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     if (digits.startsWith("91") && digits.length === 12) return digits.slice(2);
     return phone;
   };
+  const copyLeadIdentity = () => {
+    const name = (selectedConv?.lead_name || "").trim();
+    const course = (selectedConv?.course_name || "").trim();
+    const mobile = selectedPhone ? formatPhone(selectedPhone) : "";
+    const text = [name, course, mobile].filter(Boolean).join(", ");
+    if (!text) return;
+    void navigator.clipboard.writeText(text);
+    toast({ title: "Copied", description: text });
+  };
   const getDisplayName = (c: Conversation) => c.lead_name || staffNames[c.phone] || formatPhone(c.phone);
   const isStaffConv = (c: Conversation) => !c.lead_id && !!staffNames[c.phone];
 
@@ -3750,53 +3759,59 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
             ) : (
               <>
                 {/* Thread header */}
-                <div className="sticky top-0 z-20 flex items-center gap-3 border-b border-slate-200 bg-[#f0f2f5] px-3 py-2.5 flex-wrap lg:flex-nowrap">
-                  <Button variant="ghost" size="icon" className="sm:hidden h-8 w-8" onClick={() => setSelectedPhone(null)}>
+                <div className="sticky top-0 z-20 border-b border-slate-200 bg-[#f0f2f5] px-3 py-2">
+                  <div className="flex items-start gap-2.5">
+                  <Button variant="ghost" size="icon" className="sm:hidden h-8 w-8 shrink-0" onClick={() => setSelectedPhone(null)}>
                     <ArrowLeft className="h-4 w-4" />
                   </Button>
-                  <Avatar className="h-10 w-10 bg-slate-200">
+                  <Avatar className="h-10 w-10 shrink-0 bg-slate-200">
                     <AvatarFallback className="bg-success/10 text-sm font-semibold text-success">
                       {(selectedConv?.lead_name || selectedPhone || "WA").slice(0, 2).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <p className="text-sm font-semibold text-foreground truncate">{selectedConv?.lead_name || (selectedPhone ? formatPhone(selectedPhone) : "")}</p>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+                        <span>{selectedConv?.lead_name || (selectedPhone ? formatPhone(selectedPhone) : "")}</span>
+                        {selectedConv?.course_name && (
+                          <span className="font-medium text-muted-foreground"> · {selectedConv.course_name}</span>
+                        )}
+                        {selectedPhone && selectedConv?.lead_name && (
+                          <span className="font-medium text-muted-foreground"> · {formatPhone(selectedPhone)}</span>
+                        )}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={copyLeadIdentity}
+                        title="Copy name, course and mobile"
+                        className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
                       {selectedConv?.conversation_state && (
                         <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 whitespace-nowrap">
                           {stateLabel(selectedConv.conversation_state)}
                         </span>
                       )}
-                    </div>
-                    <p className="text-[10px] text-muted-foreground flex items-center gap-1.5 mt-0.5 flex-wrap">
-                      {selectedPhone ? formatPhone(selectedPhone) : ""}
-                      {selectedConv?.course_name && (
-                        <span
-                          className="inline-block max-w-[32rem] px-1.5 py-0 rounded bg-info/10 text-info-foreground text-[9px] font-semibold cursor-pointer hover:bg-info/15 transition-colors truncate"
-                          title={`${selectedConv.course_name} — click to copy`}
-                          onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(selectedConv.course_name!); toast({ title: "Copied", description: selectedConv.course_name }); }}
-                        >Course: {selectedConv.course_name}</span>
-                      )}
                       {selectedConv?.lead_source && (
                         <span
-                          className="px-1.5 py-0 rounded bg-success/5 text-success text-[9px] font-semibold capitalize"
+                          className="px-1.5 py-0.5 rounded bg-success/5 text-success text-[10px] font-semibold capitalize"
                           title={`Lead source: ${sourceLabel(selectedConv.lead_source)}`}
                         >Source: {sourceLabel(selectedConv.lead_source)}</span>
                       )}
-                    </p>
-                  </div>
-                  <div className="ml-auto flex min-w-0 basis-full items-center gap-2 overflow-x-auto pb-1 sm:basis-auto sm:flex-wrap sm:justify-end sm:overflow-visible sm:pb-0">
-                    {selectedConv?.counsellor_name && (
-                      <button
-                        type="button"
-                        title={`${selectedConv.counsellor_name} — click to copy`}
-                        onClick={() => { navigator.clipboard.writeText(selectedConv.counsellor_name!); toast({ title: "Copied", description: selectedConv.counsellor_name }); }}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary/10 dark:bg-primary/80/30 border border-primary/20 dark:border-primary/50 px-2.5 py-1.5 text-xs font-medium text-primary dark:text-primary/50 whitespace-nowrap hover:bg-primary/15 dark:hover:bg-primary/80/50 transition-colors"
-                      >
-                        <User className="h-3 w-3" />
-                        {selectedConv.counsellor_name}
-                      </button>
-                    )}
+                      {selectedConv?.counsellor_name && (
+                        <button
+                          type="button"
+                          title={`${selectedConv.counsellor_name} — click to copy`}
+                          onClick={() => { navigator.clipboard.writeText(selectedConv.counsellor_name!); toast({ title: "Copied", description: selectedConv.counsellor_name }); }}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-md bg-primary/10 dark:bg-primary/80/30 border border-primary/20 dark:border-primary/50 px-1.5 py-0.5 text-[10px] font-medium text-primary dark:text-primary/50 whitespace-nowrap hover:bg-primary/15 dark:hover:bg-primary/80/50 transition-colors"
+                        >
+                          <User className="h-3 w-3" />
+                          {selectedConv.counsellor_name}
+                        </button>
+                      )}
                     {isAdminRole(role) && selectedConv?.lead_id && (
                       <button
                         onClick={() => {
@@ -3908,6 +3923,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                         <Ban className="h-3 w-3" /> DNC
                       </span>
                     )}
+                    </div>
+                  </div>
                   </div>
                 </div>
                 {/* Quick lead actions — only for lead conversations */}

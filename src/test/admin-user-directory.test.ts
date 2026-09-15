@@ -65,5 +65,13 @@ describe("admin user directory", () => {
     expect(adminPanel).not.toContain('supabase.from("user_roles").select("id, user_id, role")');
     expect(adminPanel).not.toContain('supabase.rpc("get_user_auth_info" as any)');
   });
+
+  it("fits directory rows without a horizontal scrollbar", () => {
+    expect(adminPanel).toContain("user-directory-list");
+    expect(adminPanel).toContain("overflow-hidden");
+    expect(adminPanel).toContain("MoreHorizontal");
+    expect(adminPanel).not.toContain("flex-nowrap");
+    expect(adminPanel).not.toContain("Phone (OTP)");
+  });
 });
 

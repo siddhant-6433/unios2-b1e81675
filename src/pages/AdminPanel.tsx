@@ -3,11 +3,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import { Users, UserPlus, FileSpreadsheet, Search, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, LogOut, ArrowRightLeft, AlertTriangle, Archive, ArchiveRestore, Sparkles, ChevronRight, Check } from "lucide-react";
+import { Users, UserPlus, FileSpreadsheet, Search, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, LogOut, ArrowRightLeft, AlertTriangle, Archive, ArchiveRestore, Sparkles, ChevronRight, Check, MoreHorizontal } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Switch } from "@/components/ui/switch";
@@ -873,7 +876,7 @@ const AdminPanel = () => {
               </div>
             )}
 
-            <div className="rounded-xl bg-card card-shadow overflow-x-auto" style={{ display: userSubTab === "publishers" ? "none" : undefined }}>
+            <div className="user-directory-list rounded-xl bg-card card-shadow overflow-hidden" style={{ display: userSubTab === "publishers" ? "none" : undefined }}>
               {loading ? (
                 <div className="flex items-center justify-center py-16">
                   <OrbLoader state="working" />
@@ -884,101 +887,71 @@ const AdminPanel = () => {
                   <p className="text-sm text-muted-foreground">No users found</p>
                 </div>
               ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left">
-                      <th className="px-4 py-3 font-medium text-muted-foreground">User</th>
-                      <th className="px-4 py-3 font-medium text-muted-foreground">Email</th>
-                      <th className="px-4 py-3 font-medium text-muted-foreground">Phone (OTP)</th>
-                      <th className="px-4 py-3 font-medium text-muted-foreground">Campus</th>
-                      <th className="px-4 py-3 font-medium text-muted-foreground">Current Role</th>
-                      <th className="px-4 py-3 font-medium text-muted-foreground">Last Sign-in</th>
-                      <th className="px-4 py-3 font-medium text-muted-foreground">Last Active</th>
-                      <th className="px-4 py-3 font-medium text-muted-foreground text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {subFiltered.map((user) => {
+                <div>
+                  <div className="hidden md:grid grid-cols-[minmax(0,1fr)_9.5rem_6.5rem_auto] gap-3 border-b border-border px-4 py-3 text-left text-sm font-medium text-muted-foreground">
+                    <span>Person</span>
+                    <span>Role</span>
+                    <span>Activity</span>
+                    <span className="text-right">Actions</span>
+                  </div>
+                  {subFiltered.map((user) => {
                       const initials = (user.display_name || "?").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
                       const isEditing = editingUser === user.user_id;
                       const isSaving = savingUser === user.user_id;
                       const isFamiliesTab = userSubTab === "families";
+                      const canActOnUser = isSuperAdmin && user.role !== "super_admin" && user.user_id !== authUser?.id;
+                      const showOverflow = isSuperAdmin && !isEditing;
+                      const contactLine = [user.email || "No email", user.phone || "Not set"].join(" · ");
                       return (
-                        <tr key={user.user_id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-3">
+                        <div key={user.user_id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                          <div className="grid min-w-0 grid-cols-1 md:grid-cols-[minmax(0,1fr)_9.5rem_6.5rem_auto] items-start gap-3 px-4 py-3">
+                            <div className="flex min-w-0 items-start gap-3">
                               <div className="relative shrink-0">
                                 <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{initials}</div>
                                 {isOnline(user.last_seen_at) && (
                                   <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-success/50 ring-2 ring-background" title="Online now" />
                                 )}
                               </div>
-                              <div className="flex flex-col gap-0.5">
-                                <p className="font-medium text-foreground">{user.display_name || "Unnamed"}</p>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate font-medium text-foreground">{user.display_name || "Unnamed"}</p>
+                                <div className="mt-0.5 flex min-w-0 items-center gap-1">
+                                  <p className="min-w-0 truncate text-xs text-muted-foreground" title={contactLine}>{contactLine}</p>
+                                  <button type="button" onClick={() => setPhoneEdit({ userId: user.user_id, name: user.display_name || "User", phone: user.phone })}
+                                    className="shrink-0 rounded-lg p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" title="Edit phone number">
+                                    <Phone className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                                {isSuperAdmin ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setCampusEditUser({ userId: user.user_id, profileId: user.profile_id, selected: user.campus ? user.campus.split(", ").filter(Boolean) : [] })}
+                                    className="mt-0.5 block max-w-full truncate text-left text-xs text-muted-foreground hover:text-primary"
+                                    title="Change campus"
+                                  >
+                                    {user.campus || "No campus"}
+                                  </button>
+                                ) : (
+                                  <p className="mt-0.5 truncate text-xs text-muted-foreground">{user.campus || "No campus"}</p>
+                                )}
                                 {user.login_disabled && (
-                                  <span className="inline-flex items-center gap-1 self-start rounded-md bg-warning/50/10 px-1.5 py-0.5 text-[10px] font-medium text-warning-foreground dark:text-warning">
+                                  <span className="mt-1 inline-flex items-center gap-1 self-start rounded-md bg-warning/50/10 px-1.5 py-0.5 text-[10px] font-medium text-warning-foreground dark:text-warning">
                                     <Lock className="h-2.5 w-2.5" /> Login disabled
                                   </span>
                                 )}
                                 {user.archived_at && (
-                                  <span className="inline-flex items-center gap-1 self-start rounded-md bg-slate-500/10 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 dark:text-slate-300">
+                                  <span className="mt-1 inline-flex items-center gap-1 self-start rounded-md bg-slate-500/10 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 dark:text-slate-300">
                                     <Archive className="h-2.5 w-2.5" /> Archived
                                   </span>
                                 )}
                                 {user.deleted_at && (
-                                  <span className="inline-flex items-center gap-1 self-start rounded-md bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive">
+                                  <span className="mt-1 inline-flex items-center gap-1 self-start rounded-md bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive">
                                     Soft-deleted · still holds phone
                                   </span>
                                 )}
                               </div>
                             </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`text-sm ${user.email ? "text-foreground" : "text-muted-foreground italic"}`}>{user.email || "—"}</span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-sm ${user.phone ? "text-foreground" : "text-muted-foreground italic"}`}>{user.phone || "Not set"}</span>
-                              <button onClick={() => setPhoneEdit({ userId: user.user_id, name: user.display_name || "User", phone: user.phone })}
-                                className="rounded-lg p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" title="Edit phone number">
-                                <Phone className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground">
-                            {isSuperAdmin ? (
-                              <button
-                                onClick={() => setCampusEditUser({ userId: user.user_id, profileId: user.profile_id, selected: user.campus ? user.campus.split(", ").filter(Boolean) : [] })}
-                                className="text-sm hover:text-primary cursor-pointer"
-                                title="Change campus"
-                              >
-                                {user.campus || "—"}
-                              </button>
-                            ) : (
-                              <span className="text-sm">{user.campus || "—"}</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3">
-                            {isEditing ? (
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                {/* Each held role is a removable chip; roles are additive. */}
-                                {user.roles.map((r) => (
-                                  <span key={r} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold ${getRoleBadgeClass(r)}`}>
-                                    {ALL_ROLES.find((x) => x.value === r)?.label || r}
-                                    <button onClick={() => removeRole(user.user_id, r)} disabled={isSaving} title="Remove role" className="hover:text-destructive">
-                                      <X className="h-3 w-3" />
-                                    </button>
-                                  </span>
-                                ))}
-                                <select value="" onChange={(e) => { if (e.target.value) addRole(user.user_id, e.target.value as AppRole); }} disabled={isSaving}
-                                  className="rounded-lg border border-input bg-card px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-                                  <option value="">+ Add role…</option>
-                                  {ALL_ROLES.filter((r) => !user.roles.includes(r.value)).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-                                </select>
-                                {isSaving && <ButtonOrb state="working" />}
-                                <button onClick={() => setEditingUser(null)} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
-                              </div>
-                            ) : (
+                            <div className="min-w-0">
+                              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">Role</p>
                               <div className="flex flex-wrap gap-1">
                                 {user.roles.length > 0 ? user.roles.map((r) => (
                                   <span key={r} className={`rounded-md px-2.5 py-0.5 text-[11px] font-semibold ${getRoleBadgeClass(r)}`}>
@@ -988,134 +961,126 @@ const AdminPanel = () => {
                                   <span className={`rounded-md px-2.5 py-0.5 text-[11px] font-semibold ${getRoleBadgeClass(null)}`}>No Role</span>
                                 )}
                               </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3">
-                            {user.last_sign_in_at ? (
-                              <span className="text-xs text-foreground" title={new Date(user.last_sign_in_at).toLocaleString("en-IN")}>
-                                {timeAgo(user.last_sign_in_at)}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground italic">Never</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3">
-                            {/* Last Active = real presence (same signal as the green dot),
-                                NOT profile_updated_at — the heartbeat bumps updated_at every 60s. */}
-                            {user.last_seen_at ? (
-                              <span className="text-xs text-foreground" title={new Date(user.last_seen_at).toLocaleString("en-IN")}>
-                                {timeAgo(user.last_seen_at)}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground italic">—</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <div className="flex items-center justify-end gap-1.5 flex-nowrap">
-                              <button onClick={() => handleViewProfile(user)}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">Activity</p>
+                              {user.last_sign_in_at ? (
+                                <p className="text-xs text-foreground" title={new Date(user.last_sign_in_at).toLocaleString("en-IN")}>
+                                  {timeAgo(user.last_sign_in_at)}
+                                </p>
+                              ) : (
+                                <p className="text-xs italic text-muted-foreground">Never</p>
+                              )}
+                              {/* Last Active = real presence (same signal as the green dot),
+                                  NOT profile_updated_at — the heartbeat bumps updated_at every 60s. */}
+                              {user.last_seen_at ? (
+                                <p className="mt-0.5 text-[11px] text-muted-foreground" title={new Date(user.last_seen_at).toLocaleString("en-IN")}>
+                                  Active {timeAgo(user.last_seen_at)}
+                                </p>
+                              ) : (
+                                <p className="mt-0.5 text-[11px] italic text-muted-foreground">—</p>
+                              )}
+                            </div>
+                            <div className="flex shrink-0 items-center justify-start gap-1.5 md:justify-end">
+                              <button type="button" onClick={() => handleViewProfile(user)}
                                 className="rounded-lg bg-muted p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
                                 title={user.role === "student" ? "View Student Profile" : "View Employee Profile"}>
                                 <Eye className="h-3.5 w-3.5" />
                               </button>
-                              {!isEditing && (
-                                <>
-                                  {!isFamiliesTab && isSuperAdmin && (
-                                    <button onClick={async () => { await startImpersonating(user.user_id); navigate("/"); }}
-                                      className="rounded-lg bg-warning/50/10 p-1.5 text-warning-foreground dark:text-warning hover:bg-warning/50/20 transition-colors"
-                                      title="Impersonate user">
-                                      <UserCheck className="h-3.5 w-3.5" />
+                              {!isEditing && !isFamiliesTab && isSuperAdmin && (
+                                <button type="button" onClick={() => setEditingUser(user.user_id)}
+                                  className="rounded-lg bg-primary/10 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors">
+                                  Role
+                                </button>
+                              )}
+                              {showOverflow && (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <button type="button" className="rounded-lg bg-muted p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors" title="More actions">
+                                      <MoreHorizontal className="h-3.5 w-3.5" />
                                     </button>
-                                  )}
-                                  {isSuperAdmin && (
-                                    <button onClick={() => setSetPasswordTarget({ userId: user.user_id, name: user.display_name || "User" })}
-                                      className="rounded-lg bg-muted p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
-                                      title="Set password">
-                                      <KeyRound className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                  {!isFamiliesTab && isSuperAdmin && (
-                                    <button onClick={() => setEditingUser(user.user_id)}
-                                      className="rounded-lg bg-primary/10 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors">
-                                      Role
-                                    </button>
-                                  )}
-                                  {!isFamiliesTab && isSuperAdmin && (
-                                    <button onClick={() => setPermTarget({ userId: user.user_id, name: user.display_name || "User", role: user.role })}
-                                      className="rounded-lg bg-muted p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
-                                      title="Manage permissions">
-                                      <Shield className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                  {isSuperAdmin && user.role !== "super_admin" && user.user_id !== authUser?.id && (
-                                    <button onClick={() => setDisableTarget({
-                                      userId: user.user_id,
-                                      name: user.display_name || "Unnamed",
-                                      nextDisabled: !user.login_disabled,
-                                    })}
-                                      className={user.login_disabled
-                                        ? "rounded-lg bg-success/50/10 p-1.5 text-success dark:text-success hover:bg-success/50/20 transition-colors"
-                                        : "rounded-lg bg-warning/50/10 p-1.5 text-warning-foreground dark:text-warning hover:bg-warning/50/20 transition-colors"}
-                                      title={user.login_disabled ? "Enable login" : "Disable login"}>
-                                      {user.login_disabled
-                                        ? <LockOpen className="h-3.5 w-3.5" />
-                                        : <Lock className="h-3.5 w-3.5" />}
-                                    </button>
-                                  )}
-                                  {isSuperAdmin && user.role !== "super_admin" && user.user_id !== authUser?.id && !user.login_disabled && (
-                                    <button onClick={() => setLogoutTarget({ userId: user.user_id, name: user.display_name || "Unnamed" })}
-                                      className="rounded-lg bg-muted p-1.5 text-muted-foreground hover:text-warning-foreground dark:hover:text-warning hover:bg-warning/50/10 transition-colors"
-                                      title="Force logout (revoke sessions)">
-                                      <LogOut className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                  {isSuperAdmin && user.role !== "super_admin" && user.user_id !== authUser?.id && (
-                                    showArchivedUsers ? (
-                                      <button
-                                        onClick={() => handleArchiveUser(user, false)}
-                                        disabled={archivingUser === user.user_id}
-                                        className="rounded-lg bg-success/50/10 p-1.5 text-success dark:text-success hover:bg-success/50/20 transition-colors disabled:opacity-50"
-                                        title="Restore to main user list"
-                                      >
-                                        {archivingUser === user.user_id
-                                          ? <ButtonOrb state="working" onFilled />
-                                          : <ArchiveRestore className="h-3.5 w-3.5" />}
-                                      </button>
-                                    ) : user.login_disabled ? (
-                                      <button
-                                        onClick={() => handleArchiveUser(user, true)}
-                                        disabled={archivingUser === user.user_id}
-                                        className="rounded-lg bg-slate-500/10 p-1.5 text-slate-700 dark:text-slate-300 hover:bg-slate-500/20 transition-colors disabled:opacity-50"
-                                        title="Archive inactive user"
-                                      >
-                                        {archivingUser === user.user_id
-                                          ? <ButtonOrb state="working" />
-                                          : <Archive className="h-3.5 w-3.5" />}
-                                      </button>
-                                    ) : null
-                                  )}
-                                  {isSuperAdmin && user.role !== "super_admin" && user.user_id !== authUser?.id && (
-                                    <button onClick={() => setTransferTarget({ profileId: user.profile_id, userId: user.user_id, name: user.display_name || "Unnamed" })}
-                                      className="rounded-lg bg-primary/50/10 p-1.5 text-primary dark:text-primary/60 hover:bg-primary/50/20 transition-colors"
-                                      title="Transfer account data">
-                                      <ArrowRightLeft className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                  {isSuperAdmin && user.role !== "super_admin" && (
-                                    <button onClick={() => setDeleteTarget({ userId: user.user_id, name: user.display_name || "Unnamed" })}
-                                      className="rounded-lg bg-destructive/10 p-1.5 text-destructive hover:bg-destructive/20 transition-colors"
-                                      title="Delete user">
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                </>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-52">
+                                    {!isFamiliesTab && (
+                                      <DropdownMenuItem className="gap-2" onSelect={() => { void startImpersonating(user.user_id).then(() => navigate("/")); }}>
+                                        <UserCheck className="h-3.5 w-3.5" /> Impersonate
+                                      </DropdownMenuItem>
+                                    )}
+                                    <DropdownMenuItem className="gap-2" onSelect={() => setSetPasswordTarget({ userId: user.user_id, name: user.display_name || "User" })}>
+                                      <KeyRound className="h-3.5 w-3.5" /> Set password
+                                    </DropdownMenuItem>
+                                    {!isFamiliesTab && (
+                                      <DropdownMenuItem className="gap-2" onSelect={() => setPermTarget({ userId: user.user_id, name: user.display_name || "User", role: user.role })}>
+                                        <Shield className="h-3.5 w-3.5" /> Manage permissions
+                                      </DropdownMenuItem>
+                                    )}
+                                    {canActOnUser && (
+                                      <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem className="gap-2" onSelect={() => setDisableTarget({
+                                          userId: user.user_id,
+                                          name: user.display_name || "Unnamed",
+                                          nextDisabled: !user.login_disabled,
+                                        })}>
+                                          {user.login_disabled ? <LockOpen className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                                          {user.login_disabled ? "Enable login" : "Disable login"}
+                                        </DropdownMenuItem>
+                                        {!user.login_disabled && (
+                                          <DropdownMenuItem className="gap-2" onSelect={() => setLogoutTarget({ userId: user.user_id, name: user.display_name || "Unnamed" })}>
+                                            <LogOut className="h-3.5 w-3.5" /> Force logout (revoke sessions)
+                                          </DropdownMenuItem>
+                                        )}
+                                        {showArchivedUsers ? (
+                                          <DropdownMenuItem className="gap-2" disabled={archivingUser === user.user_id} onSelect={() => handleArchiveUser(user, false)}>
+                                            <ArchiveRestore className="h-3.5 w-3.5" /> Restore to main user list
+                                          </DropdownMenuItem>
+                                        ) : user.login_disabled ? (
+                                          <DropdownMenuItem className="gap-2" disabled={archivingUser === user.user_id} onSelect={() => handleArchiveUser(user, true)}>
+                                            <Archive className="h-3.5 w-3.5" /> Archive inactive user
+                                          </DropdownMenuItem>
+                                        ) : null}
+                                        <DropdownMenuItem className="gap-2" onSelect={() => setTransferTarget({ profileId: user.profile_id, userId: user.user_id, name: user.display_name || "Unnamed" })}>
+                                          <ArrowRightLeft className="h-3.5 w-3.5" /> Transfer account data
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
+                                    {isSuperAdmin && user.role !== "super_admin" && (
+                                      <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onSelect={() => setDeleteTarget({ userId: user.user_id, name: user.display_name || "Unnamed" })}>
+                                          <Trash2 className="h-3.5 w-3.5" /> Delete user
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               )}
                             </div>
-                          </td>
-                        </tr>
+                          </div>
+                          {isEditing && (
+                            <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3 pl-[3.75rem]">
+                              {/* Each held role is a removable chip; roles are additive. */}
+                              {user.roles.map((r) => (
+                                <span key={r} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold ${getRoleBadgeClass(r)}`}>
+                                  {ALL_ROLES.find((x) => x.value === r)?.label || r}
+                                  <button type="button" onClick={() => removeRole(user.user_id, r)} disabled={isSaving} title="Remove role" className="hover:text-destructive">
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </span>
+                              ))}
+                              <select value="" onChange={(e) => { if (e.target.value) addRole(user.user_id, e.target.value as AppRole); }} disabled={isSaving}
+                                className="rounded-lg border border-input bg-card px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+                                <option value="">+ Add role…</option>
+                                {ALL_ROLES.filter((r) => !user.roles.includes(r.value)).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                              </select>
+                              {isSaving && <ButtonOrb state="working" />}
+                              <button type="button" onClick={() => setEditingUser(null)} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+                            </div>
+                          )}
+                        </div>
                       );
                     })}
-                  </tbody>
-                </table>
+                </div>
               )}
             </div>
 

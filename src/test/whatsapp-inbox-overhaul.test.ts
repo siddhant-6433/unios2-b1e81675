@@ -319,3 +319,12 @@ describe("no fabricated template values", () => {
     expect(templatesRlsMigration).not.toContain("team_leader");
   });
 });
+
+describe("thread header identity", () => {
+  it("puts name, course and mobile on the first line with a combined copy", () => {
+    expect(inbox).toContain("copyLeadIdentity");
+    expect(inbox).toContain("Copy name, course and mobile");
+    expect(inbox).toContain('[name, course, mobile].filter(Boolean).join(", ")');
+    expect(inbox).not.toContain("Course: {selectedConv.course_name}");
+  });
+});
