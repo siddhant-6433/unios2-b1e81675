@@ -62,6 +62,8 @@ describe("marketing campaign reports and list assignment", () => {
     expect(whatsappWebhook).toContain("markCampaignRecipientEngagement");
     expect(whatsappWebhook).toContain("clicked_button_at");
     expect(whatsappWebhook).toContain("clicked_link_at");
+    expect(whatsappWebhook).toContain("responded_at: nowIso");
+    expect(whatsappWebhook).toContain("businessNumber: [businessPnId, businessNumber]");
   });
 
   it("makes Marketing the campaign hub and shows all recipient details", () => {
