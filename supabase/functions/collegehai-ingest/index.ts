@@ -25,6 +25,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { pickLeadForSchoolBrand } from "../_shared/schoolLeadBrand.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -137,13 +138,13 @@ Deno.serve(async (req) => {
     );
 
     // ── Duplicate check by phone ─────────────────────────────────────────
-    const { data: existing } = await supabase
+    const { data: existingRows } = await supabase
       .from("leads")
-      .select("id, name, stage, source, secondary_source, tertiary_source, source_history")
+      .select("id, name, stage, source, secondary_source, tertiary_source, source_history, campus_id, portal_brand, lead_institution_type, is_mirror")
       .eq("phone", normPhone)
       .eq("is_mirror", false)
-      .limit(1)
-      .maybeSingle();
+      .limit(5);
+    const existing = pickLeadForSchoolBrand(existingRows as any[], "nimt");
 
     if (existing) {
       // Track collegehai as secondary/tertiary source
@@ -193,13 +194,13 @@ Deno.serve(async (req) => {
     }
 
     // ── Duplicate detection — add secondary/tertiary source if exists ────
-    const { data: existingLead } = await supabase
+    const { data: existingLeadRows } = await supabase
       .from("leads")
-      .select("id, name, phone, source, stage, secondary_source, tertiary_source, source_history")
+      .select("id, name, phone, source, stage, secondary_source, tertiary_source, source_history, campus_id, portal_brand, lead_institution_type, is_mirror")
       .eq("phone", normPhone)
       .eq("is_mirror", false)
-      .limit(1)
-      .maybeSingle();
+      .limit(5);
+    const existingLead = pickLeadForSchoolBrand(existingLeadRows as any[], "nimt");
 
     if (existingLead) {
       const newSource = "collegehai";

@@ -20,6 +20,10 @@ import {
   renderCourseFactsBlock,
 } from "../_shared/nimt-admissions-context.ts";
 import { resolveApplyPortal } from "../generate-apply-link/portal.ts";
+import {
+  pickLeadForSchoolBrand,
+  WHATSAPP_SCHOOL_CHANNEL_BRAND,
+} from "../_shared/schoolLeadBrand.ts";
 
 // Course → owning institution is the only reliable Mirai signal (the Avantika
 // campus is shared with B.Ed), same as generate-apply-link. Beacon = NIMT School.
@@ -797,14 +801,17 @@ Deno.serve(async (req) => {
     }
 
     // ── Find or create lead ──────────────────────────────────────────────────
+    const channelBrand = typeof business_phone_number_id === "string"
+      ? (WHATSAPP_SCHOOL_CHANNEL_BRAND[business_phone_number_id] || "nimt")
+      : "nimt";
     const { data: existingLeads } = await admin
       .from("leads")
-      .select("id, name, course_id, person_role, counsellor_id, portal_brand, lead_institution_type, source, origin_domain, landing_page, campus_id")
+      .select("id, name, course_id, person_role, counsellor_id, portal_brand, lead_institution_type, source, origin_domain, landing_page, campus_id, is_mirror")
       .or(`phone.eq.${normalizedPhone},phone.eq.${normalizedPhone.replace(/^91/, "+91")},phone.eq.+${normalizedPhone}`)
       .eq("is_mirror", false)
-      .limit(1);
+      .limit(5);
 
-    const existingLead = existingLeads?.[0] || null;
+    const existingLead = pickLeadForSchoolBrand(existingLeads, channelBrand);
     let leadId = existingLead?.id || null;
     let existingCourseId = existingLead?.course_id || null;
     let existingCourseName = await loadCourseName(admin, existingCourseId);
@@ -880,6 +887,7 @@ Deno.serve(async (req) => {
           _source: "whatsapp",
           _reason: "whatsapp_reply",
           _name: lead_name || null,
+          _portal_brand: channelBrand === "mirai" ? "mirai" : null,
         },
       );
       if (leadInsertErr) {

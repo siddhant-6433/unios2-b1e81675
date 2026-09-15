@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { pickLeadForSchoolBrand, schoolLeadBrand } from "../_shared/schoolLeadBrand.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -523,13 +524,19 @@ Deno.serve(async (req) => {
     // ── Duplicate detection by phone ──
     const attributionKeys = Object.keys(attribution) as (keyof typeof attribution)[];
 
-    const { data: existing } = await supabase
+    const { data: existingRows } = await supabase
       .from("leads")
-      .select(`id, name, stage, source, secondary_source, tertiary_source, source_history, ${attributionKeys.join(", ")}`)
+      .select(`id, name, stage, source, secondary_source, tertiary_source, source_history, campus_id, portal_brand, lead_institution_type, is_mirror, ${attributionKeys.join(", ")}`)
       .eq("phone", normPhone)
       .eq("is_mirror", false)
-      .limit(1)
-      .maybeSingle();
+      .limit(5);
+
+    const incomingBrand = schoolLeadBrand({
+      portal_brand: attribution.portal_brand,
+      campus_id: null,
+      lead_institution_type: attribution.portal_brand === "mirai" ? "school" : "college",
+    });
+    const existing = pickLeadForSchoolBrand(existingRows as any[], incomingBrand);
 
     if (existing) {
       const existingLead = existing as any;

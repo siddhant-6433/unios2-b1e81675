@@ -318,7 +318,11 @@ async function provisionStudent(
     };
   });
 
-  if (rows.length === 0) return 0;
+  if (rows.length === 0) {
+    // Ledger rows may already exist from an earlier run; still apply offer waivers.
+    await syncLedgerConcessions(db, studentId);
+    return 0;
+  }
 
   // 7a. Apply approved offer waivers (year-wise) to matching ledger rows.
   // Each waiver is keyed by term ('year_1', 'year_2', ...). If the fee
@@ -511,7 +515,12 @@ async function provisionStudent(
     }
   }
 
-  if (newRows.length === 0) return 0;
+  if (newRows.length === 0) {
+    // School PAN/AN often provisions once, then the offer is approved later.
+    // Re-running must still sync concessions.
+    await syncLedgerConcessions(db, studentId);
+    return 0;
+  }
 
   // Try insert with fee_structure_item_id; if column doesn't exist yet, retry without it
   const insertRows = newRows.map(({ fee_code_code, fee_code_name, ...row }: any) => row);
@@ -561,10 +570,17 @@ async function provisionStudent(
   // call then re-derives the exact concessions from the approved waivers so
   // provisioning and later waiver edits (via the offer_waivers trigger) always
   // agree — no need to re-provision to pick up a waiver.
-  const { error: syncErr } = await db.rpc("sync_fee_ledger_concessions", { p_student_id: studentId });
-  if (syncErr) console.warn(`[provision-student-fees] concession sync failed for ${studentId}: ${syncErr.message}`);
+  await syncLedgerConcessions(db, studentId);
 
   return newRows.length;
+}
+
+async function syncLedgerConcessions(
+  db: ReturnType<typeof createClient>,
+  studentId: string,
+): Promise<void> {
+  const { error: syncErr } = await db.rpc("sync_fee_ledger_concessions", { p_student_id: studentId });
+  if (syncErr) console.warn(`[provision-student-fees] concession sync failed for ${studentId}: ${syncErr.message}`);
 }
 
 function json(data: any, status = 200) {

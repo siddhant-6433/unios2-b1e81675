@@ -26,6 +26,13 @@ describe("edge provisioner writes payment links", () => {
   it("never fails provisioning because the link insert failed", () => {
     expect(edgeFn).toContain("link insert failed");
   });
+
+  it("still syncs offer waivers when the ledger already exists", () => {
+    expect(edgeFn).toContain("async function syncLedgerConcessions");
+    expect(edgeFn).toContain("if (newRows.length === 0)");
+    expect(edgeFn).toContain("await syncLedgerConcessions(db, studentId)");
+    expect(edgeFn).not.toMatch(/if \(newRows\.length === 0\) return 0;/);
+  });
 });
 
 describe("duplicate application guard", () => {
