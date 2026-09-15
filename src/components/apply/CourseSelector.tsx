@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { CourseSelection, determineProgramCategory, calculateFee } from "./types";
 import { usePortal } from "./PortalContext";
+import { pickLeadForPortal } from "./portalConfig";
 import { filterCoursesByAge, validateAge, AgeValidationResult, getSchoolGradeSortRank } from "./ageValidation";
 
 interface Props {
@@ -219,14 +220,14 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
     }
     setSaving(true);
 
-    const { data: existingLead } = await supabase
+    const { data: existingLeads } = await supabase
       .from("leads")
-      .select("id")
+      .select("id, campus_id, portal_brand, lead_institution_type, is_mirror")
       .eq("phone", phone)
       .eq("is_mirror", false)
       .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(5);
+    const existingLead = pickLeadForPortal(existingLeads, portal.id);
 
     onComplete(selectedSession, selections, existingLead?.id || null);
     setSaving(false);

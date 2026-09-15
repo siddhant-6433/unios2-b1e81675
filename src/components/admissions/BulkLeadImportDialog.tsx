@@ -321,7 +321,8 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultLis
     // Preflight: find which of these phones already exist in the DB. We
     // canonicalise client-side (mirror of normalize_lead_phone) so the IN()
     // lookup matches the trigger's canonical form. This avoids fighting the
-    // partial unique index `idx_leads_phone_unique` (WHERE is_mirror=false)
+    // partial unique indexes `idx_leads_phone_unique_nimt` /
+    // `idx_leads_phone_unique_mirai` (one real lead per phone per school brand)
     // — ON CONFLICT can't match a partial index without supplying its WHERE,
     // Marketing import: rows go to marketing_contacts via one bulk RPC. No
     // per-row insert_lead, no dedupe preflight (the RPC upserts on normalized

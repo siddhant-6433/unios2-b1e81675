@@ -38,7 +38,7 @@ const supabaseConfig = readFileSync("supabase/config.toml", "utf8");
 
 describe("WhatsApp inbound auto-reply and qualification routing", () => {
   it("creates a Meta webhook lead before logging and handing routing to the orchestrator", () => {
-    const autoCreateIndex = metaWebhook.indexOf("Webhook auto-create lead failed");
+    const autoCreateIndex = metaWebhook.indexOf("Webhook resolve/create lead failed");
     const insertIndex = metaWebhook.indexOf("// Insert message");
     const orchestratorIndex = metaWebhook.indexOf('source: "meta_webhook"');
 
