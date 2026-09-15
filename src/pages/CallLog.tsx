@@ -71,7 +71,7 @@ interface CallLogLead {
 
 interface CallLogRow {
   id: string;
-  lead_id: string;
+  lead_id: string | null;
   disposition: string | null;
   duration_seconds: number | null;
   notes: string | null;
@@ -81,7 +81,6 @@ interface CallLogRow {
   user_id: string | null;
   cloud_call_uuid?: string | null;
   source?: string | null;
-  leads?: CallLogLead | null;
 }
 
 interface EnrichedCallLog extends CallLogRow {
@@ -188,12 +187,14 @@ const CallLog = () => {
       return;
     }
 
+    // Do not embed leads here. PostgREST joins leads into the same statement,
+    // so org-wide roles (admission_head, principal) evaluate the expensive
+    // leads RLS across the call_logs scan and the request errors/times out.
+    // The page then treated `data: null` as "no calls". Fetch the page of
+    // call_logs first, then hydrate names in a bounded IN() lookup.
     let query = supabase
       .from("call_logs")
-      .select(`
-        id, lead_id, disposition, duration_seconds, notes, recording_url, created_at, called_at, user_id, cloud_call_uuid, source,
-        leads:lead_id(name, phone, stage, source)
-      `)
+      .select("id, lead_id, disposition, duration_seconds, notes, recording_url, created_at, called_at, user_id, cloud_call_uuid, source")
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .not("disposition", "in", '("cancelled","cancelled_by_counsellor")')
@@ -212,30 +213,56 @@ const CallLog = () => {
       query = query.eq("user_id", scopedCounsellorId);
     }
 
-    const { data } = await query;
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("Failed to fetch call logs", error);
+      setRecords([]);
+      setTotalCount(0);
+      setStats(EMPTY_STATS);
+      setCounsellorStats([]);
+      setHasNextCallPage(false);
+      setLoading(false);
+      return;
+    }
 
     if (data) {
       const rows = (data as unknown as CallLogRow[]).slice(0, PAGE_SIZE);
       const hasNext = (data as unknown as CallLogRow[]).length > PAGE_SIZE;
-      // Batch-fetch caller profiles
       const callerIds = [...new Set(rows.map((r) => r.user_id).filter((id): id is string => Boolean(id)))];
-      const callerMap: Record<string, string> = {};
-      if (callerIds.length > 0) {
-        const { data: profs } = await supabase.from("profiles").select("user_id, display_name").in("user_id", callerIds);
-        ((profs || []) as CallerProfile[]).forEach((p) => {
-          if (p.user_id) callerMap[p.user_id] = p.display_name || "Unknown";
-        });
-      }
+      const leadIds = [...new Set(rows.map((r) => r.lead_id).filter((id): id is string => Boolean(id)))];
 
-      let enriched: EnrichedCallLog[] = rows.map((r) => ({
-        ...r,
-        lead_name: r.leads?.name || "Unknown",
-        lead_phone: r.leads?.phone || "",
-        lead_stage: r.leads?.stage || "",
-        lead_source: r.leads?.source || "",
-        caller_user_id: r.user_id || "",
-        counsellor_name: callerMap[r.user_id] || "Unknown",
-      }));
+      const callerMap: Record<string, string> = {};
+      const leadMap: Record<string, CallLogLead> = {};
+
+      const [profsRes, leadsRes] = await Promise.all([
+        callerIds.length > 0
+          ? supabase.from("profiles").select("user_id, display_name").in("user_id", callerIds)
+          : Promise.resolve({ data: [] as CallerProfile[] | null }),
+        leadIds.length > 0
+          ? supabase.from("leads").select("id, name, phone, stage, source").in("id", leadIds)
+          : Promise.resolve({ data: [] as (CallLogLead & { id: string })[] | null }),
+      ]);
+
+      ((profsRes.data || []) as CallerProfile[]).forEach((p) => {
+        if (p.user_id) callerMap[p.user_id] = p.display_name || "Unknown";
+      });
+      ((leadsRes.data || []) as (CallLogLead & { id: string })[]).forEach((lead) => {
+        leadMap[lead.id] = { name: lead.name, phone: lead.phone, stage: lead.stage, source: lead.source };
+      });
+
+      let enriched: EnrichedCallLog[] = rows.map((r) => {
+        const lead = r.lead_id ? leadMap[r.lead_id] : undefined;
+        return {
+          ...r,
+          lead_name: lead?.name || "Unknown",
+          lead_phone: lead?.phone || "",
+          lead_stage: lead?.stage || "",
+          lead_source: lead?.source || "",
+          caller_user_id: r.user_id || "",
+          counsellor_name: callerMap[r.user_id || ""] || "Unknown",
+        };
+      });
 
       // Cloud Call rows have no recording_url in call_logs — Plivo's recording
       // callback only updates ai_call_records. Match by cloud_call_uuid (the
@@ -246,8 +273,8 @@ const CallLog = () => {
       )];
       const legacyCloudLeadIds = [...new Set(
         enriched
-          .filter(r => !r.recording_url && !r.cloud_call_uuid && /Cloud Call \[[a-f0-9]{8}\]/.test(r.notes || ""))
-          .map(r => r.lead_id)
+          .filter(r => !r.recording_url && !r.cloud_call_uuid && r.lead_id && /Cloud Call \[[a-f0-9]{8}\]/.test(r.notes || ""))
+          .map(r => r.lead_id as string)
       )];
 
       const recByUuid: Record<string, string> = {};
@@ -557,7 +584,7 @@ const CallLog = () => {
                 <tbody>
                   {filtered.map(r => (
                     <tr key={r.id} className="border-b border-border/40 hover:bg-muted/20 cursor-pointer"
-                      onClick={() => navigate(`/admissions/${r.lead_id}`)}>
+                      onClick={() => { if (r.lead_id) navigate(`/admissions/${r.lead_id}`); }}>
                       <td className="px-4 py-2.5">
                         <p className="font-medium text-foreground text-sm">{r.lead_name}</p>
                         <p className="text-[10px] text-muted-foreground">{showPhone(r.lead_phone)}</p>
