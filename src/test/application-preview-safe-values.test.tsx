@@ -37,4 +37,39 @@ describe("ApplicationPreview safe value rendering", () => {
     expect(screen.getByText("Nursery")).toBeInTheDocument();
     expect(screen.getByText("NIMT Beacon Arthala")).toBeInTheDocument();
   });
+
+  it("masks phones for staff CRM views and leaves them visible on the apply portal", () => {
+    const { rerender } = render(
+      <ApplicationPreview
+        docs={[]}
+        maskPhones
+        app={{
+          completed_sections: {},
+          full_name: "Aarav Student",
+          phone: "+919812345892",
+          father: { name: "Father", phone: "9871763193" },
+          mother: { name: "Mother", phone_mobile: "9998887776" },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("981****892")).toBeInTheDocument();
+    expect(screen.getByText("987****193")).toBeInTheDocument();
+    expect(screen.getByText("999****776")).toBeInTheDocument();
+    expect(screen.queryByText("+919812345892")).toBeNull();
+    expect(screen.queryByText("9871763193")).toBeNull();
+    expect(screen.queryByText("9998887776")).toBeNull();
+
+    rerender(
+      <ApplicationPreview
+        docs={[]}
+        app={{
+          completed_sections: {},
+          full_name: "Aarav Student",
+          phone: "+919812345892",
+        }}
+      />,
+    );
+    expect(screen.getByText("+919812345892")).toBeInTheDocument();
+  });
 });

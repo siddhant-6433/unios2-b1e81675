@@ -1678,7 +1678,7 @@ export default function AdminApplicationView() {
         cahetRegistration={cahetRegistration}
       />
 
-      <ApplicationPreview app={app} docs={docs} cahetRegistration={cahetRegistration} />
+      <ApplicationPreview app={app} docs={docs} cahetRegistration={cahetRegistration} maskPhones />
 
       <Dialog open={programDialogOpen} onOpenChange={(open) => {
         if (!savingProgram) setProgramDialogOpen(open);

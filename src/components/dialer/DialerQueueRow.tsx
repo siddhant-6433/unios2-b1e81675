@@ -25,7 +25,7 @@ interface Props {
 }
 
 /**
- * One queue row. Two lines: name, then course · last-4. The bucket is a
+ * One queue row. Two lines: name, then course · 981****892. The bucket is a
  * coloured left edge rather than a badge — badges pushed every row to three
  * lines and the colour already carries the meaning.
  */

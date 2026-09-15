@@ -26,7 +26,7 @@ describe("maskPhone", () => {
 });
 
 describe("displayPhone / canUnmaskContact", () => {
-  it("reveals the stored value only for super_admin", () => {
+  it("reveals the stored value only for super_admin exports", () => {
     expect(canUnmaskContact("super_admin")).toBe(true);
     expect(canUnmaskContact("counsellor")).toBe(false);
     expect(canUnmaskContact("admission_head")).toBe(false);

@@ -7,6 +7,7 @@ import {
 import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
 import type { CahetRegistrationDetails as CahetRegistrationDetailsType } from "@/lib/cahet";
 import { displayValue } from "@/lib/displayValue";
+import { maskPhone } from "@/lib/maskContact";
 
 export type PreviewDoc = {
   name: string;
@@ -22,6 +23,8 @@ interface Props {
   app: any;
   docs: PreviewDoc[];
   cahetRegistration?: CahetRegistrationDetailsType | null;
+  /** Staff CRM views hide phone digits; the apply portal leaves the applicant's own number visible. */
+  maskPhones?: boolean;
 }
 
 /**
@@ -29,7 +32,7 @@ interface Props {
  * /applications/:id (admin view) and the apply portal's "View Submission"
  * tile so staff and students see the same comprehensive layout.
  */
-export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
+export function ApplicationPreview({ app, docs, cahetRegistration, maskPhones = false }: Props) {
   const courses = (app?.course_selections as any[]) || [];
   const photo = docs.find(d => /^(applicant|student)_photo|passport_photo|^photo[-_]/i.test(d.name));
   const otherDocs = docs.filter(d => d !== photo);
@@ -81,7 +84,7 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
             <Row label="Category" value={app?.category} />
             <Row label="Nationality" value={app?.nationality} />
             <Row label="Aadhaar" value={app?.aadhaar} />
-            <Row label="Phone" value={app?.phone} />
+            <Row label="Phone" value={app?.phone} mask={maskPhones} />
             <Row label="Email" value={app?.email} />
             {app?.apaar_id && <Row label="APAAR ID" value={app.apaar_id} />}
             {app?.pen_number && <Row label="PEN" value={app.pen_number} />}
@@ -140,7 +143,7 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
               <Users className="h-3 w-3" />Father
             </p>
             <Row label="Name" value={app?.father?.name || `${app?.father?.first_name || ""} ${app?.father?.last_name || ""}`.trim()} />
-            <Row label="Phone" value={app?.father?.phone || app?.father?.phone_mobile} />
+            <Row label="Phone" value={app?.father?.phone || app?.father?.phone_mobile} mask={maskPhones} />
             <Row label="Email" value={app?.father?.email} />
             <Row label="Occupation" value={app?.father?.occupation || app?.father?.current_position} />
             <Row label="Annual Income" value={app?.father?.annual_income} />
@@ -152,7 +155,7 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
               <Users className="h-3 w-3" />Mother
             </p>
             <Row label="Name" value={app?.mother?.name || `${app?.mother?.first_name || ""} ${app?.mother?.last_name || ""}`.trim()} />
-            <Row label="Phone" value={app?.mother?.phone || app?.mother?.phone_mobile} />
+            <Row label="Phone" value={app?.mother?.phone || app?.mother?.phone_mobile} mask={maskPhones} />
             <Row label="Email" value={app?.mother?.email} />
             <Row label="Occupation" value={app?.mother?.occupation || app?.mother?.current_position} />
             <Row label="Annual Income" value={app?.mother?.annual_income} />
@@ -182,7 +185,7 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
                     ))
                   ) : (
                     Object.entries(details).map(([k, v]) =>
-                      v ? <Row key={k} label={k.replace(/_/g, " ")} value={v} /> : null
+                      v ? <Row key={k} label={k.replace(/_/g, " ")} value={v} mask={maskPhones && /phone|mobile/i.test(k)} /> : null
                     )
                   )}
                 </div>
@@ -200,7 +203,7 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
               <Award className="h-3 w-3" />Extracurricular
             </p>
             {Object.entries(app.extracurricular).map(([k, v]) =>
-              v ? <Row key={k} label={k.replace(/_/g, " ")} value={v} /> : null
+              v ? <Row key={k} label={k.replace(/_/g, " ")} value={v} mask={maskPhones && /phone|mobile/i.test(k)} /> : null
             )}
           </CardContent>
         </Card>
@@ -250,13 +253,14 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
   );
 }
 
-function Row({ label, value }: { label: string; value?: unknown }) {
+function Row({ label, value, mask }: { label: string; value?: unknown; mask?: boolean }) {
   const text = displayValue(value);
   if (!text) return null;
+  const shown = mask ? maskPhone(text) : text;
   return (
     <div className="flex items-baseline justify-between gap-3 py-1 text-xs border-b border-border/50 last:border-0">
       <span className="text-muted-foreground capitalize">{label}</span>
-      <span className="text-foreground text-right font-medium truncate max-w-[60%]">{text}</span>
+      <span className="text-foreground text-right font-medium truncate max-w-[60%]">{shown}</span>
     </div>
   );
 }

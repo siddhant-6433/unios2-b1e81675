@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { PauseCircle, PlayCircle, MessageCircle } from "lucide-react";
 import { type ExamCode, EXAM_DISPLAY_NAMES } from "@/lib/examRegistration";
+import { maskPhone } from "@/lib/maskContact";
 
 export interface HoldApplicationTarget {
   id: string;
@@ -197,7 +198,7 @@ export function HoldApplicationDialog({ target, onClose, onSaved }: Props) {
                 </span>
                 <br />
                 Sends the <code className="text-[10px] bg-muted px-1 rounded">application_on_hold_eligibility</code> template
-                {examName ? <> mentioning {examName}</> : null}. {target.phone ? `To ${target.phone}.` : "No phone on file — will skip."}
+                {examName ? <> mentioning {examName}</> : null}. {target.phone ? `To ${maskPhone(target.phone)}.` : "No phone on file — will skip."}
               </span>
             </label>
           </div>

@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
 import { useAuth } from "@/contexts/AuthContext";
-import { canUnmaskContact, displayPhone } from "@/lib/maskContact";
+import { displayPhone } from "@/lib/maskContact";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
@@ -871,7 +871,7 @@ const replyChannelPayload = (conv: Conversation | null | undefined) => {
 const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user, role: authRole, realRole, profile: authProfile } = useAuth();
+  const { user, role: authRole, profile: authProfile } = useAuth();
   const role = demoMode ? "super_admin" : authRole;
   const profile = demoMode
     ? { id: "demo-profile", display_name: "Meta QA", phone: null, avatar_url: null, campus: null, department: null, institution: null }
@@ -3104,11 +3104,11 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
   const sourceLabel = (source: string | null) =>
     source ? source.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : null;
 
-  // Format phone: strip 91 prefix for Indian numbers, then mask for non-admins.
+  // Format phone: strip 91 prefix for Indian numbers, then always mask in CRM.
   const formatPhone = (phone: string) => {
     const digits = phone.replace(/\D/g, "");
     const local = digits.startsWith("91") && digits.length === 12 ? digits.slice(2) : phone;
-    return displayPhone(local, canUnmaskContact(realRole));
+    return displayPhone(local);
   };
   const copyLeadIdentity = () => {
     const name = (selectedConv?.lead_name || "").trim();

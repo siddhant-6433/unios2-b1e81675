@@ -46,7 +46,7 @@ describe("HeaderSearchHit", () => {
     expect(screen.getByText("Student")).toBeInTheDocument();
   });
 
-  it("masks the phone as first3****last3 for non-super-admin viewers", () => {
+  it("masks the phone as first3****last3 for staff viewers", () => {
     render(
       <HeaderSearchHit
         result={{

@@ -6,7 +6,6 @@ import {
 } from "lucide-react";
 import type { CourseOption, CampusOption } from "@/hooks/useCourseCampusLink";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
-import { canUnmaskContact } from "@/lib/maskContact";
 import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -84,9 +83,9 @@ export function LeadInfoCard({
   onStageChange, onFieldUpdate, userRole, onTokenPaidOverride,
 }: LeadInfoCardProps) {
   const isSuperAdmin = userRole === "super_admin";
-  const { realRole } = useAuth();
+  const { role } = useAuth();
   const showPhone = useDisplayPhone();
-  const canEditPhone = canUnmaskContact(realRole);
+  const canEditPhone = role === "super_admin";
   const initials = lead.name
     .split(" ")
     .map((n: string) => n[0])
@@ -107,7 +106,14 @@ export function LeadInfoCard({
           <div className="min-w-0">
             <EditableText field="name" label="Name" value={lead.name} onSave={onFieldUpdate} className="text-lg font-bold text-foreground" />
             {canEditPhone ? (
-              <EditableText field="phone" label="Phone" value={lead.phone} onSave={onFieldUpdate} className="text-sm text-muted-foreground" />
+              <EditableText
+                field="phone"
+                label="Phone"
+                value={lead.phone}
+                displayValue={showPhone(lead.phone)}
+                onSave={onFieldUpdate}
+                className="text-sm text-muted-foreground"
+              />
             ) : (
               <span className="text-sm text-muted-foreground">{showPhone(lead.phone) || "—"}</span>
             )}
@@ -333,8 +339,8 @@ function validateField(field: string, value: string): string | null {
   return null;
 }
 
-function EditableText({ field, label, value, onSave, className }: {
-  field: string; label: string; value: string; onSave?: (field: string, value: string | null, label: string) => void; className?: string;
+function EditableText({ field, label, value, onSave, className, displayValue }: {
+  field: string; label: string; value: string; onSave?: (field: string, value: string | null, label: string) => void; className?: string; displayValue?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -366,7 +372,7 @@ function EditableText({ field, label, value, onSave, className }: {
 
   return (
     <div className="group flex items-center gap-1.5 cursor-pointer" onClick={() => { setDraft(value); setEditing(true); }}>
-      <span className={className}>{value || "—"}</span>
+      <span className={className}>{displayValue ?? value || "—"}</span>
       <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
     </div>
   );
@@ -478,9 +484,9 @@ function EditableSelectRow({ icon, iconColor, label, value, displayValue, option
 // ── Guardian row (dual fields) ──────────────────────────────
 
 function EditableGuardianRow({ lead, onSave }: { lead: any; onSave?: (field: string, value: string | null, label: string) => void }) {
-  const { realRole } = useAuth();
+  const { role } = useAuth();
   const showPhone = useDisplayPhone();
-  const canEditPhone = canUnmaskContact(realRole);
+  const canEditPhone = role === "super_admin";
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(lead.guardian_name || "");
   const [phone, setPhone] = useState(lead.guardian_phone || "");
