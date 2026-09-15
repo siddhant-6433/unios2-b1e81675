@@ -169,7 +169,7 @@ async function markCampaignRecipientEngagement(
   admin: any,
   args: {
     phone: string;
-    businessNumber: string | null;
+    businessNumber: string | string[] | null;
     messageType: string;
     content: string;
     rawMessage: any;
@@ -189,7 +189,7 @@ async function markCampaignRecipientEngagement(
     const buttonTitle = buttonReply?.title || listReply?.title || legacyButton?.text || null;
     const referralUrl = args.rawMessage?.referral?.source_url || null;
     const nowIso = new Date().toISOString();
-    const patch: Record<string, unknown> = {};
+    const patch: Record<string, unknown> = { responded_at: nowIso };
 
     if (buttonPayload || buttonTitle || args.messageType === "interactive" || args.messageType === "button") {
       patch.clicked_button_at = nowIso;
@@ -201,12 +201,10 @@ async function markCampaignRecipientEngagement(
       patch.clicked_url = referralUrl;
     }
 
-    if (Object.keys(patch).length > 0) {
-      await admin
-        .from("whatsapp_campaign_recipients")
-        .update(patch)
-        .eq("id", recipientId);
-    }
+    await admin
+      .from("whatsapp_campaign_recipients")
+      .update(patch)
+      .eq("id", recipientId);
   } catch (err) {
     console.error("markCampaignRecipientEngagement error:", err);
   }
@@ -652,7 +650,7 @@ Deno.serve(async (req) => {
             }).select("id").single();
             await markCampaignRecipientEngagement(admin, {
               phone,
-              businessNumber: businessPnId || businessNumber || null,
+              businessNumber: [businessPnId, businessNumber],
               messageType: msgType,
               content,
               rawMessage: msg,
@@ -701,7 +699,7 @@ Deno.serve(async (req) => {
           const inboundMessageId: string | null = insertedMsg?.id || null;
           await markCampaignRecipientEngagement(admin, {
             phone,
-            businessNumber: businessPnId || businessNumber || null,
+            businessNumber: [businessPnId, businessNumber],
             messageType: msgType,
             content,
             rawMessage: msg,
