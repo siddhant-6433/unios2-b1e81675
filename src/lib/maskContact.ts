@@ -1,6 +1,6 @@
 // Partial masking of phone numbers and emails for CRM display and exports.
-// Only super_admins see real values; everyone else sees masked data. Single
-// source of truth — mirror of the edge-side maskPhoneForLog
+// Every staff CRM view paints 981****892. Super_admin exports can still
+// unmask. Single source of truth — mirror of the edge-side maskPhoneForLog
 // (supabase/functions/_shared/phone.ts) and the LeadBuckets frontend pattern.
 
 export function maskPhone(value: string | null | undefined): string {

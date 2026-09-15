@@ -1,18 +1,15 @@
 import { useCallback } from "react";
-import { useAuth } from "@/contexts/AuthContext";
-import { canUnmaskContact, displayPhone } from "@/lib/maskContact";
+import { displayPhone } from "@/lib/maskContact";
 
 /**
- * CRM display helper: counsellors and other staff see 981****892.
- * Super admins (real role, ignoring impersonation) see the stored number.
- * Search/call/WhatsApp still use the real value from the row — this only
- * formats what is painted on screen.
+ * CRM display helper: every staff view (counsellors, impersonation, and
+ * super admins) paints 981****892. Search/call/WhatsApp still use the
+ * stored number — this only formats what is on screen. Exports still
+ * unmask for super_admin via maskContact's unmask flag.
  */
 export function useDisplayPhone() {
-  const { realRole } = useAuth();
-  const unmask = canUnmaskContact(realRole);
   return useCallback(
-    (value: string | null | undefined) => displayPhone(value, unmask),
-    [unmask],
+    (value: string | null | undefined) => displayPhone(value, false),
+    [],
   );
 }

@@ -13,6 +13,7 @@ import { isBptOrBmritCourseName } from "@/lib/cahet";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { consecutiveNotAnswered } from "@/lib/leadTransitions";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 export type CallDisposition =
   | "interested"
@@ -244,6 +245,7 @@ export function CallDispositionDialog({
 }: CallDispositionDialogProps) {
   const isMobile = useIsMobile();
   const { toast } = useToast();
+  const showPhone = useDisplayPhone();
   const [retrying, setRetrying] = useState(false);
   const [disposition, setDisposition] = useState<CallDisposition | null>(null);
   const [duration, setDuration] = useState(0);
@@ -525,7 +527,7 @@ export function CallDispositionDialog({
                   )}
                 </div>
               </div>
-              <p className="text-[11px] text-muted-foreground font-mono">{leadPhone}</p>
+              <p className="text-[11px] text-muted-foreground font-mono">{showPhone(leadPhone)}</p>
               {courseName && (
                 <p className="text-xs text-foreground flex items-center gap-1.5 pt-0.5">
                   <span className="text-muted-foreground">Course:</span>
@@ -642,7 +644,7 @@ export function CallDispositionDialog({
             <div className="rounded-xl bg-muted/40 px-3 py-2">
               <p className="text-xs text-muted-foreground">Calling</p>
               <p className="text-sm font-semibold text-foreground truncate">{leadName}</p>
-              <p className="text-[11px] text-muted-foreground font-mono">{leadPhone}</p>
+              <p className="text-[11px] text-muted-foreground font-mono">{showPhone(leadPhone)}</p>
             </div>
             <div className="flex gap-2">
               <Button
@@ -739,7 +741,7 @@ export function CallDispositionDialog({
           <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/40 px-3 py-2.5">
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-foreground truncate">{leadName}</p>
-              <p className="text-[11px] text-muted-foreground font-mono">{leadPhone}</p>
+              <p className="text-[11px] text-muted-foreground font-mono">{showPhone(leadPhone)}</p>
             </div>
             {!callStatus && (
               <Button

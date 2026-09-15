@@ -5,7 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { maskPhone } from "@/lib/maskContact";
 
 interface Props {
   leadId: string;
@@ -200,7 +200,7 @@ export function ApplyMagicLinkButton({
       });
       if (error) throw new Error(await extractFnError(error));
       if (data?.error) throw new Error(data.error);
-      toast({ title: "Apply link sent on WhatsApp", description: `Delivered to ${leadPhone}.` });
+      toast({ title: "Apply link sent on WhatsApp", description: `Delivered to ${maskPhone(leadPhone)}.` });
     } catch (err: unknown) {
       toast({
         title: "Couldn't send via WhatsApp",

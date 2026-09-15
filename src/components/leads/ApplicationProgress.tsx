@@ -24,7 +24,6 @@ import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
 import { fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails as CahetRegistrationDetailsType } from "@/lib/cahet";
 import { useDisplayPhone } from "@/hooks/useDisplayPhone";
-import { canUnmaskContact } from "@/lib/maskContact";
 
 interface ApplicationRow {
   id: string;
@@ -293,7 +292,7 @@ function ApplicationEditDialog({ app, steps, isSchool, cahetRegistration, onClos
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { role, realRole } = useAuth();
+  const { role } = useAuth();
   const showPhone = useDisplayPhone();
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
@@ -520,7 +519,7 @@ function ApplicationEditDialog({ app, steps, isSchool, cahetRegistration, onClos
                   onChange={onChange}
                   onNext={onNextSave("personal")}
                   saving={saving}
-                  maskPhoneDisplay={!canUnmaskContact(realRole)}
+                  maskPhoneDisplay
                 />
               )}
               {activeTab === "parents" && (

@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Users, ExternalLink, Phone, Mail, User, ShieldAlert } from "lucide-react";
+import { useDisplayPhone } from "@/hooks/useDisplayPhone";
 
 interface DuplicateMatch {
   id: string;
@@ -48,6 +49,7 @@ interface Props {
 }
 
 export function FuzzyDuplicateAlert({ leadId, leadName, leadPhone, leadEmail }: Props) {
+  const showPhone = useDisplayPhone();
   const [matches, setMatches] = useState<DuplicateMatch[]>([]);
 
   useEffect(() => {
@@ -116,7 +118,7 @@ export function FuzzyDuplicateAlert({ leadId, leadName, leadPhone, leadEmail }: 
                   <Badge variant="outline" className="text-[9px]">{STAGE_LABELS[m.stage] || m.stage}</Badge>
                 </div>
                 <div className="flex items-center gap-3 mt-0.5">
-                  {m.phone && <span className="text-[10px] text-muted-foreground font-mono">{m.phone}</span>}
+                  {m.phone && <span className="text-[10px] text-muted-foreground font-mono">{showPhone(m.phone)}</span>}
                   {m.email && <span className="text-[10px] text-muted-foreground">{m.email}</span>}
                 </div>
                 {/* Match reason badges */}
