@@ -127,17 +127,16 @@ const AiCallLog = () => {
       }
     }
 
-    // Fetch page data with joins. Same exclusion as countQuery so the list
-    // matches the stats above.
+    // Fetch the page without embedding leads. Nested lead and counsellor
+    // profile joins run the expensive leads RLS on the same statement as the
+    // org-wide scan, which empties this page for admission_head. Hydrate
+    // names with a bounded IN() lookup instead.
     let query = supabase
       .from("ai_call_records" as any)
       .select(`
         id, lead_id, status, duration_seconds, recording_url, summary,
         conversion_probability, disposition, created_at,
-        quality_score, quality_notes, quality_metrics, call_type,
-        leads:lead_id(name, phone, counsellor_id,
-          profiles:counsellor_id(display_name)
-        )
+        quality_score, quality_notes, quality_metrics, call_type
       `)
       .neq("status", "counsellor_no_answer")
       .order("created_at", { ascending: false })
@@ -161,7 +160,14 @@ const AiCallLog = () => {
     if (activeStatFilter === "highConv") query = query.gte("conversion_probability", 60);
     if (activeStatFilter === "inbound") query = query.eq("call_type", "inbound");
 
-    const { data } = await query;
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("[AiCallLog] failed to fetch records", error);
+      setRecords([]);
+      setLoading(false);
+      return;
+    }
 
     if (data) {
       const fetchedRows = data as any[];
@@ -174,9 +180,9 @@ const AiCallLog = () => {
       } else {
         delete pageCursorsRef.current[page + 1];
       }
-      // Batch-fetch retry counts and followup info for all lead_ids in this page
+      // Batch-fetch retry counts, followups, and lead names for this page.
       const leadIds = [...new Set(pageRows.map((r: any) => r.lead_id).filter(Boolean))];
-      const [retryRes, followupRes] = await Promise.all([
+      const [retryRes, followupRes, leadsRes] = await Promise.all([
         // Count total AI calls per lead
         supabase.from("ai_call_records" as any)
           .select("lead_id")
@@ -186,6 +192,9 @@ const AiCallLog = () => {
           .select("lead_id, scheduled_at, status, type, notes")
           .in("lead_id", leadIds)
           .order("scheduled_at", { ascending: false }),
+        leadIds.length > 0
+          ? supabase.from("leads").select("id, name, phone, counsellor_id").in("id", leadIds)
+          : Promise.resolve({ data: [] as { id: string; name: string | null; phone: string | null; counsellor_id: string | null }[] | null }),
       ]);
 
       // Build retry count map
@@ -200,17 +209,35 @@ const AiCallLog = () => {
         if (!followupMap[f.lead_id]) followupMap[f.lead_id] = f;
       });
 
+      const leadRows = (leadsRes.data || []) as { id: string; name: string | null; phone: string | null; counsellor_id: string | null }[];
+      const leadMap: Record<string, { name: string | null; phone: string | null; counsellor_id: string | null; counsellor_name?: string }> = {};
+      leadRows.forEach((lead) => {
+        leadMap[lead.id] = { name: lead.name, phone: lead.phone, counsellor_id: lead.counsellor_id };
+      });
+      const counsellorIds = [...new Set(leadRows.map((lead) => lead.counsellor_id).filter((id): id is string => Boolean(id)))];
+      if (counsellorIds.length > 0) {
+        const { data: profs } = await supabase.from("profiles").select("id, display_name").in("id", counsellorIds);
+        const nameByProfileId: Record<string, string> = {};
+        ((profs || []) as { id: string; display_name: string | null }[]).forEach((p) => {
+          nameByProfileId[p.id] = p.display_name || "Unassigned";
+        });
+        Object.values(leadMap).forEach((lead) => {
+          if (lead.counsellor_id) lead.counsellor_name = nameByProfileId[lead.counsellor_id];
+        });
+      }
+
       let mapped = pageRows.map((r: any) => {
         const fu = followupMap[r.lead_id];
+        const lead = r.lead_id ? leadMap[r.lead_id] : undefined;
         return {
           ...r,
-          lead_name: r.leads?.name || "Unknown",
-          lead_phone: r.leads?.phone || "",
-          counsellor_name: r.leads?.profiles?.display_name || "Unassigned",
+          lead_name: lead?.name || "Unknown",
+          lead_phone: lead?.phone || "",
+          counsellor_name: lead?.counsellor_name || "Unassigned",
           retry_count: retryCounts[r.lead_id] || 1,
           followup_status: fu?.status || null,
           followup_date: fu?.scheduled_at || null,
-          followup_counsellor: r.leads?.profiles?.display_name || null,
+          followup_counsellor: lead?.counsellor_name || null,
         };
       });
 
