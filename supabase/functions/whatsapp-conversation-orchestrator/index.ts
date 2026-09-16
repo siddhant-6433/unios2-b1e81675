@@ -120,7 +120,12 @@ Deno.serve(async (req) => {
       });
     }
 
-    const outboundContext = await loadLatestOutboundContext(admin, phone, businessNumber);
+    const outboundContext = await loadLatestOutboundContext(admin, phone, [
+      body.business_phone_number_id,
+      body.business_number,
+      body.business_phone_number,
+      businessNumber,
+    ]);
     if (!leadId && typeof outboundContext?.lead_id === "string") {
       leadId = outboundContext.lead_id;
     }

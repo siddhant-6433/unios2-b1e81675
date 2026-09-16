@@ -336,6 +336,8 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
   it("uses outbound context when routing inbound replies", () => {
     expect(automationEventsHelper).toContain("inbound_reply_to_outbound");
     expect(orchestrator).toContain("loadLatestOutboundContext");
+    expect(orchestrator).toContain("body.business_phone_number_id");
+    expect(orchestrator).toContain("body.business_phone_number");
     expect(orchestrator).toContain('eventType: "inbound_reply_to_outbound"');
     expect(orchestrator).toContain("campaign_recipient_id");
     expect(orchestrator).toContain("responsePolicy === \"human\"");
