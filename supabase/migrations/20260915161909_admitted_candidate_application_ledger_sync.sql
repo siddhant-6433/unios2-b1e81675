@@ -273,14 +273,21 @@ $$;
 
 DROP TRIGGER IF EXISTS trg_applications_ensure_lead ON public.applications;
 CREATE TRIGGER trg_applications_ensure_lead
-  BEFORE INSERT OR UPDATE OF lead_id, phone, full_name, email, application_id, course_selections
+  BEFORE INSERT
+  ON public.applications
+  FOR EACH ROW
+  WHEN (NEW.phone IS NOT NULL AND NEW.phone <> '')
+  EXECUTE FUNCTION public.fn_applications_ensure_lead();
+
+DROP TRIGGER IF EXISTS trg_applications_ensure_lead_update ON public.applications;
+CREATE TRIGGER trg_applications_ensure_lead_update
+  BEFORE UPDATE OF lead_id, phone, full_name, email, application_id, course_selections
   ON public.applications
   FOR EACH ROW
   WHEN (
     NEW.phone IS NOT NULL AND NEW.phone <> ''
     AND (
       NEW.lead_id IS NULL
-      OR TG_OP = 'INSERT'
       OR NEW.lead_id IS DISTINCT FROM OLD.lead_id
       OR NEW.phone IS DISTINCT FROM OLD.phone
     )
