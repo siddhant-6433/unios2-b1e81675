@@ -58,6 +58,9 @@ export const CampusProvider = ({ children }: { children: ReactNode }) => {
         if (!data) { setLoading(false); return; }
         let visibleCampuses = data as Campus[];
 
+        // Any non-super-admin is branch-scoped. If their profile has no
+        // matching campus assignment, fail closed instead of falling back to
+        // "all".
         if (role && role !== "super_admin") {
           const assignedNames = (profile?.campus || "")
             .split(",")

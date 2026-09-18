@@ -45,6 +45,7 @@ export function ConcessionApprovalPanel() {
         requester:requested_by(display_name),
         approver:approved_by(display_name)
       `)
+      .in("status", ["pending_principal", "pending_super_admin"])
       .order("created_at", { ascending: false });
     if (data) setConcessions(data);
     setLoading(false);
@@ -87,19 +88,19 @@ export function ConcessionApprovalPanel() {
     setProcessing(null);
   };
 
-  const handleReject = async (concessionId: string) => {
-    setProcessing(concessionId);
+  const handleReject = async (concession: any) => {
+    setProcessing(concession.id);
     const note = window.prompt("Reason for rejecting this concession? (optional)") || null;
 
     // decide_fee_concession is super_admin-only; a principal rejecting a legacy
     // pending_principal request still writes the status directly.
     const { error } = isSuperAdmin
-      ? await (supabase.rpc as any)("decide_fee_concession", { _id: concessionId, _approve: false, _note: note })
+      ? await (supabase.rpc as any)("decide_fee_concession", { _id: concession.id, _approve: false, _note: note })
       : await supabase.from("concessions").update({
           status: "rejected",
           approved_by_principal: user?.id,
           principal_decision_at: new Date().toISOString(),
-        } as any).eq("id", concessionId);
+        } as any).eq("id", concession.id);
 
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -112,9 +113,9 @@ export function ConcessionApprovalPanel() {
 
   // Filter based on role
   const visible = concessions.filter(c => {
-    if (isSuperAdmin) return true; // sees all
-    if (isPrincipal) return c.status === "pending_principal" || c.status === "pending_super_admin" || c.status === "approved" || c.status === "rejected";
-    return true;
+    if (isSuperAdmin) return c.status === "pending_principal" || c.status === "pending_super_admin";
+    if (isPrincipal) return c.status === "pending_principal";
+    return false;
   });
 
   const pending = visible.filter(c =>
@@ -209,7 +210,7 @@ export function ConcessionApprovalPanel() {
                               variant="ghost"
                               className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
                               disabled={processing === c.id}
-                              onClick={() => handleReject(c.id)}
+                              onClick={() => handleReject(c)}
                             >
                               <XCircle className="h-3.5 w-3.5" />
                             </Button>
