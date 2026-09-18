@@ -120,7 +120,10 @@ describe("concessions never write the ledger from the client", () => {
   });
 
   it("keeps the row concession popover inside the viewport", () => {
-    expect(concessionPopover).toContain("max-h-[min(72vh,560px)]");
+    expect(concessionPopover).toContain("max-h-[min(var(--radix-popover-content-available-height),560px)]");
+    expect(concessionPopover).toContain("flex-col overflow-hidden");
+    expect(concessionPopover).toContain("min-h-0 flex-1 space-y-1.5 overflow-y-auto");
+    expect(concessionPopover).toContain("mt-2.5 shrink-0 space-y-2.5 border-t");
     expect(concessionPopover).toContain("overflow-y-auto");
     expect(concessionPopover).toContain("collisionPadding={16}");
   });
