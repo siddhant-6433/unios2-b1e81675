@@ -6,7 +6,7 @@ const inbox = readFileSync("src/pages/Inbox.tsx", "utf8");
 describe("Inbox offer waiver badge and reload behavior", () => {
   it("counts pending offer waivers from actual rows instead of planner estimates", () => {
     expect(inbox).not.toContain('.from("offer_waivers")\n            .select("id", { count: "planned", head: true })');
-    expect(inbox).toContain('.from("offer_waivers")\n            .select("id")');
+    expect(inbox).toContain('.from("offer_waivers")\n            .select("id, offer_letters(lead_id)")');
     expect(inbox).toContain("(r.value as any).count ?? (r.value as any).data?.length ?? 0");
   });
 
@@ -42,5 +42,40 @@ describe("Inbox offer waiver badge and reload behavior", () => {
     expect(inbox).toContain("if (selected === cat.id)");
     expect(inbox).toContain("loadItems(cat.id);");
     expect(inbox).toContain("setSelected(cat.id);");
+  });
+
+  it("hides zero-count inbox queues from the sidebar", () => {
+    expect(inbox).toContain("const roleAllowedCategories = allCategories.filter");
+    expect(inbox).toContain("const visibleCategories = countsLoaded");
+    expect(inbox).toContain("roleAllowedCategories.filter((c) => categoryDisplayCount(c) > 0)");
+    expect(inbox).toContain("No open inbox items");
+    expect(inbox).not.toContain('displayCount === 0 ? "All clear"');
+  });
+
+  it("auto-selects only open categories and clears stale empty selections", () => {
+    expect(inbox).toContain("if (!countsLoaded) return;");
+    expect(inbox).toContain('const visibleCategoryIdList = visibleCategoryIds ? visibleCategoryIds.split("|") as CategoryId[] : []');
+    expect(inbox).toContain("const selectedStillVisible = selected && visibleCategoryIdList.includes(selected)");
+    expect(inbox).toContain("const target = requestedCategory && visibleCategoryIdList.includes(requestedCategory)");
+    expect(inbox).toContain("visibleCategoryIdList[0] ?? null");
+    expect(inbox).toContain("setSelected(null);");
+    expect(inbox).toContain("setSelectedItem(null);");
+  });
+
+  it("keeps Pending AN Generation restricted to super admins", () => {
+    const categoryBranch = inbox.slice(
+      inbox.indexOf('id: "pending_an_generation"'),
+      inbox.indexOf('id: "contact_changes"'),
+    );
+    expect(categoryBranch).toContain('roles: ["super_admin"]');
+    expect(categoryBranch).not.toContain('"principal"');
+
+    const countBranch = inbox.slice(
+      inbox.indexOf("// Pending AN generation"),
+      inbox.indexOf("// Offer letter edit requests"),
+    );
+    expect(countBranch).toContain("isSuperAdmin");
+    expect(countBranch).toContain('supabase.rpc("list_pending_an_generation")');
+    expect(countBranch).not.toContain("isPrincipal");
   });
 });
