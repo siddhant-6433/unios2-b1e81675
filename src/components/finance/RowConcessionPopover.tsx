@@ -3,15 +3,17 @@
 // Replaces the header "Request Waiver / Concession" button, which opened a
 // dialog asking the cashier to re-select the row they were already pointing at.
 //
-// Adds, and now also EDITS / REDUCES / REMOVES, the per-row concessions on this
-// ledger head. Direction rules (server-enforced too):
-//   - reduce / remove  → super_admin, accountant, counsellor — applied at once.
+// Adds, and now also EDITS / REDUCES / REMOVES, the per-row
+// concessions on this ledger head. Direction rules (server-enforced too):
+//   - reduce           → finance/campus staff below the current waiver.
+//   - remove           → allowed staff remove immediately with a note.
 //   - increase / add   → super_admin applies immediately; others go for approval.
 // Every add funnels through request_fee_concession (+ decide_fee_concession for a
-// super_admin), every edit/remove through edit_fee_concession / remove_fee_concession.
+// super_admin), edits through edit_fee_concession, and removals through
+// remove_fee_concession.
 // All routes end at sync_fee_ledger_concessions(), which recomputes
-// fee_ledger.concession from source, so an offer-waiver share on the same row
-// survives. Edit/remove additionally write a concession_audit row.
+// fee_ledger.concession from source after the write, so an offer-waiver share on
+// the same row survives. Edit/remove additionally write audit rows.
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -33,6 +35,8 @@ interface Concession {
   value: number;
   reason: string | null;
   status: string;
+  removal_requested_at?: string | null;
+  removal_reason?: string | null;
 }
 
 // An approved offer-letter waiver contributing to this row's concession. These
@@ -60,26 +64,31 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
   const [value, setValue] = useState("");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loadingExisting, setLoadingExisting] = useState(false);
   const [existing, setExisting] = useState<Concession[]>([]);
   const [waivers, setWaivers] = useState<Waiver[]>([]);
   const [editing, setEditing] = useState<Editing>(null);
 
   const isSuperAdmin = role === "super_admin";
-  // Reduce / remove is open to the cashier and counsellor; increase is not.
-  const canEdit = ["super_admin", "accountant", "counsellor", "office_admin"].includes(role || "");
+  // Reduce matches edit_fee_concession server policy.
+  const canEdit = ["principal", "office_assistant", "office_admin", "counsellor", "super_admin", "accountant"].includes(role || "");
+  const canRemove = ["principal", "office_assistant", "office_admin", "counsellor", "super_admin"].includes(role || "");
   const total = Number(fee.total_amount || 0);
+  const hasLedgerConcession = Number(fee.concession || 0) > 0;
   const amount = !value ? 0 : effectiveAmount(type, Number(value), total);
 
   const reset = () => { setType("flat"); setValue(""); setReason(""); setEditing(null); };
 
   const fetchExisting = async () => {
+    setLoadingExisting(true);
     const { data } = await supabase
       .from("concessions")
-      .select("id, type, value, reason, status")
+      .select("id, type, value, reason, status, removal_requested_at, removal_reason")
       .eq("fee_ledger_id", fee.id)
       .in("status", ["approved", "pending_principal", "pending_super_admin"])
       .order("created_at", { ascending: true });
     setExisting(((data as Concession[]) || []).filter((c) => c.type === "flat" || c.type === "percentage"));
+    setLoadingExisting(false);
   };
 
   // Offer-letter waivers feeding this row's concession. Only super_admin can edit
@@ -172,9 +181,18 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
   };
 
   const removeConcession = async (c: Concession) => {
+    const note = window.prompt(
+      isSuperAdmin
+        ? "Reason for removing this waiver?"
+        : "Reason for removing this waiver?",
+    );
+    if (!note?.trim()) {
+      toast({ title: "A removal note is required", variant: "destructive" });
+      return;
+    }
     setSaving(true);
     const { error } = await (supabase.rpc as any)("remove_fee_concession", {
-      _id: c.id, _reason: reason.trim() || null,
+      _id: c.id, _reason: note.trim(),
     });
     if (error) {
       setSaving(false);
@@ -236,20 +254,26 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
 
   const editingConcession = editing?.kind === "concession" ? existing.find((c) => c.id === editing.id) || null : null;
   const editingWaiver = editing?.kind === "waiver" ? waivers.find((w) => w.id === editing.id) || null : null;
-  const showAddForm = !editing;
+  const showAddForm = !editing && !hasLedgerConcession;
+  const showUnavailableState = !editing && hasLedgerConcession && !loadingExisting && existing.length === 0 && waivers.length === 0;
 
   return (
     <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
       <PopoverTrigger asChild>
         <button
           className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted hover:text-primary focus-visible:text-primary"
-          title="Waivers / concessions on this head"
-          aria-label="Manage waivers on this head"
+          title={hasLedgerConcession ? "Manage or remove waiver on this head" : "Add waiver on this head"}
+          aria-label={hasLedgerConcession ? "Manage or remove waiver on this head" : "Add waiver on this head"}
         >
-          <Plus className="h-3.5 w-3.5" />
+          {hasLedgerConcession ? <Trash2 className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 space-y-2.5">
+      <PopoverContent
+        align="end"
+        sideOffset={6}
+        collisionPadding={16}
+        className="w-72 max-h-[min(72vh,560px)] overflow-y-auto space-y-2.5"
+      >
         <div>
           <p className="text-sm font-semibold text-foreground">{fee.fee_codes?.code || "Fee"}</p>
           <p className="text-[11px] text-muted-foreground">
@@ -257,19 +281,30 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
           </p>
         </div>
 
+        {loadingExisting && hasLedgerConcession && (
+          <div className="rounded-lg border border-input px-2.5 py-2 text-xs text-muted-foreground">
+            Loading existing waiver...
+          </div>
+        )}
+
         {/* Existing per-row concessions, each editable / removable. */}
         {existing.length > 0 && (
           <div className="space-y-1.5">
             {existing.map((c) => {
               const amt = effectiveAmount(c.type, Number(c.value), total);
               const pending = c.status !== "approved";
+              const removalPending = Boolean(c.removal_requested_at);
+              const canEditThis = canEdit && c.status === "approved" && !removalPending;
+              const canRemoveThis = canRemove && c.status === "approved" && !removalPending;
               return (
                 <div key={c.id} className="rounded-lg border border-input px-2.5 py-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <span className="text-sm font-medium text-success">−₹{amt.toLocaleString("en-IN")}</span>
                       <span className="ml-1 text-[10px] text-muted-foreground">
-                        {c.type === "percentage" ? `${c.value}%` : "flat"}{pending ? " · pending" : ""}
+                        {c.type === "percentage" ? `${c.value}%` : "flat"}
+                        {pending ? " · Under Approval" : ""}
+                        {removalPending ? " · removal requested" : ""}
                       </span>
                       {/* Staff-only. The student ledger renders fee_ledger.concession
                           (the amount) and never reads this table, so the reason
@@ -279,26 +314,42 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
                           {c.reason}
                         </p>
                       )}
+                      {removalPending && c.removal_reason && (
+                        <p className="truncate text-[10px] text-muted-foreground" title={c.removal_reason}>
+                          Remove: {c.removal_reason}
+                        </p>
+                      )}
                     </div>
-                    {canEdit && (
+                    {(canEditThis || canRemoveThis) && (
                       <div className="flex shrink-0 gap-0.5">
-                        <button
-                          onClick={() => (editing?.id === c.id ? reset() : startEdit(c))}
-                          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary"
-                          title="Edit / reduce" aria-label="Edit or reduce this waiver"
-                        ><Pencil className="h-3 w-3" /></button>
-                        <button
-                          onClick={() => removeConcession(c)}
-                          disabled={saving}
-                          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive"
-                          title="Remove" aria-label="Remove this waiver"
-                        ><Trash2 className="h-3 w-3" /></button>
+                        {canEditThis && (
+                          <button
+                            onClick={() => (editing?.id === c.id ? reset() : startEdit(c))}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary"
+                            title="Edit / reduce" aria-label="Edit or reduce this waiver"
+                          ><Pencil className="h-3 w-3" /></button>
+                        )}
+                        {canRemoveThis && (
+                          <button
+                            onClick={() => removeConcession(c)}
+                            disabled={saving}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive"
+                            title="Remove"
+                            aria-label="Remove this waiver"
+                          ><Trash2 className="h-3 w-3" /></button>
+                        )}
                       </div>
                     )}
                   </div>
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {showUnavailableState && (
+          <div className="rounded-lg border border-warning/30 bg-warning/5 px-2.5 py-2 text-xs text-muted-foreground">
+            Existing waiver details are not available yet. Refresh this student and try again.
           </div>
         )}
 
@@ -375,6 +426,11 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
                 </span>
               </p>
             )}
+            {editingConcession && (
+              <p className="text-[10px] text-muted-foreground">
+                Current waiver: ₹{effectiveAmount(editingConcession.type, Number(editingConcession.value), total).toLocaleString("en-IN")}.
+              </p>
+            )}
 
             <textarea
               value={reason}
@@ -389,7 +445,7 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
               </p>
             )}
             {editingConcession && !isSuperAdmin && (
-              <p className="text-[10px] text-muted-foreground">You can only reduce this waiver.</p>
+              <p className="text-[10px] text-muted-foreground">Enter a lower value to reduce this waiver.</p>
             )}
             {editingWaiver && (
               <p className="text-[10px] text-muted-foreground">Changes the offer-letter waiver for this term; applied immediately.</p>
