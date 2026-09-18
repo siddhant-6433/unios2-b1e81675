@@ -297,7 +297,6 @@ function OtpLogin({
     }
   };
 
-  const portal = usePortal();
   const passwordLoginEnabled = portal.id === "nimt";
   const renderLoginLogo = (placement: "desktop" | "mobile") => {
     const compact = placement === "mobile";

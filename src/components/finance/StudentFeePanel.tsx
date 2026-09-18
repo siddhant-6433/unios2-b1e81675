@@ -93,7 +93,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const isSuperAdmin = role === "super_admin";
   const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant", "office_admin"].includes(role || "");
   const canProvision = isFinanceRole;
-  const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
+  const canRequestConcession = ["principal", "school_coordinator", "office_assistant", "counsellor", "super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
   const canReallocate = hasPermission("fee_ledger:reallocate") || ["super_admin", "accountant", "office_admin"].includes(role || "");
   // Taking money at the counter is cashier-only, same gate as OfflinePaymentDialog.
   // Works for both lead-based candidates and lead-less (school) students — the
@@ -921,7 +921,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                           )}
                           {pendingWaivers[f.id] > 0 && (
                             <span className="text-[10px] font-medium text-warning" title="Waiver awaiting super-admin approval">
-                              +₹{pendingWaivers[f.id].toLocaleString("en-IN")} pending
+                              Under Approval
                             </span>
                           )}
                         </div>

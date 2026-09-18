@@ -368,7 +368,7 @@ export function canSeePolicyItem(state: AccessState, item: AccessPolicyItem): bo
   const permission = item.permission
     ?? (item.roles ? undefined : routePolicy?.permission);
 
-  if (roles?.includes(state.role as AppRole)) return true;
+  if (roles) return roles.includes(state.role as AppRole);
   if (anyPermission && canUseAnyPermission(state, anyPermission)) return true;
   if (anyPermission && !roles && !permission) return false;
   if (roles && !permission) return false;

@@ -41,19 +41,18 @@ export const CampusProvider = ({ children }: { children: ReactNode }) => {
         if (!data) { setLoading(false); return; }
         let visibleCampuses = data as Campus[];
 
-        // Office assistants are branch-scoped. The database enforces the same
-        // profile.campus -> campuses.name/code match via RLS helper functions.
+        // Any non-super-admin with profile.campus set is branch-scoped. The
+        // database enforces the same profile.campus -> campuses.name/code match
+        // via RLS helper functions.
         if (role && role !== "super_admin" && profile?.campus) {
           const assignedNames = profile.campus.split(",").map((s) => s.trim().toLowerCase());
           const matches = data.filter(
             (c) => assignedNames.includes(c.name.toLowerCase()) || assignedNames.includes(c.code.toLowerCase())
           );
-          if (role === "office_assistant" || role === "school_coordinator") {
-            visibleCampuses = matches.length ? matches : [];
-          }
+          visibleCampuses = matches.length ? matches : [];
           if (matches.length > 0) {
             setSelectedCampusId(matches[0].id);
-          } else if (role === "office_assistant" || role === "school_coordinator") {
+          } else {
             setSelectedCampusId("all");
           }
         }
