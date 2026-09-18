@@ -40,7 +40,6 @@ const LeadFeeLedger         = lazy(() => import("@/components/finance/LeadFeeLed
 const FeeStructureViewer    = lazy(() => import("@/components/finance/FeeStructureViewer").then(m => ({ default: m.FeeStructureViewer })));
 const ScholarshipCalculator = lazy(() => import("@/components/finance/ScholarshipCalculator").then(m => ({ default: m.ScholarshipCalculator })));
 const ApplyMagicLinkButton  = lazy(() => import("@/components/leads/ApplyMagicLinkButton").then(m => ({ default: m.ApplyMagicLinkButton })));
-const MirrorLeadCard        = lazy(() => import("@/components/leads/MirrorLeadCard").then(m => ({ default: m.MirrorLeadCard })));
 const FuzzyDuplicateAlert   = lazy(() => import("@/components/admissions/FuzzyDuplicateAlert").then(m => ({ default: m.FuzzyDuplicateAlert })));
 const ScorePopup            = lazy(() => import("@/components/admissions/ScorePopup").then(m => ({ default: m.ScorePopup })));
 
@@ -1510,11 +1509,6 @@ const LeadDetail = () => {
           <Suspense fallback={null}>
             <FuzzyDuplicateAlert leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} leadEmail={lead.email} />
           </Suspense>
-          {lead.mirror_lead_id && (
-            <Suspense fallback={null}>
-              <MirrorLeadCard mirrorLeadId={lead.mirror_lead_id} />
-            </Suspense>
-          )}
           <Card className="border-border/60">
             <CardContent className="p-4 flex items-center justify-between gap-3">
               <div>

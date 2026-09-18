@@ -1119,6 +1119,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
           importedProposalWaivers.map(w => ({
             offer_letter_id: insertedOffer.id,
             term: w.term,
+            fee_category: w.fee_category || null,
             amount: w.amount,
             reason: w.reason,
             status: "approved",

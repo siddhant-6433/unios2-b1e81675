@@ -8,6 +8,13 @@ import loginBgBeacon from "@/assets/login-bg-beacon.jpg";
 import loginBgMirai from "@/assets/login-bg-mirai.jpg";
 import nirfLogo from "@/assets/nirf-logo.png";
 import greatPlaceToStudy from "@/assets/great-place-to-study.png";
+import {
+  MIRAI_CAMPUS_ID,
+  pickLeadForPortal,
+  schoolLeadBrandForPortal,
+} from "@/lib/schoolLeadBrand";
+
+export { MIRAI_CAMPUS_ID, pickLeadForPortal, schoolLeadBrandForPortal };
 
 export type PortalId = "nimt" | "beacon" | "mirai";
 

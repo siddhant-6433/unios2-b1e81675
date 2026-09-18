@@ -52,6 +52,7 @@ const ledgerMigration = readMigration("ledger_status_and_multi_term_charges");
 const removeMigration = readMigration("relax_remove_fee_charge_to_cashier");
 const searchMigration = readMigration("cashier_search_course");
 const phoneNormalizeMigration = readMigration("cashier_search_phone_normalize");
+const campusScopeMigration = readMigration("campus_scope_concession_nav_guards");
 
 describe("campus filtering", () => {
   it("keeps rows whose campus could not be resolved", () => {
@@ -107,6 +108,86 @@ describe("concessions never write the ledger from the client", () => {
   it("requests land as pending and require a reason", () => {
     expect(chargesMigration).toContain("'pending_super_admin'");
     expect(chargesMigration).toContain("A reason is required");
+  });
+
+  it("shows the request control to principals, coordinators, office assistants, counsellors and finance roles", () => {
+    expect(studentFeePanel).toContain('["principal", "school_coordinator", "office_assistant", "counsellor", "super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "")');
+  });
+
+  it("labels pending concessions as under approval in the ledger", () => {
+    expect(studentFeePanel).toContain("Under Approval");
+    expect(concessionPopover).toContain("Under Approval");
+  });
+
+  it("keeps the row concession popover inside the viewport", () => {
+    expect(concessionPopover).toContain("max-h-[min(72vh,560px)]");
+    expect(concessionPopover).toContain("overflow-y-auto");
+    expect(concessionPopover).toContain("collisionPadding={16}");
+  });
+
+  it("keeps edit/reduce aligned with the server RPC policy", () => {
+    expect(concessionPopover).toContain('["principal", "office_assistant", "office_admin", "counsellor", "super_admin", "accountant"].includes(role || "")');
+    expect(campusScopeMigration).toContain("Not authorised to request a concession");
+  });
+
+  it("lets named staff remove concessions immediately with a required note and audit", () => {
+    expect(concessionPopover).toContain('["principal", "office_assistant", "office_admin", "counsellor", "super_admin"].includes(role || "")');
+    expect(concessionPopover).toContain('"remove_fee_concession"');
+    expect(concessionPopover).toContain("Manage or remove waiver on this head");
+    expect(concessionPopover).toContain("A removal note is required");
+    expect(campusScopeMigration).toContain("CREATE OR REPLACE FUNCTION public.remove_fee_concession");
+    expect(campusScopeMigration).toContain("Not authorised to remove a concession");
+    expect(campusScopeMigration).toContain("Only approved concessions can be removed");
+    expect(campusScopeMigration).toContain("'remove'");
+  });
+
+  it("keeps reduction immediate but blocks non-super-admin increases", () => {
+    expect(campusScopeMigration).toContain("CREATE OR REPLACE FUNCTION public.edit_fee_concession");
+    expect(campusScopeMigration).toContain("Only a super admin can increase or keep the same waiver");
+    expect(concessionPopover).toContain("Current waiver:");
+    expect(concessionPopover).toContain("Enter a lower value to reduce this waiver.");
+    expect(campusScopeMigration).toContain("PERFORM public.sync_fee_ledger_concessions(c.student_id)");
+  });
+
+  it("keeps concession decisions super-admin only", () => {
+    expect(campusScopeMigration).toContain("request_fee_concession");
+    expect(chargesMigration).toContain("Only a super admin can decide a concession");
+  });
+
+  it("keeps removed concessions out of the approval queue", () => {
+    expect(concessionPanel).toContain('.in("status", ["pending_principal", "pending_super_admin"])');
+    expect(concessionPanel).toContain('if (isPrincipal) return c.status === "pending_principal"');
+    expect(concessionPanel).not.toContain('|| c.status === "approved" || c.status === "rejected"');
+  });
+});
+
+describe("campus-scoped staff access", () => {
+  it("parses multi-campus profile assignments and detects scoped users", () => {
+    expect(campusScopeMigration).toContain("regexp_split_to_table(COALESCE(p.campus, ''), '\\s*,\\s*')");
+    expect(campusScopeMigration).toContain("CREATE OR REPLACE FUNCTION public.user_has_campus_scope");
+  });
+
+  it("keeps super_admin unrestricted while scoping assigned principals and staff", () => {
+    expect(campusScopeMigration).toContain("public.has_role(_user_id, 'super_admin'::public.app_role)");
+    expect(campusScopeMigration).toContain("OR NOT public.user_has_campus_scope(_user_id)");
+    expect(campusScopeMigration).toContain("public.user_can_access_assigned_campus(_user_id, _campus_id)");
+    expect(campusScopeMigration).toContain("public.has_role(auth.uid(), 'principal'::public.app_role)");
+  });
+
+  it("applies the campus predicate to students, applications, ledger rows and payments", () => {
+    for (const policyName of [
+      '"Staff can view students"',
+      '"Staff view all applications"',
+      '"Finance staff can view all ledger"',
+      '"Finance staff can view ledger payments"',
+      '"Staff can read lead_payments"',
+    ]) {
+      expect(campusScopeMigration).toContain(policyName);
+    }
+    expect(campusScopeMigration).toContain("public.user_can_access_record_campus(auth.uid(), students.campus_id)");
+    expect(campusScopeMigration).toContain("public.application_branch_campus_id(applications.lead_id, applications.course_selections)");
+    expect(campusScopeMigration).toContain("public.user_can_access_record_campus(auth.uid(), s.campus_id)");
+    expect(campusScopeMigration).toContain("public.user_can_access_record_campus(auth.uid(), l.campus_id)");
   });
 });
 
@@ -269,8 +350,8 @@ describe("payment link: Collect Fee vs Token Fee", () => {
 
   it("itemises the breakup on the receipt instead of one opaque total", () => {
     expect(receiptFn).toContain("allocations,");
-    expect(receiptFn).toContain("see breakup below");
-    expect(receiptFn).toContain('rows.push([`  ${a?.label || "Fee"}`, `${RUP}${fmtINR(amt)}`]);');
+    expect(receiptFn).toContain("see table below");
+    expect(receiptFn).toContain("for (let i = 0; i < opts.allocations.length; i++)");
   });
 });
 

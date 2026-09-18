@@ -7,6 +7,10 @@ import {
 import { applyLeadTransition } from "../_shared/lead-transition.ts";
 import { loadLatestOutboundContext } from "../_shared/whatsapp-outbound-context.ts";
 import { handleExamRegistrationIntakeReply } from "../_shared/exam-registration-intake.ts";
+import {
+  pickLeadForSchoolBrand,
+  WHATSAPP_SCHOOL_CHANNEL_BRAND,
+} from "../_shared/schoolLeadBrand.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -169,7 +173,7 @@ async function markCampaignRecipientEngagement(
   admin: any,
   args: {
     phone: string;
-    businessNumber: string | null;
+    businessNumber: string | string[] | null;
     messageType: string;
     content: string;
     rawMessage: any;
@@ -189,7 +193,7 @@ async function markCampaignRecipientEngagement(
     const buttonTitle = buttonReply?.title || listReply?.title || legacyButton?.text || null;
     const referralUrl = args.rawMessage?.referral?.source_url || null;
     const nowIso = new Date().toISOString();
-    const patch: Record<string, unknown> = {};
+    const patch: Record<string, unknown> = { responded_at: nowIso };
 
     if (buttonPayload || buttonTitle || args.messageType === "interactive" || args.messageType === "button") {
       patch.clicked_button_at = nowIso;
@@ -201,12 +205,10 @@ async function markCampaignRecipientEngagement(
       patch.clicked_url = referralUrl;
     }
 
-    if (Object.keys(patch).length > 0) {
-      await admin
-        .from("whatsapp_campaign_recipients")
-        .update(patch)
-        .eq("id", recipientId);
-    }
+    await admin
+      .from("whatsapp_campaign_recipients")
+      .update(patch)
+      .eq("id", recipientId);
   } catch (err) {
     console.error("markCampaignRecipientEngagement error:", err);
   }
@@ -605,13 +607,16 @@ Deno.serve(async (req) => {
 
           // Find lead by phone
           const normalizedPhone = phone.replace(/^91/, "+91");
+          const channelBrand = businessPnId && WHATSAPP_SCHOOL_CHANNEL_BRAND[businessPnId]
+            ? WHATSAPP_SCHOOL_CHANNEL_BRAND[businessPnId]
+            : "nimt";
           const { data: leadRows } = await admin
             .from("leads")
-            .select("id, counsellor_id, name, stage, person_role")
+            .select("id, counsellor_id, name, stage, person_role, campus_id, portal_brand, lead_institution_type, is_mirror")
             .or(`phone.eq.${phone},phone.eq.${normalizedPhone},phone.eq.+${phone}`)
             .eq("is_mirror", false)
-            .limit(1);
-          let lead = leadRows?.[0] || null;
+            .limit(5);
+          let lead = pickLeadForSchoolBrand(leadRows, channelBrand);
 
           if (!lead) {
             // No lead on this number. resolve_or_create_lead_by_phone is the one
@@ -622,7 +627,12 @@ Deno.serve(async (req) => {
             const phoneForLead = phone.length === 10 ? `+91${phone}` : `+${phone}`;
             const { data: resolvedId, error: resolveErr } = await admin.rpc(
               "resolve_or_create_lead_by_phone",
-              { _phone: phoneForLead, _source: "whatsapp", _reason: "whatsapp_reply" },
+              {
+                _phone: phoneForLead,
+                _source: "whatsapp",
+                _reason: "whatsapp_reply",
+                _portal_brand: channelBrand === "mirai" ? "mirai" : null,
+              },
             );
             if (resolveErr) {
               console.error("Webhook resolve/create lead failed:", resolveErr.message);
@@ -652,7 +662,7 @@ Deno.serve(async (req) => {
             }).select("id").single();
             await markCampaignRecipientEngagement(admin, {
               phone,
-              businessNumber: businessPnId || businessNumber || null,
+              businessNumber: [businessPnId, businessNumber],
               messageType: msgType,
               content,
               rawMessage: msg,
@@ -701,7 +711,7 @@ Deno.serve(async (req) => {
           const inboundMessageId: string | null = insertedMsg?.id || null;
           await markCampaignRecipientEngagement(admin, {
             phone,
-            businessNumber: businessPnId || businessNumber || null,
+            businessNumber: [businessPnId, businessNumber],
             messageType: msgType,
             content,
             rawMessage: msg,

@@ -38,7 +38,7 @@ const supabaseConfig = readFileSync("supabase/config.toml", "utf8");
 
 describe("WhatsApp inbound auto-reply and qualification routing", () => {
   it("creates a Meta webhook lead before logging and handing routing to the orchestrator", () => {
-    const autoCreateIndex = metaWebhook.indexOf("Webhook auto-create lead failed");
+    const autoCreateIndex = metaWebhook.indexOf("Webhook resolve/create lead failed");
     const insertIndex = metaWebhook.indexOf("// Insert message");
     const orchestratorIndex = metaWebhook.indexOf('source: "meta_webhook"');
 
@@ -336,6 +336,8 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
   it("uses outbound context when routing inbound replies", () => {
     expect(automationEventsHelper).toContain("inbound_reply_to_outbound");
     expect(orchestrator).toContain("loadLatestOutboundContext");
+    expect(orchestrator).toContain("body.business_phone_number_id");
+    expect(orchestrator).toContain("body.business_phone_number");
     expect(orchestrator).toContain('eventType: "inbound_reply_to_outbound"');
     expect(orchestrator).toContain("campaign_recipient_id");
     expect(orchestrator).toContain("responsePolicy === \"human\"");

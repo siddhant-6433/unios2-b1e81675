@@ -50,12 +50,30 @@ export function AiCallLogsPanel() {
     if (!canSee) { setLoading(false); return; }
     (async () => {
       setLoading(true);
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("ai_call_logs" as any)
-        .select("*, leads:lead_id(name, phone)")
+        .select("*")
         .order("created_at", { ascending: false })
         .limit(50);
-      setLogs((data || []) as any);
+      if (error) {
+        console.error("Failed to fetch AI call logs", error);
+        setLogs([]);
+        setLoading(false);
+        return;
+      }
+      const rows = (data || []) as AiCallLog[];
+      const leadIds = [...new Set(rows.map((r) => r.lead_id).filter((id): id is string => Boolean(id)))];
+      const leadMap: Record<string, { name: string; phone: string }> = {};
+      if (leadIds.length > 0) {
+        const { data: leadRows } = await supabase.from("leads").select("id, name, phone").in("id", leadIds);
+        ((leadRows || []) as { id: string; name: string | null; phone: string | null }[]).forEach((lead) => {
+          leadMap[lead.id] = { name: lead.name || "Unknown", phone: lead.phone || "" };
+        });
+      }
+      setLogs(rows.map((row) => ({
+        ...row,
+        leads: row.lead_id ? leadMap[row.lead_id] ?? null : null,
+      })));
       setLoading(false);
     })();
   }, [role]);

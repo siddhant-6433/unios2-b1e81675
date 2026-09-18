@@ -11,6 +11,7 @@ import {
   isCampaignEngaged,
   matchesRecipientEngagementFilter,
   recipientEngagementOrFilter,
+  whatsappMatchKeys,
 } from "@/lib/campaignEngaged";
 
 const marketingPage = readFileSync("src/pages/Marketing.tsx", "utf8");
@@ -49,10 +50,52 @@ describe("campaign engaged leads", () => {
     expect(campaignPhoneLookupValues("+91 98765 43210")).toEqual(
       expect.arrayContaining(["919876543210", "9876543210"]),
     );
+    expect(whatsappMatchKeys("9876543210")).toEqual(["9876543210", "919876543210"]);
+    expect(whatsappMatchKeys("919876543210")).toEqual(["919876543210", "9876543210"]);
+    expect(whatsappMatchKeys("1110238142172240")).toEqual(["1110238142172240"]);
     const engaged = engagedPhoneDigitSet(["919876543210"]);
     expect(conversationMatchesEngagedPhones("9876543210", engaged)).toBe(true);
     expect(conversationMatchesEngagedPhones("919876543210", engaged)).toBe(true);
     expect(conversationMatchesEngagedPhones("919111111111", engaged)).toBe(false);
+  });
+
+  it("treats the Mirai Meta ID and 9220522282 as the same sender", () => {
+    const channel = {
+      business_number: "919220522282",
+      meta_phone_number_id: "1110238142172240",
+    };
+    const expand = (requested: string[]) => {
+      const keys = new Set(requested.flatMap((value) => whatsappMatchKeys(value)));
+      const channelKeys = [
+        ...whatsappMatchKeys(channel.business_number),
+        ...whatsappMatchKeys(channel.meta_phone_number_id),
+      ];
+      if (channelKeys.some((key) => keys.has(key))) {
+        for (const key of channelKeys) keys.add(key);
+      }
+      return keys;
+    };
+    const inbound = expand(["1110238142172240"]);
+    expect(inbound.has("919220522282")).toBe(true);
+    expect(whatsappMatchKeys("919220522282").some((key) => inbound.has(key))).toBe(true);
+    expect(whatsappMatchKeys("9220522282").some((key) => inbound.has(key))).toBe(true);
+    expect(whatsappMatchKeys("9876543210").some((key) => expand(["919876543210"]).has(key))).toBe(true);
+  });
+
+  it("attributes Mirai replies when Meta ID, display phone, and 91-prefix disagree", () => {
+    const engagementFix = readFileSync(
+      "supabase/migrations/20260915080309_campaign_engagement_mirai_identity_match.sql",
+      "utf8",
+    );
+    const outboundContext = readFileSync("supabase/functions/_shared/whatsapp-outbound-context.ts", "utf8");
+    expect(engagementFix).toContain("whatsapp_match_keys");
+    expect(engagementFix).toContain("whatsapp_business_match_keys");
+    expect(engagementFix).toContain("whatsapp_channels");
+    expect(engagementFix).toContain("woc.phone = ANY (v_phone_keys)");
+    expect(outboundContext).toContain("whatsappMatchKeys");
+    expect(outboundContext).toContain(".in(\"phone\", phoneKeys)");
+    expect(outboundContext).toContain("whatsapp_channels");
+    expect(inbox).toContain("fetchEngagedCampaignPhones");
   });
 
   it("deep-links the inbox with campaign id instead of a phone list", () => {
