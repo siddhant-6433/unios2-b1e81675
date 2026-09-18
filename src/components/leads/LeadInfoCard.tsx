@@ -372,7 +372,7 @@ function EditableText({ field, label, value, onSave, className, displayValue }: 
 
   return (
     <div className="group flex items-center gap-1.5 cursor-pointer" onClick={() => { setDraft(value); setEditing(true); }}>
-      <span className={className}>{displayValue ?? (value || "—")}</span>
+      <span className={className}>{(displayValue ?? value) || "—"}</span>
       <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
     </div>
   );
