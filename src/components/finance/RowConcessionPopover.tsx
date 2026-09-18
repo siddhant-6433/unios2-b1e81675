@@ -272,126 +272,120 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
         align="end"
         sideOffset={6}
         collisionPadding={16}
-        className="w-72 max-h-[min(72vh,560px)] overflow-y-auto space-y-2.5"
+        className="flex max-h-[min(var(--radix-popover-content-available-height),560px)] w-72 flex-col overflow-hidden"
       >
-        <div>
+        <div className="shrink-0">
           <p className="text-sm font-semibold text-foreground">{fee.fee_codes?.code || "Fee"}</p>
           <p className="text-[11px] text-muted-foreground">
             {fee.fee_codes?.name} · ₹{total.toLocaleString("en-IN")}
           </p>
         </div>
 
-        {loadingExisting && hasLedgerConcession && (
-          <div className="rounded-lg border border-input px-2.5 py-2 text-xs text-muted-foreground">
-            Loading existing waiver...
-          </div>
-        )}
+        <div className="mt-2.5 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+          {loadingExisting && hasLedgerConcession && (
+            <div className="rounded-lg border border-input px-2.5 py-2 text-xs text-muted-foreground">
+              Loading existing waiver...
+            </div>
+          )}
 
-        {/* Existing per-row concessions, each editable / removable. */}
-        {existing.length > 0 && (
-          <div className="space-y-1.5">
-            {existing.map((c) => {
-              const amt = effectiveAmount(c.type, Number(c.value), total);
-              const pending = c.status !== "approved";
-              const removalPending = Boolean(c.removal_requested_at);
-              const canEditThis = canEdit && c.status === "approved" && !removalPending;
-              const canRemoveThis = canRemove && c.status === "approved" && !removalPending;
-              return (
-                <div key={c.id} className="rounded-lg border border-input px-2.5 py-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <span className="text-sm font-medium text-success">−₹{amt.toLocaleString("en-IN")}</span>
-                      <span className="ml-1 text-[10px] text-muted-foreground">
-                        {c.type === "percentage" ? `${c.value}%` : "flat"}
-                        {pending ? " · Under Approval" : ""}
-                        {removalPending ? " · removal requested" : ""}
-                      </span>
-                      {/* Staff-only. The student ledger renders fee_ledger.concession
-                          (the amount) and never reads this table, so the reason
-                          stays internal. */}
-                      {c.reason && (
-                        <p className="truncate text-[10px] text-muted-foreground" title={c.reason}>
-                          {c.reason}
-                        </p>
-                      )}
-                      {removalPending && c.removal_reason && (
-                        <p className="truncate text-[10px] text-muted-foreground" title={c.removal_reason}>
-                          Remove: {c.removal_reason}
-                        </p>
-                      )}
-                    </div>
-                    {(canEditThis || canRemoveThis) && (
-                      <div className="flex shrink-0 gap-0.5">
-                        {canEditThis && (
-                          <button
-                            onClick={() => (editing?.id === c.id ? reset() : startEdit(c))}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary"
-                            title="Edit / reduce" aria-label="Edit or reduce this waiver"
-                          ><Pencil className="h-3 w-3" /></button>
-                        )}
-                        {canRemoveThis && (
-                          <button
-                            onClick={() => removeConcession(c)}
-                            disabled={saving}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive"
-                            title="Remove"
-                            aria-label="Remove this waiver"
-                          ><Trash2 className="h-3 w-3" /></button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {showUnavailableState && (
-          <div className="rounded-lg border border-warning/30 bg-warning/5 px-2.5 py-2 text-xs text-muted-foreground">
-            Existing waiver details are not available yet. Refresh this student and try again.
-          </div>
-        )}
-
-        {/* Offer-letter waivers on this term. Editing recomputes the whole term's
-            share across its rows; super_admin only. */}
-        {waivers.length > 0 && (
-          <div className="space-y-1.5">
-            {waivers.map((w) => (
-              <div key={w.id} className="rounded-lg border border-input px-2.5 py-1.5">
+          {/* Existing per-row concessions, each editable / removable. */}
+          {existing.map((c) => {
+            const amt = effectiveAmount(c.type, Number(c.value), total);
+            const pending = c.status !== "approved";
+            const removalPending = Boolean(c.removal_requested_at);
+            const canEditThis = canEdit && c.status === "approved" && !removalPending;
+            const canRemoveThis = canRemove && c.status === "approved" && !removalPending;
+            return (
+              <div key={c.id} className="rounded-lg border border-input px-2.5 py-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <span className="text-sm font-medium text-success">−₹{Number(w.amount).toLocaleString("en-IN")}</span>
-                    <span className="ml-1 text-[10px] text-muted-foreground">offer letter</span>
-                    {w.reason && (
-                      <p className="truncate text-[10px] text-muted-foreground" title={w.reason}>{w.reason}</p>
+                    <span className="text-sm font-medium text-success">−₹{amt.toLocaleString("en-IN")}</span>
+                    <span className="ml-1 text-[10px] text-muted-foreground">
+                      {c.type === "percentage" ? `${c.value}%` : "flat"}
+                      {pending ? " · Under Approval" : ""}
+                      {removalPending ? " · removal requested" : ""}
+                    </span>
+                    {/* Staff-only. The student ledger renders fee_ledger.concession
+                        (the amount) and never reads this table, so the reason
+                        stays internal. */}
+                    {c.reason && (
+                      <p className="truncate text-[10px] text-muted-foreground" title={c.reason}>
+                        {c.reason}
+                      </p>
+                    )}
+                    {removalPending && c.removal_reason && (
+                      <p className="truncate text-[10px] text-muted-foreground" title={c.removal_reason}>
+                        Remove: {c.removal_reason}
+                      </p>
                     )}
                   </div>
-                  {isSuperAdmin && (
+                  {(canEditThis || canRemoveThis) && (
                     <div className="flex shrink-0 gap-0.5">
-                      <button
-                        onClick={() => (editing?.id === w.id ? reset() : startEditWaiver(w))}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary"
-                        title="Edit / reduce" aria-label="Edit or reduce this offer-letter waiver"
-                      ><Pencil className="h-3 w-3" /></button>
-                      <button
-                        onClick={() => removeWaiver(w)}
-                        disabled={saving}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive"
-                        title="Remove" aria-label="Remove this offer-letter waiver"
-                      ><Trash2 className="h-3 w-3" /></button>
+                      {canEditThis && (
+                        <button
+                          onClick={() => (editing?.id === c.id ? reset() : startEdit(c))}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary"
+                          title="Edit / reduce" aria-label="Edit or reduce this waiver"
+                        ><Pencil className="h-3 w-3" /></button>
+                      )}
+                      {canRemoveThis && (
+                        <button
+                          onClick={() => removeConcession(c)}
+                          disabled={saving}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive"
+                          title="Remove"
+                          aria-label="Remove this waiver"
+                        ><Trash2 className="h-3 w-3" /></button>
+                      )}
                     </div>
                   )}
                 </div>
               </div>
-            ))}
-          </div>
-        )}
+            );
+          })}
+
+          {showUnavailableState && (
+            <div className="rounded-lg border border-warning/30 bg-warning/5 px-2.5 py-2 text-xs text-muted-foreground">
+              Existing waiver details are not available yet. Refresh this student and try again.
+            </div>
+          )}
+
+          {/* Offer-letter waivers on this term. Editing recomputes the whole term's
+              share across its rows; super_admin only. */}
+          {waivers.map((w) => (
+            <div key={w.id} className="rounded-lg border border-input px-2.5 py-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="text-sm font-medium text-success">−₹{Number(w.amount).toLocaleString("en-IN")}</span>
+                  <span className="ml-1 text-[10px] text-muted-foreground">offer letter</span>
+                  {w.reason && (
+                    <p className="truncate text-[10px] text-muted-foreground" title={w.reason}>{w.reason}</p>
+                  )}
+                </div>
+                {isSuperAdmin && (
+                  <div className="flex shrink-0 gap-0.5">
+                    <button
+                      onClick={() => (editing?.id === w.id ? reset() : startEditWaiver(w))}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary"
+                      title="Edit / reduce" aria-label="Edit or reduce this offer-letter waiver"
+                    ><Pencil className="h-3 w-3" /></button>
+                    <button
+                      onClick={() => removeWaiver(w)}
+                      disabled={saving}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive"
+                      title="Remove" aria-label="Remove this offer-letter waiver"
+                    ><Trash2 className="h-3 w-3" /></button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
 
         {/* One shared form: add a new concession, edit a concession, or edit an
             offer-letter waiver (flat amount only, so its type toggle is hidden). */}
         {(showAddForm || editingConcession || editingWaiver) && (
-          <div className="space-y-2.5 border-t border-border pt-2.5">
+          <div className="mt-2.5 shrink-0 space-y-2.5 border-t border-border pt-2.5">
             <p className="text-[11px] font-medium text-foreground">
               {editingWaiver ? "Edit offer-letter waiver" : editingConcession ? "Edit waiver" : "Add a waiver"}
             </p>
