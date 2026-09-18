@@ -312,6 +312,27 @@ function normalisePhone(phone: string): string {
   return `+${digits}`;
 }
 
+async function navyaAutoOutboundCallsEnabled(supabase: any): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("_app_config")
+    .select("value")
+    .eq("key", "voice_agent_settings")
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Could not read voice_agent_settings; defaulting auto outbound calls to enabled:", error.message);
+    return true;
+  }
+
+  try {
+    const settings = data?.value ? JSON.parse(data.value) : {};
+    return settings.auto_outbound_calls_enabled !== false;
+  } catch (err) {
+    console.warn("Could not parse voice_agent_settings; defaulting auto outbound calls to enabled:", err);
+    return true;
+  }
+}
+
 // ─── Meta course-answer resolution ──────────────────────────────────
 // Meta lead forms are multi-course, so we resolve the course from the in-form
 // "which course?" answer (already extracted + normalised by parseMetaAds),
@@ -726,7 +747,7 @@ Deno.serve(async (req) => {
     });
 
     // For chat widget leads: schedule AI call after 10 minutes (after chat likely ends)
-    if (skipAiCallSources.includes(leadSource)) {
+    if (skipAiCallSources.includes(leadSource) && await navyaAutoOutboundCallsEnabled(supabase)) {
       const scheduledAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
       await supabase.from("ai_call_queue" as any).insert({
         lead_id: lead.id,
