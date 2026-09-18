@@ -48,6 +48,8 @@ type MenuItem = {
   hideForSuperAdmin?: boolean;
 };
 
+const NO_ASSIGNED_CAMPUS_ID = "00000000-0000-0000-0000-000000000000";
+
 const mainMenu: MenuItem[] = [
   { title: "Overview", url: "/", icon: LayoutDashboard, permission: "dashboard:view" },
   { title: "Inbox", url: "/inbox", icon: Inbox, permission: "leads:view" },
@@ -201,7 +203,7 @@ export function AppSidebar() {
     return location.pathname === path;
   };
   const { user, profile, role, realRole, isImpersonating, signOut } = useAuth();
-  const { campuses, selectedCampusId, setSelectedCampusId } = useCampus();
+  const { campuses, selectedCampusId, setSelectedCampusId, canSelectAllCampuses } = useCampus();
 
   const displayName = profile?.display_name || "User";
   const roleLabel = role ? labelForRole(role) : "User";
@@ -271,8 +273,23 @@ export function AppSidebar() {
       setPendingApprovals(0);
       return;
     }
-    const { data } = await supabase.rpc("count_pending_approvals" as any);
-    setPendingApprovals(Number(data) || 0);
+    const { data, error } = await supabase
+      .from("pending_approvals" as any)
+      .select("kind, pending_role");
+    if (error) {
+      console.error("[AppSidebar] pending approvals fetch failed:", error);
+      return;
+    }
+
+    const actionableCount = (data || []).filter((item: any) => {
+      if (item.kind === "pending_an") return false;
+      if (role === "super_admin") return true;
+      if (role === "principal") return item.pending_role === "principal";
+      if (role === "admission_head") return item.pending_role === "principal";
+      if (role === "campus_admin") return item.pending_role === "super_admin";
+      return false;
+    }).length;
+    setPendingApprovals(actionableCount);
   }, [role]);
 
   useEffect(() => {
@@ -305,7 +322,7 @@ export function AppSidebar() {
       clearInterval(badgeInterval);
       document.removeEventListener("visibilitychange", tickBadges);
     };
-  }, [fetchAdmissionBadges, fetchPendingApprovals]);
+  }, [fetchAdmissionBadges, fetchPendingApprovals, role]);
 
   const inboxBadge = pendingApprovals + pendingFollowupCount;
   const isAdmissionPortalRole = isAdmissionPartnerPortalRole(role);
@@ -380,14 +397,15 @@ export function AppSidebar() {
         </div>
 
         {/* Campus Selector */}
-        {!collapsed && !isPartnerPortalRole && campuses.length > 0 && (
+        {!collapsed && !isPartnerPortalRole && (campuses.length > 0 || selectedCampusId === NO_ASSIGNED_CAMPUS_ID) && (
           <div className="px-3 pb-3">
             <select
               value={selectedCampusId}
               onChange={(e) => setSelectedCampusId(e.target.value)}
               className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-[12px] font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 cursor-pointer"
             >
-              {role === "super_admin" || !profile?.campus ? <option value="all">All Campuses</option> : null}
+              {canSelectAllCampuses && <option value="all">All Campuses</option>}
+              {selectedCampusId === NO_ASSIGNED_CAMPUS_ID && <option value={NO_ASSIGNED_CAMPUS_ID}>No assigned campus</option>}
               {campuses.map(c => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}

@@ -282,6 +282,7 @@ export default function Inbox() {
   const [items, setItems] = useState<InboxItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<InboxItem | null>(null);
   const [loading, setLoading] = useState(false);
+  const [countsLoaded, setCountsLoaded] = useState(false);
   const [processing, setProcessing] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<CategoryId, number>>({
     offer_waivers: 0,
@@ -372,7 +373,7 @@ export default function Inbox() {
       label: "Pending AN Generation",
       icon: AlertTriangle,
       count: counts.pending_an_generation,
-      roles: ["super_admin", "principal"],
+      roles: ["super_admin"],
       color: "text-amber-600",
     },
     {
@@ -425,12 +426,17 @@ export default function Inbox() {
     },
   ];
 
-  const visibleCategories = allCategories.filter((c) =>
+  const roleAllowedCategories = allCategories.filter((c) =>
     c.roles.includes(role || "")
   );
-  const selectedCategory = visibleCategories.find((c) => c.id === selected);
   const categoryDisplayCount = (cat: InboxCategory) =>
     cat.id === selected && !loading ? items.length : cat.count;
+  const visibleCategories = countsLoaded
+    ? roleAllowedCategories.filter((c) => categoryDisplayCount(c) > 0)
+    : [];
+  const visibleCategoryIds = visibleCategories.map((c) => c.id).join("|");
+  const requestedCategory = searchParams.get("category") as CategoryId | null;
+  const selectedCategory = roleAllowedCategories.find((c) => c.id === selected);
   const selectedDisplayCount = selectedCategory ? categoryDisplayCount(selectedCategory) : 0;
   const totalVisibleCount = visibleCategories.reduce((sum, c) => sum + categoryDisplayCount(c), 0);
 
@@ -538,8 +544,8 @@ export default function Inbox() {
             .in("status", ["pending_principal", "pending_super_admin"])
         : Promise.resolve({ count: 0 }),
 
-      // Pending AN generation — super_admin + principal
-      (isSuperAdmin || isPrincipal)
+      // Pending AN generation — super_admin only; it exposes document-gated AN rows.
+      isSuperAdmin
         ? supabase.rpc("list_pending_an_generation")
         : Promise.resolve({ count: 0 }),
 
@@ -613,7 +619,8 @@ export default function Inbox() {
       }).length,
       hr_document_approvals: get(13),
     });
-  }, [role, isSuperAdmin, isPrincipal, isApprover, isAdmissions, profile?.id]);
+    setCountsLoaded(true);
+  }, [isSuperAdmin, isPrincipal, isApprover, isAdmissions]);
 
   useEffect(() => {
     fetchCounts();
@@ -621,14 +628,26 @@ export default function Inbox() {
   }, [fetchCounts]);
 
   useEffect(() => {
-    if (visibleCategories.length === 0 || selected) return;
+    if (!countsLoaded) return;
+
     // Deep-link: /inbox?category=<id> (e.g. from a notification) wins over first-visible.
-    const wanted = searchParams.get("category") as CategoryId | null;
-    const target = wanted && visibleCategories.some((c) => c.id === wanted)
-      ? wanted
-      : visibleCategories[0].id;
-    setSelected(target);
-  }, [visibleCategories.length, searchParams]);
+    const visibleCategoryIdList = visibleCategoryIds ? visibleCategoryIds.split("|") as CategoryId[] : [];
+    const selectedStillVisible = selected && visibleCategoryIdList.includes(selected);
+    if (selectedStillVisible) return;
+
+    const target = requestedCategory && visibleCategoryIdList.includes(requestedCategory)
+      ? requestedCategory
+      : visibleCategoryIdList[0] ?? null;
+
+    if (target) {
+      setSelected(target);
+      return;
+    }
+
+    setSelected(null);
+    setItems([]);
+    setSelectedItem(null);
+  }, [countsLoaded, visibleCategoryIds, selected, requestedCategory]);
 
   // ── Item loading ──────────────────────────────────────────────────────────
 
@@ -2708,8 +2727,8 @@ export default function Inbox() {
           </div>
         </div>
         <nav className="flex-1 overflow-y-auto p-3 space-y-1.5">
-          {visibleCategories.length === 0 && (
-            <p className="px-3 py-3 text-xs text-muted-foreground">No categories available</p>
+          {countsLoaded && visibleCategories.length === 0 && (
+            <p className="px-3 py-3 text-xs text-muted-foreground">No open inbox items</p>
           )}
           {visibleCategories.map((cat) => {
             const active = selected === cat.id;
@@ -2741,7 +2760,7 @@ export default function Inbox() {
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{cat.label}</span>
                 <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
-                  {displayCount === 0 ? "All clear" : `${displayCount} open item${displayCount === 1 ? "" : "s"}`}
+                  {displayCount} open item{displayCount === 1 ? "" : "s"}
                 </span>
               </span>
               {displayCount > 0 && (

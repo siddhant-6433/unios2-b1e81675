@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ShieldCheck, ChevronRight } from "lucide-react";
 
 interface PendingItem {
-  kind: "concession" | "offer_letter" | "offer_edit" | "lead_deletion";
+  kind: "concession" | "offer_letter" | "offer_edit" | "lead_deletion" | "student_contact_change" | "pending_an";
   id: string;
   status: string;
   subject_id: string;
@@ -40,6 +40,7 @@ export function PendingApprovalsPanel() {
 
     // Client-side filter: only show items the current role can act on
     const filtered = (data || []).filter((item: any) => {
+      if (item.kind === "pending_an") return false;
       if (role === "super_admin") return true;
       if (role === "principal") return item.pending_role === "principal";
       if (role === "admission_head") return item.pending_role === "principal";
