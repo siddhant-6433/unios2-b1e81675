@@ -33,7 +33,7 @@ interface InboxCategory {
   color: string;
 }
 
-type CategoryId = "offer_waivers" | "fee_concessions" | "abvmu_deposits" | "offer_approvals" | "offer_edits" | "certificate_approvals" | "hr_document_approvals" | "pending_an_generation" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+type CategoryId = "offer_waivers" | "fee_concessions" | "abvmu_deposits" | "offer_approvals" | "offer_edits" | "certificate_approvals" | "hr_document_approvals" | "pending_an_generation" | "contact_changes" | "whatsapp" | "video_approvals" | "voice_messages";
 
 // Manual fee concessions raised at the cashier desk. Approving one runs
 // sync_fee_ledger_concessions server-side, so an offer waiver already mapped
@@ -179,27 +179,6 @@ interface ContactChangeItem {
   created_at: string;
 }
 
-interface ApplicationItem {
-  id: string;
-  application_id: string;
-  lead_name: string;
-  course_name: string | null;
-  created_at: string;
-  stage: string;
-  phone: string | null;
-  app_status: string | null;
-}
-
-interface FollowupItem {
-  id: string;
-  lead_id: string;
-  lead_name: string;
-  phone: string | null;
-  scheduled_at: string;
-  notes: string | null;
-  counsellor_name: string | null;
-}
-
 interface WhatsAppItem {
   phone: string;
   lead_id: string | null;
@@ -233,7 +212,7 @@ interface VoiceMessageItem {
   sender_name: string;
 }
 
-type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | OfferEditItem | CertificateApprovalItem | HrDocumentApprovalItem | PendingAnItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
+type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | OfferEditItem | CertificateApprovalItem | HrDocumentApprovalItem | PendingAnItem | ContactChangeItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -301,8 +280,6 @@ export default function Inbox() {
     hr_document_approvals: 0,
     pending_an_generation: 0,
     contact_changes: 0,
-    applications: 0,
-    followups: 0,
     whatsapp: 0,
     video_approvals: 0,
     voice_messages: 0,
@@ -392,22 +369,6 @@ export default function Inbox() {
       color: "text-cyan-600",
     },
     {
-      id: "applications",
-      label: "New Applications",
-      icon: FileText,
-      count: counts.applications,
-      roles: ADMISSIONS_ROLES,
-      color: "text-primary",
-    },
-    {
-      id: "followups",
-      label: "Pending Follow-ups",
-      icon: AlertTriangle,
-      count: counts.followups,
-      roles: ADMISSIONS_ROLES,
-      color: "text-warning-foreground",
-    },
-    {
       id: "whatsapp",
       label: "WhatsApp Unreplied",
       icon: MessageSquare,
@@ -466,7 +427,6 @@ export default function Inbox() {
   // ── Counts ────────────────────────────────────────────────────────────────
 
   const fetchCounts = useCallback(async () => {
-    const today = new Date().toISOString().slice(0, 10);
     const results = await Promise.allSettled([
       // offer_waivers — super_admin only
       isSuperAdmin
@@ -498,26 +458,6 @@ export default function Inbox() {
             .from("student_contact_change_requests" as any)
             .select("id, student_id")
             .eq("status", "pending")
-        : Promise.resolve({ count: 0 }),
-
-      // applications — admissions (submitted apps awaiting review)
-      isAdmissions
-        ? supabase
-            .from("applications" as any)
-            .select("id, lead_id")
-            .eq("status", "submitted")
-        : Promise.resolve({ count: 0 }),
-
-      // followups — admissions
-      isAdmissions
-        ? (() => {
-            const q = supabase
-              .from("lead_followups")
-              .select("id")
-              .eq("status", "pending")
-              .lte("scheduled_at", `${today}T23:59:59`);
-            return q;
-          })()
         : Promise.resolve({ count: 0 }),
 
       // whatsapp unreplied
@@ -597,16 +537,14 @@ export default function Inbox() {
     const abvmuRows = rowsOf(1);
     const offerApprovalRows = rowsOf(2);
     const contactRows = rowsOf(3);
-    const applicationRows = rowsOf(4);
-    const concessionRows = rowsOf(10);
-    const offerEditRows = rowsOf(12);
+    const concessionRows = rowsOf(8);
+    const offerEditRows = rowsOf(10);
 
     const [hiddenLeads, hiddenStudents] = await Promise.all([
       fetchHiddenLeadIds([
         ...waiverRows.map(nestedOfferLeadId),
         ...abvmuRows.map((r) => r.lead_id),
         ...offerApprovalRows.map((r) => r.lead_id),
-        ...applicationRows.map((r) => r.lead_id),
         ...offerEditRows.map(nestedOfferLeadId),
       ]),
       fetchHiddenStudentIds([
@@ -623,19 +561,17 @@ export default function Inbox() {
       abvmu_deposits: abvmuRows.filter((r) => r.lead_id && !hiddenLeads.has(r.lead_id)).length,
       offer_approvals: offerApprovalRows.filter((r) => r.lead_id && !hiddenLeads.has(r.lead_id)).length,
       contact_changes: contactRows.filter((r) => r.student_id && !hiddenStudents.has(r.student_id)).length,
-      applications: applicationRows.filter((r) => !r.lead_id || !hiddenLeads.has(r.lead_id)).length,
-      followups: get(5),
-      whatsapp: get(6),
-      video_approvals: get(7),
-      voice_messages: get(8),
-      certificate_approvals: get(9),
+      whatsapp: get(4),
+      video_approvals: get(5),
+      voice_messages: get(6),
+      certificate_approvals: get(7),
       fee_concessions: concessionRows.filter((r) => r.student_id && !hiddenStudents.has(r.student_id)).length,
-      pending_an_generation: get(11),
+      pending_an_generation: get(9),
       offer_edits: offerEditRows.filter((r) => {
         const leadId = nestedOfferLeadId(r);
         return leadId && !hiddenLeads.has(leadId);
       }).length,
-      hr_document_approvals: get(13),
+      hr_document_approvals: get(11),
     });
     setCountsLoaded(true);
   }, [isSuperAdmin, isPrincipal, isApprover, isAdmissions]);
@@ -1085,51 +1021,6 @@ export default function Inbox() {
             requested_by_role: r.requested_by_role,
             created_at: r.created_at,
           } as ContactChangeItem));
-        commitItems(cat, nextItems);
-      } else if (cat === "applications") {
-        const { data, error } = await (supabase as any)
-          .from("applications")
-          .select("id, lead_id, application_id, status, created_at, submitted_at, course_selections, full_name, phone, leads!lead_id ( name, phone )")
-          .eq("status", "submitted")
-          .order("submitted_at", { ascending: false })
-          .limit(100);
-
-        if (error) throw error;
-        const hiddenLeads = await fetchHiddenLeadIds((data || []).map((a: any) => a.lead_id));
-        const nextItems = (data || [])
-          .filter((a: any) => !a.lead_id || !hiddenLeads.has(a.lead_id))
-          .map((a: any) => ({
-            id: a.id,
-            application_id: a.application_id,
-            lead_name: a.leads?.name || a.full_name || "—",
-            course_name: a.course_selections?.[0]?.course_name || null,
-            created_at: a.submitted_at || a.created_at,
-            stage: a.status,
-            phone: a.leads?.phone || a.phone || null,
-            app_status: a.status || null,
-          } as ApplicationItem));
-        commitItems(cat, nextItems);
-      } else if (cat === "followups") {
-        const today = new Date().toISOString().slice(0, 10);
-        // user_id is FK to auth.users (not profiles); just fetch lead data
-        const { data, error } = await supabase
-          .from("lead_followups")
-          .select("id, lead_id, scheduled_at, notes, leads!lead_id ( name, phone )")
-          .eq("status", "pending")
-          .lte("scheduled_at", `${today}T23:59:59`)
-          .order("scheduled_at", { ascending: true })
-          .limit(100);
-
-        if (error) throw error;
-        const nextItems = (data || []).map((f: any) => ({
-            id: f.id,
-            lead_id: f.lead_id,
-            lead_name: f.leads?.name || "—",
-            phone: f.leads?.phone || null,
-            scheduled_at: f.scheduled_at,
-            notes: f.notes,
-            counsellor_name: null,
-          } as FollowupItem));
         commitItems(cat, nextItems);
       } else if (cat === "whatsapp") {
         // Use whatsapp_conversations view if available, else aggregate
@@ -1774,44 +1665,6 @@ export default function Inbox() {
             <span className="text-[10px] text-warning-foreground font-medium shrink-0">Pending</span>
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(c.created_at)}</p>
-        </button>
-      );
-    }
-
-    if (selected === "applications") {
-      const a = item as ApplicationItem;
-      return (
-        <button key={a.id} className={baseClass} onClick={() => setSelectedItem(a)}>
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">{a.lead_name}</p>
-              <p className="text-xs text-muted-foreground truncate">{a.course_name || "—"}</p>
-            </div>
-            <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0 mt-0.5" />
-          </div>
-          <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(a.created_at)}</p>
-        </button>
-      );
-    }
-
-    if (selected === "followups") {
-      const f = item as FollowupItem;
-      const isOverdue = new Date(f.scheduled_at) < new Date();
-      return (
-        <button key={f.id} className={baseClass} onClick={() => setSelectedItem(f)}>
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">{f.lead_name}</p>
-              {f.notes && <p className="text-xs text-muted-foreground truncate">{f.notes}</p>}
-            </div>
-            <span className={cn("text-[10px] font-medium shrink-0", isOverdue ? "text-destructive" : "text-muted-foreground")}>
-              {isOverdue ? "Overdue" : "Today"}
-            </span>
-          </div>
-          <p className="text-[10px] text-muted-foreground/60 mt-1">
-            {new Date(f.scheduled_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-            {f.counsellor_name && ` · ${f.counsellor_name}`}
-          </p>
         </button>
       );
     }
@@ -2502,75 +2355,6 @@ export default function Inbox() {
       );
     }
 
-    if (selected === "applications") {
-      const a = selectedItem as ApplicationItem;
-      const stageLabel: Record<string, string> = {
-        draft: "Draft",
-        submitted: "Submitted",
-        under_review: "Under Review",
-        approved: "Approved",
-        rejected: "Rejected",
-      };
-      return (
-        <div className="p-5 space-y-5">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">{a.lead_name}</h3>
-            {a.course_name && <p className="text-sm text-muted-foreground">{a.course_name}</p>}
-          </div>
-
-          <div className="rounded-xl border border-border bg-card divide-y divide-border">
-            <Row label="Application ID" value={a.application_id} />
-            <Row label="Stage" value={stageLabel[a.stage] || a.stage} />
-            {a.phone && <Row label="Phone" value={a.phone} />}
-            <Row label="Started On" value={fmtDate(a.created_at)} />
-          </div>
-
-          <Button
-            size="sm"
-            className="w-full"
-            onClick={() => navigate(`/applications/${a.application_id}`)}
-          >
-            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-            Open Application
-          </Button>
-        </div>
-      );
-    }
-
-    if (selected === "followups") {
-      const f = selectedItem as FollowupItem;
-      const isOverdue = new Date(f.scheduled_at) < new Date();
-      return (
-        <div className="p-5 space-y-5">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">{f.lead_name}</h3>
-            {f.phone && <p className="text-sm text-muted-foreground">{f.phone}</p>}
-          </div>
-
-          <div className="rounded-xl border border-border bg-card divide-y divide-border">
-            <Row
-              label="Scheduled"
-              value={new Date(f.scheduled_at).toLocaleString("en-IN", {
-                day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
-              })}
-            />
-            <Row label="Status" value={isOverdue ? "Overdue" : "Due Today"} />
-            {f.counsellor_name && <Row label="Counsellor" value={f.counsellor_name} />}
-            {f.notes && <Row label="Notes" value={f.notes} />}
-          </div>
-
-          <Button
-            size="sm"
-            className="w-full"
-            onClick={() => navigate(`/admissions/${f.lead_id}`)}
-          >
-            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-            Open Lead
-          </Button>
-        </div>
-      );
-    }
-
     if (selected === "whatsapp") {
       const w = selectedItem as WhatsAppItem;
       return (
@@ -2762,7 +2546,6 @@ export default function Inbox() {
                 <span className={cn(
                   "flex h-6 min-w-6 items-center justify-center rounded-full text-[10px] font-bold text-white px-1.5",
                   cat.id === "whatsapp" ? "bg-success/50"
-                  : cat.id === "followups" ? "bg-warning"
                   : "bg-primary"
                 )}>
                   {formatBadgeCount(displayCount)}
