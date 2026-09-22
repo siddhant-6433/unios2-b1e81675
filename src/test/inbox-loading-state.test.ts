@@ -27,8 +27,4 @@ describe("Inbox counts loading state", () => {
   it("shows the list loader while counts load, not the All clear empty state", () => {
     expect(inbox).toContain("countsLoading || (loading && items.length === 0)");
   });
-
-  it("resolves hidden leads and students in parallel", () => {
-    expect(inbox).toContain("const [hiddenLeads, hiddenStudents] = await Promise.all([");
-  });
 });

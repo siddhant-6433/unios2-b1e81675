@@ -17,7 +17,6 @@ import {
   fetchHiddenLeadIds,
   fetchHiddenStudentIds,
   isHiddenFromStaffQueues,
-  nestedOfferLeadId,
   nestedStudent,
 } from "@/lib/staffQueueVisibility";
 
@@ -461,179 +460,42 @@ export default function Inbox() {
   // ── Counts ────────────────────────────────────────────────────────────────
 
   const fetchCounts = useCallback(async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const results = await Promise.allSettled([
-      // offer_waivers — super_admin only
-      isSuperAdmin
-        ? supabase
-            .from("offer_waivers")
-            .select("id, offer_letters(lead_id)")
-            .eq("status", "pending")
-        : Promise.resolve({ count: 0 }),
-
-      // abvmu deposit claims — super_admin only
-      isSuperAdmin
-        ? supabase
-            .from("abvmu_deposit_claims" as any)
-            .select("id, lead_id")
-            .eq("status", "pending")
-        : Promise.resolve({ count: 0 }),
-
-      // offer_approvals — approvers
-      isApprover
-        ? supabase
-            .from("offer_letters")
-            .select("id, lead_id")
-            .eq("approval_status", "pending_principal")
-        : Promise.resolve({ count: 0 }),
-
-      // contact changes — principal/super_admin
-      (isSuperAdmin || isPrincipal)
-        ? supabase
-            .from("student_contact_change_requests" as any)
-            .select("id, student_id")
-            .eq("status", "pending")
-        : Promise.resolve({ count: 0 }),
-
-      // applications — admissions (submitted apps awaiting review)
-      isAdmissions
-        ? supabase
-            .from("applications" as any)
-            .select("id, lead_id")
-            .eq("status", "submitted")
-        : Promise.resolve({ count: 0 }),
-
-      // followups — admissions
-      isAdmissions
-        ? (() => {
-            const q = supabase
-              .from("lead_followups")
-              .select("id")
-              .eq("status", "pending")
-              .lte("scheduled_at", `${today}T23:59:59`);
-            return q;
-          })()
-        : Promise.resolve({ count: 0 }),
-
-      // whatsapp unreplied
-      isAdmissions
-        ? supabase
-            .from("whatsapp_conversations" as any)
-            .select("phone")
-            .gt("unread_count", 0)
-        : Promise.resolve({ count: 0 }),
-
-      // video approvals — super_admin only (videos awaiting approval)
-      isSuperAdmin
-        ? supabase
-            .from("videos" as any)
-            .select("id")
-            .eq("status", "pending_approval")
-        : Promise.resolve({ count: 0 }),
-
-      // voice messages — approvers (unresolved messages from consultants)
-      isApprover
-        ? supabase
-            .from("consultant_voice_messages" as any)
-            .select("id")
-            .neq("status", "resolved")
-        : Promise.resolve({ count: 0 }),
-
-      // PGDM certificate approvals — super_admin only
-      isSuperAdmin
-        ? supabase
-            .from("alumni_verification_requests" as any)
-            .select("id")
-            .eq("pgdm_certificate_status", "pending_approval")
-        : Promise.resolve({ count: 0 }),
-
-      // Manual fee concessions awaiting a super_admin decision
-      isSuperAdmin
-        ? supabase
-            .from("concessions")
-            .select("id, student_id")
-            .in("status", ["pending_principal", "pending_super_admin"])
-        : Promise.resolve({ count: 0 }),
-
+    // One aggregate RPC (get_inbox_counts) replaces ~14 row-fetch queries plus
+    // two hidden-id lookups. Exact counts, RLS-scoped server-side, so the page
+    // stops waiting on the slowest of a dozen scans before it can render.
+    const [{ data, error }, anRes] = await Promise.all([
+      (supabase as any).rpc("get_inbox_counts"),
       // Pending AN generation — super_admin only; it exposes document-gated AN rows.
       isSuperAdmin
         ? supabase.rpc("list_pending_an_generation")
-        : Promise.resolve({ count: 0 }),
-
-      // Offer letter edit requests — super_admin only (they alone can decide)
-      isSuperAdmin
-        ? supabase
-            .from("offer_letter_edit_requests" as any)
-            .select("id, offer_letters(lead_id)")
-            .eq("status", "pending")
-        : Promise.resolve({ count: 0 }),
-
-      // HR document approvals — super_admin only
-      isSuperAdmin
-        ? supabase
-            .from("hr_letters" as any)
-            .select("id")
-            .eq("status", "pending_approval")
-        : Promise.resolve({ count: 0 }),
+        : Promise.resolve({ data: [] as unknown[] }),
+      // Offer letter edit requests — super_admin only (they alone can decide);
+      // counted by get_inbox_counts() alongside every other queue.
     ]);
 
-    const get = (i: number) => {
-      const r = results[i];
-      if (r.status === "fulfilled") return (r.value as any).count ?? (r.value as any).data?.length ?? 0;
-      return 0;
-    };
-    const rowsOf = (i: number): any[] => {
-      const r = results[i];
-      if (r.status !== "fulfilled") return [];
-      return (r.value as any)?.data || [];
-    };
-
-    const waiverRows = rowsOf(0);
-    const abvmuRows = rowsOf(1);
-    const offerApprovalRows = rowsOf(2);
-    const contactRows = rowsOf(3);
-    const applicationRows = rowsOf(4);
-    const concessionRows = rowsOf(10);
-    const offerEditRows = rowsOf(12);
-
-    const [hiddenLeads, hiddenStudents] = await Promise.all([
-      fetchHiddenLeadIds([
-        ...waiverRows.map(nestedOfferLeadId),
-        ...abvmuRows.map((r) => r.lead_id),
-        ...offerApprovalRows.map((r) => r.lead_id),
-        ...applicationRows.map((r) => r.lead_id),
-        ...offerEditRows.map(nestedOfferLeadId),
-      ]),
-      fetchHiddenStudentIds([
-        ...contactRows.map((r) => r.student_id),
-        ...concessionRows.map((r) => r.student_id),
-      ]),
-    ]);
-
+    if (error) {
+      toast({ title: "Couldn't load inbox counts", description: error.message, variant: "destructive" });
+    }
+    const c = (data || {}) as Record<string, number | undefined>;
+    const n = (key: string) => Number(c[key] || 0);
     setCounts({
-      offer_waivers: waiverRows.filter((r) => {
-        const leadId = nestedOfferLeadId(r);
-        return leadId && !hiddenLeads.has(leadId);
-      }).length,
-      abvmu_deposits: abvmuRows.filter((r) => r.lead_id && !hiddenLeads.has(r.lead_id)).length,
-      offer_approvals: offerApprovalRows.filter((r) => r.lead_id && !hiddenLeads.has(r.lead_id)).length,
-      contact_changes: contactRows.filter((r) => r.student_id && !hiddenStudents.has(r.student_id)).length,
-      applications: applicationRows.filter((r) => !r.lead_id || !hiddenLeads.has(r.lead_id)).length,
-      followups: get(5),
-      whatsapp: get(6),
-      video_approvals: get(7),
-      voice_messages: get(8),
-      certificate_approvals: get(9),
-      fee_concessions: concessionRows.filter((r) => r.student_id && !hiddenStudents.has(r.student_id)).length,
-      pending_an_generation: get(11),
-      offer_edits: offerEditRows.filter((r) => {
-        const leadId = nestedOfferLeadId(r);
-        return leadId && !hiddenLeads.has(leadId);
-      }).length,
-      hr_document_approvals: get(13),
+      offer_waivers: n("offer_waivers"),
+      fee_concessions: n("fee_concessions"),
+      abvmu_deposits: n("abvmu_deposits"),
+      offer_approvals: n("offer_approvals"),
+      offer_edits: n("offer_edits"),
+      certificate_approvals: n("certificate_approvals"),
+      hr_document_approvals: n("hr_document_approvals"),
+      pending_an_generation: Array.isArray((anRes as any)?.data) ? (anRes as any).data.length : 0,
+      contact_changes: n("contact_changes"),
+      applications: n("applications"),
+      followups: n("followups"),
+      whatsapp: n("whatsapp"),
+      video_approvals: n("video_approvals"),
+      voice_messages: n("voice_messages"),
     });
     setCountsLoaded(true);
-  }, [isSuperAdmin, isPrincipal, isApprover, isAdmissions]);
+  }, [isSuperAdmin, toast]);
 
   useEffect(() => {
     fetchCounts();
