@@ -10,13 +10,13 @@ import { Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle, Exte
 import { cn } from "@/lib/utils";
 import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
 import { feeTermLabel } from "@/lib/feeTermLabels";
+import { summarizeConcessionLedger } from "@/lib/feeConcession";
 import { exportRowsCsv } from "@/lib/xlsxExport";
 import { pendingAnDocSummary, type PendingAnDocStatus } from "@/lib/pendingAnGeneration";
 import {
   fetchHiddenLeadIds,
   fetchHiddenStudentIds,
   isHiddenFromStaffQueues,
-  nestedOfferLeadId,
   nestedStudent,
 } from "@/lib/staffQueueVisibility";
 
@@ -42,8 +42,14 @@ interface FeeConcessionItem {
   student_name: string;
   admission_no: string | null;
   fee_code: string | null;
+  fee_name: string | null;
   term: string | null;
   fee_total: number | null;
+  /** Concession already approved on this ledger row (offer waivers + prior concessions). */
+  fee_concession: number;
+  fee_paid: number;
+  fee_balance: number | null;
+  fee_due_date: string | null;
   type: string;
   value: number;
   reason: string | null;
@@ -434,6 +440,10 @@ export default function Inbox() {
   const visibleCategories = countsLoaded
     ? roleAllowedCategories.filter((c) => categoryDisplayCount(c) > 0)
     : [];
+  // The whole sidebar/list is gated on one aggregate counts fetch. Until it
+  // lands the page is genuinely still loading — not empty — so the cards and
+  // list must show a loader rather than 0 / "All clear".
+  const countsLoading = !countsLoaded;
   const visibleCategoryIds = visibleCategories.map((c) => c.id).join("|");
   const requestedCategory = searchParams.get("category") as CategoryId | null;
   const selectedCategory = roleAllowedCategories.find((c) => c.id === selected);
@@ -450,177 +460,42 @@ export default function Inbox() {
   // ── Counts ────────────────────────────────────────────────────────────────
 
   const fetchCounts = useCallback(async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const results = await Promise.allSettled([
-      // offer_waivers — super_admin only
-      isSuperAdmin
-        ? supabase
-            .from("offer_waivers")
-            .select("id, offer_letters(lead_id)")
-            .eq("status", "pending")
-        : Promise.resolve({ count: 0 }),
-
-      // abvmu deposit claims — super_admin only
-      isSuperAdmin
-        ? supabase
-            .from("abvmu_deposit_claims" as any)
-            .select("id, lead_id")
-            .eq("status", "pending")
-        : Promise.resolve({ count: 0 }),
-
-      // offer_approvals — approvers
-      isApprover
-        ? supabase
-            .from("offer_letters")
-            .select("id, lead_id")
-            .eq("approval_status", "pending_principal")
-        : Promise.resolve({ count: 0 }),
-
-      // contact changes — principal/super_admin
-      (isSuperAdmin || isPrincipal)
-        ? supabase
-            .from("student_contact_change_requests" as any)
-            .select("id, student_id")
-            .eq("status", "pending")
-        : Promise.resolve({ count: 0 }),
-
-      // applications — admissions (submitted apps awaiting review)
-      isAdmissions
-        ? supabase
-            .from("applications" as any)
-            .select("id, lead_id")
-            .eq("status", "submitted")
-        : Promise.resolve({ count: 0 }),
-
-      // followups — admissions
-      isAdmissions
-        ? (() => {
-            const q = supabase
-              .from("lead_followups")
-              .select("id")
-              .eq("status", "pending")
-              .lte("scheduled_at", `${today}T23:59:59`);
-            return q;
-          })()
-        : Promise.resolve({ count: 0 }),
-
-      // whatsapp unreplied
-      isAdmissions
-        ? supabase
-            .from("whatsapp_conversations" as any)
-            .select("phone")
-            .gt("unread_count", 0)
-        : Promise.resolve({ count: 0 }),
-
-      // video approvals — super_admin only (videos awaiting approval)
-      isSuperAdmin
-        ? supabase
-            .from("videos" as any)
-            .select("id")
-            .eq("status", "pending_approval")
-        : Promise.resolve({ count: 0 }),
-
-      // voice messages — approvers (unresolved messages from consultants)
-      isApprover
-        ? supabase
-            .from("consultant_voice_messages" as any)
-            .select("id")
-            .neq("status", "resolved")
-        : Promise.resolve({ count: 0 }),
-
-      // PGDM certificate approvals — super_admin only
-      isSuperAdmin
-        ? supabase
-            .from("alumni_verification_requests" as any)
-            .select("id")
-            .eq("pgdm_certificate_status", "pending_approval")
-        : Promise.resolve({ count: 0 }),
-
-      // Manual fee concessions awaiting a super_admin decision
-      isSuperAdmin
-        ? supabase
-            .from("concessions")
-            .select("id, student_id")
-            .in("status", ["pending_principal", "pending_super_admin"])
-        : Promise.resolve({ count: 0 }),
-
+    // One aggregate RPC (get_inbox_counts) replaces ~14 row-fetch queries plus
+    // two hidden-id lookups. Exact counts, RLS-scoped server-side, so the page
+    // stops waiting on the slowest of a dozen scans before it can render.
+    const [{ data, error }, anRes] = await Promise.all([
+      (supabase as any).rpc("get_inbox_counts"),
       // Pending AN generation — super_admin only; it exposes document-gated AN rows.
       isSuperAdmin
         ? supabase.rpc("list_pending_an_generation")
-        : Promise.resolve({ count: 0 }),
-
-      // Offer letter edit requests — super_admin only (they alone can decide)
-      isSuperAdmin
-        ? supabase
-            .from("offer_letter_edit_requests" as any)
-            .select("id, offer_letters(lead_id)")
-            .eq("status", "pending")
-        : Promise.resolve({ count: 0 }),
-
-      // HR document approvals — super_admin only
-      isSuperAdmin
-        ? supabase
-            .from("hr_letters" as any)
-            .select("id")
-            .eq("status", "pending_approval")
-        : Promise.resolve({ count: 0 }),
+        : Promise.resolve({ data: [] as unknown[] }),
+      // Offer letter edit requests — super_admin only (they alone can decide);
+      // counted by get_inbox_counts() alongside every other queue.
     ]);
 
-    const get = (i: number) => {
-      const r = results[i];
-      if (r.status === "fulfilled") return (r.value as any).count ?? (r.value as any).data?.length ?? 0;
-      return 0;
-    };
-    const rowsOf = (i: number): any[] => {
-      const r = results[i];
-      if (r.status !== "fulfilled") return [];
-      return (r.value as any)?.data || [];
-    };
-
-    const waiverRows = rowsOf(0);
-    const abvmuRows = rowsOf(1);
-    const offerApprovalRows = rowsOf(2);
-    const contactRows = rowsOf(3);
-    const applicationRows = rowsOf(4);
-    const concessionRows = rowsOf(10);
-    const offerEditRows = rowsOf(12);
-
-    const hiddenLeads = await fetchHiddenLeadIds([
-      ...waiverRows.map(nestedOfferLeadId),
-      ...abvmuRows.map((r) => r.lead_id),
-      ...offerApprovalRows.map((r) => r.lead_id),
-      ...applicationRows.map((r) => r.lead_id),
-      ...offerEditRows.map(nestedOfferLeadId),
-    ]);
-    const hiddenStudents = await fetchHiddenStudentIds([
-      ...contactRows.map((r) => r.student_id),
-      ...concessionRows.map((r) => r.student_id),
-    ]);
-
+    if (error) {
+      toast({ title: "Couldn't load inbox counts", description: error.message, variant: "destructive" });
+    }
+    const c = (data || {}) as Record<string, number | undefined>;
+    const n = (key: string) => Number(c[key] || 0);
     setCounts({
-      offer_waivers: waiverRows.filter((r) => {
-        const leadId = nestedOfferLeadId(r);
-        return leadId && !hiddenLeads.has(leadId);
-      }).length,
-      abvmu_deposits: abvmuRows.filter((r) => r.lead_id && !hiddenLeads.has(r.lead_id)).length,
-      offer_approvals: offerApprovalRows.filter((r) => r.lead_id && !hiddenLeads.has(r.lead_id)).length,
-      contact_changes: contactRows.filter((r) => r.student_id && !hiddenStudents.has(r.student_id)).length,
-      applications: applicationRows.filter((r) => !r.lead_id || !hiddenLeads.has(r.lead_id)).length,
-      followups: get(5),
-      whatsapp: get(6),
-      video_approvals: get(7),
-      voice_messages: get(8),
-      certificate_approvals: get(9),
-      fee_concessions: concessionRows.filter((r) => r.student_id && !hiddenStudents.has(r.student_id)).length,
-      pending_an_generation: get(11),
-      offer_edits: offerEditRows.filter((r) => {
-        const leadId = nestedOfferLeadId(r);
-        return leadId && !hiddenLeads.has(leadId);
-      }).length,
-      hr_document_approvals: get(13),
+      offer_waivers: n("offer_waivers"),
+      fee_concessions: n("fee_concessions"),
+      abvmu_deposits: n("abvmu_deposits"),
+      offer_approvals: n("offer_approvals"),
+      offer_edits: n("offer_edits"),
+      certificate_approvals: n("certificate_approvals"),
+      hr_document_approvals: n("hr_document_approvals"),
+      pending_an_generation: Array.isArray((anRes as any)?.data) ? (anRes as any).data.length : 0,
+      contact_changes: n("contact_changes"),
+      applications: n("applications"),
+      followups: n("followups"),
+      whatsapp: n("whatsapp"),
+      video_approvals: n("video_approvals"),
+      voice_messages: n("voice_messages"),
     });
     setCountsLoaded(true);
-  }, [isSuperAdmin, isPrincipal, isApprover, isAdmissions]);
+  }, [isSuperAdmin, toast]);
 
   useEffect(() => {
     fetchCounts();
@@ -922,7 +797,7 @@ export default function Inbox() {
           .select(`
             id, student_id, type, value, reason, created_at,
             students:student_id(name, admission_no, pre_admission_no, login_disabled, archived_at, deleted_at),
-            fee_ledger:fee_ledger_id(term, total_amount, fee_codes:fee_code_id(code, name)),
+            fee_ledger:fee_ledger_id(term, total_amount, concession, paid_amount, balance, due_date, fee_codes:fee_code_id(code, name)),
             requester:requested_by(display_name)
           `)
           .in("status", ["pending_principal", "pending_super_admin"])
@@ -936,8 +811,13 @@ export default function Inbox() {
             student_name: c.students?.name || "—",
             admission_no: c.students?.admission_no || c.students?.pre_admission_no || null,
             fee_code: c.fee_ledger?.fee_codes?.code || null,
+            fee_name: c.fee_ledger?.fee_codes?.name || null,
             term: c.fee_ledger?.term || null,
             fee_total: c.fee_ledger?.total_amount ?? null,
+            fee_concession: Number(c.fee_ledger?.concession || 0),
+            fee_paid: Number(c.fee_ledger?.paid_amount || 0),
+            fee_balance: c.fee_ledger?.balance ?? null,
+            fee_due_date: c.fee_ledger?.due_date ?? null,
             type: c.type,
             value: Number(c.value),
             reason: c.reason,
@@ -1691,13 +1571,23 @@ export default function Inbox() {
 
     if (selected === "fee_concessions") {
       const c = item as FeeConcessionItem;
+      const s = summarizeConcessionLedger({
+        total: c.fee_total,
+        existing: c.fee_concession,
+        type: c.type,
+        value: c.value,
+        paid: c.fee_paid,
+      });
       return (
         <button key={c.id} className={baseClass} onClick={() => setSelectedItem(c)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{c.student_name}</p>
               <p className="text-xs text-muted-foreground truncate">
-                {c.fee_code || "Fee"} · {c.type === "flat" ? fmtINR(c.value) : `${c.value}%`}
+                {c.fee_code || "Fee"} · {c.type === "percentage" ? `${c.value}% → ` : ""}−{fmtINR(s.requested)}
+              </p>
+              <p className="text-[11px] text-muted-foreground/80 truncate">
+                net after waiver {fmtINR(s.netAfterWaiver)}
               </p>
             </div>
             <span className="text-[10px] text-warning-foreground font-medium shrink-0">Pending</span>
@@ -2188,9 +2078,13 @@ export default function Inbox() {
 
     if (selected === "fee_concessions") {
       const c = selectedItem as FeeConcessionItem;
-      const effective = c.type === "flat"
-        ? c.value
-        : Math.round(((c.fee_total || 0) * c.value) / 100);
+      const s = summarizeConcessionLedger({
+        total: c.fee_total,
+        existing: c.fee_concession,
+        type: c.type,
+        value: c.value,
+        paid: c.fee_paid,
+      });
       return (
         <div className="p-5 space-y-5">
           <div>
@@ -2198,21 +2092,46 @@ export default function Inbox() {
             {c.admission_no && <p className="text-sm text-muted-foreground font-mono">{c.admission_no}</p>}
           </div>
 
-          <div className="rounded-xl border border-border bg-card divide-y divide-border">
-            <Row label="Fee Head" value={`${c.fee_code || "—"}${c.term ? ` · ${c.term}` : ""}`} />
-            <Row label="Fee Amount" value={fmtINR(c.fee_total)} />
-            <Row label="Concession" value={c.type === "flat" ? fmtINR(c.value) : `${c.value}%`} />
-            <Row label="Reduces Balance By" value={fmtINR(effective)} highlight />
-            <Row label="Requested By" value={c.requested_by_name || "—"} />
-            <Row label="Requested On" value={fmtDate(c.created_at)} />
+          {/* The exact ledger item the waiver lands on, with the waiver applied
+              line by line: fee, what is already waived, this request, and the
+              net payable after it. */}
+          <div>
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Fee ledger item</p>
+            <div className="overflow-hidden rounded-xl border border-border bg-card">
+              <div className="border-b border-border bg-muted/40 px-4 py-2.5">
+                <p className="text-sm font-medium text-foreground">
+                  {c.fee_code || "Fee Head"}{c.fee_name ? ` · ${c.fee_name}` : ""}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {c.term ? feeTermLabel(c.term) : "—"}{c.fee_due_date ? ` · due ${fmtDate(c.fee_due_date)}` : ""}
+                </p>
+              </div>
+              <div className="divide-y divide-border">
+                <Row label="Fee amount" value={fmtINR(s.total)} />
+                {s.existing > 0 && <Row label="Already waived" value={`−${fmtINR(s.existing)}`} />}
+                <Row label="This request" value={`−${fmtINR(s.requested)}`} />
+                <Row label="Net payable after waiver" value={fmtINR(s.netAfterWaiver)} highlight />
+                {s.paid > 0 && <Row label="Already paid" value={fmtINR(s.paid)} />}
+                {c.fee_balance != null && <Row label="Balance now" value={fmtINR(c.fee_balance)} />}
+                <Row label="Balance after waiver" value={fmtINR(s.projectedBalance)} />
+              </div>
+            </div>
           </div>
 
-          {c.reason && (
-            <div className="rounded-xl border border-border bg-muted/30 p-3">
-              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Reason</p>
-              <p className="mt-1 text-sm text-foreground">{c.reason}</p>
-            </div>
-          )}
+          <div className="rounded-xl border border-border bg-muted/30 p-3">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Concession requested</p>
+            <p className="mt-1 text-sm text-foreground">
+              {c.type === "flat"
+                ? fmtINR(s.requested)
+                : `${c.value}% of ${fmtINR(s.total)} = ${fmtINR(s.requested)}`}
+              <span className="text-muted-foreground"> off this head</span>
+            </p>
+            <p className="mt-2.5 text-[10px] uppercase tracking-wide text-muted-foreground">Reason</p>
+            <p className="mt-1 text-sm text-foreground">{c.reason || "—"}</p>
+            <p className="mt-2.5 text-[11px] text-muted-foreground">
+              Requested by {c.requested_by_name || "—"} · {fmtDate(c.created_at)}
+            </p>
+          </div>
 
           <div className="flex gap-2">
             <Button
@@ -2718,15 +2637,24 @@ export default function Inbox() {
           <div className="mt-4 grid grid-cols-2 gap-2">
             <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
               <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Open</p>
-              <p className="mt-0.5 text-lg font-semibold text-foreground">{totalVisibleCount}</p>
+              <p className="mt-0.5 text-lg font-semibold text-foreground">
+                {countsLoading ? <OrbLoader state="searching" size={20} /> : totalVisibleCount}
+              </p>
             </div>
             <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
               <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Selected</p>
-              <p className="mt-0.5 text-lg font-semibold text-foreground">{selectedDisplayCount}</p>
+              <p className="mt-0.5 text-lg font-semibold text-foreground">
+                {countsLoading ? <OrbLoader state="searching" size={20} /> : selectedDisplayCount}
+              </p>
             </div>
           </div>
         </div>
         <nav className="flex-1 overflow-y-auto p-3 space-y-1.5">
+          {countsLoading && (
+            <div className="flex h-24 items-center justify-center">
+              <OrbLoader state="searching" />
+            </div>
+          )}
           {countsLoaded && visibleCategories.length === 0 && (
             <p className="px-3 py-3 text-xs text-muted-foreground">No open inbox items</p>
           )}
@@ -2818,7 +2746,7 @@ export default function Inbox() {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto bg-background/60">
-          {loading && items.length === 0 ? (
+          {countsLoading || (loading && items.length === 0) ? (
             <div className="flex h-40 items-center justify-center">
               <OrbLoader state="searching" />
             </div>
