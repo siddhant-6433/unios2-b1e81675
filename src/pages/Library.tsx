@@ -170,6 +170,29 @@ type DigitizationRecord = {
   created_at: string;
 };
 
+type DigitizationSummary = {
+  total: number;
+  pending: number;
+  captured: number;
+  matched: number;
+  needs_review: number;
+  approved: number;
+  duplicate: number;
+  rejected: number;
+  enriched: number;
+  no_match: number;
+  not_tried: number;
+  missing_cover: number;
+};
+
+type LibraryHold = {
+  id: string;
+  book_id: string;
+  member_id: string;
+  status: string;
+  created_at: string;
+};
+
 type DigitizationReviewEdit = {
   accession_no: string;
   title: string;
@@ -277,7 +300,7 @@ function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
 
 const Library = () => {
   const { user, role } = useAuth();
-  const { can } = usePermissions();
+  const { can, loading: permissionsLoading } = usePermissions();
   const { campuses, selectedCampusId: globalCampusId, selectedCampusName: globalCampusName } = useCampus();
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -290,7 +313,28 @@ const Library = () => {
   const canManageSettings = can("library", "manage_settings");
   const canCreateLibrary = role === "super_admin" || role === "campus_admin" || role === "principal";
   const canExport = can("library", "export");
-  const isPatronOnly = !canCatalog && !canCirculate && !canInventory && !canDigitize;
+  const isSuperAdmin = role === "super_admin";
+  const isOversightRole = role === "campus_admin" || role === "principal";
+  // Faculty/teacher (and any role with only `library:view`) get the patron
+  // discovery experience, not the staff console.
+  const isPatronOnly = !canCatalog && !canCirculate && !canInventory && !canDigitize
+    && !canManageSettings && !canExport && !isSuperAdmin && !isOversightRole;
+  // Only surface the tabs a role can actually use. Principals keep read oversight
+  // of the queue; faculty/students get the patron view instead of the console.
+  const tabVisibility: Record<string, boolean> = {
+    dashboard: true,
+    catalog: true,
+    circulation: canCirculate,
+    inventory: canInventory,
+    digitization: canDigitize || isOversightRole || isSuperAdmin,
+    authors: canCatalog,
+    publishers: canCatalog,
+    members: canCirculate || canManageSettings || isSuperAdmin,
+    reports: canExport || isSuperAdmin,
+    settings: canManageSettings || isSuperAdmin,
+  };
+  const visibleTabs = tabKeys.filter((key) => tabVisibility[key]);
+  const effectiveTab = visibleTabs.includes(activeTab) ? activeTab : (visibleTabs[0] || "dashboard");
 
   const [loading, setLoading] = useState(true);
   const initializedRef = useRef(false);
@@ -299,6 +343,15 @@ const Library = () => {
   const [loans, setLoans] = useState<LibraryLoan[]>([]);
   const [members, setMembers] = useState<LibraryMember[]>([]);
   const [digitization, setDigitization] = useState<DigitizationRecord[]>([]);
+  const [digitizationSummary, setDigitizationSummary] = useState<DigitizationSummary | null>(null);
+  const [queueHasMore, setQueueHasMore] = useState(false);
+  const [queuePage, setQueuePage] = useState(0);
+  const [queueStatus, setQueueStatus] = useState<"pending" | "all" | "approved" | "duplicate" | "rejected">("pending");
+  const [queueSearchInput, setQueueSearchInput] = useState("");
+  const [queueSearch, setQueueSearch] = useState("");
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [holds, setHolds] = useState<LibraryHold[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [branches, setBranches] = useState<LibraryBranch[]>([]);
@@ -344,13 +397,15 @@ const Library = () => {
   const [publisherEntities, setPublisherEntities] = useState<{ id: string; name: string; normalized_name: string }[]>([]);
   const [enrichCron, setEnrichCron] = useState<{ enabled: boolean; minutes: number }>({ enabled: false, minutes: 30 });
   const [bulkEnrich, setBulkEnrich] = useState<{ done: number; total: number } | null>(null);
+  const [bulkApprove, setBulkApprove] = useState<{ approved: number; failed: number; remaining: number } | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
 
   const fetchLibrary = async () => {
     // Only show the full-page loader on first load; refetches after an action stay silent so the
     // page doesn't unmount/remount (which would reset the scroll position to the top).
     if (!initializedRef.current) setLoading(true);
-    const [institutionRes, courseRes, branchRes, branchCourseRes, settingsRes, assignmentRes, bookRes, itemRes, loanRes, memberRes, digitizationRes, roleRes, pubEntityRes, branchInstRes] = await Promise.all([
+    try {
+    const [institutionRes, courseRes, branchRes, branchCourseRes, settingsRes, assignmentRes, bookRes, itemRes, loanRes, memberRes, holdsRes, roleRes, pubEntityRes, branchInstRes] = await Promise.all([
       (supabase as any).from("institutions").select("id, name, code, campus_id, type").order("name"),
       (supabase as any).from("courses").select("id, name, code, department_id, departments(institution_id)").eq("is_active", true).order("name"),
       (supabase as any).from("library_branches").select("*").order("name"),
@@ -369,7 +424,7 @@ const Library = () => {
         .order("issued_at", { ascending: false })
         .limit(200),
       (supabase as any).from("library_members").select("*").order("display_name").limit(200),
-      (supabase as any).from("library_digitization_records").select("*").order("created_at", { ascending: false }).limit(200),
+      (supabase as any).from("library_holds").select("id, book_id, member_id, status, created_at").order("created_at", { ascending: false }).limit(200),
       (supabase as any).from("user_roles").select("user_id, role").eq("role", "librarian"),
       (supabase as any).from("library_publishers").select("id, name, normalized_name").order("name").limit(2000),
       (supabase as any).from("library_branch_institutions").select("branch_id, institution_id"),
@@ -385,7 +440,7 @@ const Library = () => {
     if (itemRes.data) setItems(itemRes.data);
     if (loanRes.data) setLoans(loanRes.data);
     if (memberRes.data) setMembers(memberRes.data);
-    if (digitizationRes.data) setDigitization(digitizationRes.data);
+    if (holdsRes.data) setHolds(holdsRes.data);
     if (pubEntityRes.data) setPublisherEntities(pubEntityRes.data);
     if (branchInstRes.data) setBranchInstitutions(branchInstRes.data);
     const librarianUserIds = (roleRes.data || []).map((row: any) => row.user_id).filter(Boolean);
@@ -402,7 +457,14 @@ const Library = () => {
       setStaffProfiles([]);
     }
     initializedRef.current = true;
-    setLoading(false);
+    setLoadError(null);
+    } catch (err: any) {
+      console.error("Library load failed", err);
+      setLoadError(err?.message || "Could not load library data.");
+      initializedRef.current = true;
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -428,10 +490,13 @@ const Library = () => {
   }, [institutions, libraryCampusId]);
 
   const isLibraryAdministrator = role === "super_admin" || role === "campus_admin" || role === "principal";
-  const assignmentScopedUser = role === "librarian" && !isLibraryAdministrator;
   const myAssignedBranchIds = useMemo(() => {
     return new Set(staffAssignments.filter((assignment) => assignment.user_id === user?.id && assignment.active).map((assignment) => assignment.branch_id));
   }, [staffAssignments, user?.id]);
+  // A librarian is scoped to their explicit assignments *only when they have some*.
+  // Otherwise they fall back to their campus (mirrors the SQL role fallback), so a
+  // freshly-created librarian account can operate without an admin pre-assigning them.
+  const assignmentScopedUser = role === "librarian" && !isLibraryAdministrator && myAssignedBranchIds.size > 0;
 
   const visibleBranches = useMemo(() => {
     return branches.filter((branch) => {
@@ -452,6 +517,13 @@ const Library = () => {
     });
   }, [assignmentScopedUser, branches, libraryCampusId, myAssignedBranchIds]);
 
+  // Server-side queue scope: one library when explicitly selected, else every
+  // library visible under the campus/institution/assignment filters.
+  const queueBranchIds = useMemo(
+    () => (selectedBranchId ? [selectedBranchId] : visibleBranches.map((branch) => branch.id)),
+    [selectedBranchId, visibleBranches],
+  );
+
   useEffect(() => {
     if (selectedInstitutionId && !visibleInstitutions.some((institution) => institution.id === selectedInstitutionId)) {
       setSelectedInstitutionId("");
@@ -464,10 +536,65 @@ const Library = () => {
     }
   }, [selectableBranches, selectedBranchId]);
 
+  // Digitization records are paged + filtered on the server: a register import can
+  // be thousands of rows, so the old "fetch 200 and filter in the browser" approach
+  // silently hid (and made unapprovable) most of the queue.
+  const QUEUE_PAGE_SIZE = 25;
+  const fetchDigitization = async () => {
+    setQueueLoading(true);
+    try {
+      const branchIds = queueBranchIds;
+      const statuses = queueStatus === "pending"
+        ? ["captured", "matched", "needs_review"]
+        : queueStatus === "all"
+          ? null
+          : [queueStatus];
+      const [rowsRes, summaryRes] = await Promise.all([
+        (supabase as any).rpc("library_list_digitization_records", {
+          _branch_ids: branchIds,
+          _statuses: statuses,
+          _enrichment: enrichFilter,
+          _search: queueSearch || null,
+          _limit: QUEUE_PAGE_SIZE,
+          _offset: queuePage * QUEUE_PAGE_SIZE,
+        }),
+        (supabase as any).rpc("library_digitization_summary", { _branch_ids: branchIds }),
+      ]);
+      if (rowsRes.error) throw rowsRes.error;
+      if (summaryRes.error) throw summaryRes.error;
+      const rows = (rowsRes.data || []) as DigitizationRecord[];
+      setDigitization(rows);
+      setQueueHasMore(rows.length === QUEUE_PAGE_SIZE);
+      setDigitizationSummary((summaryRes.data?.[0] as DigitizationSummary) || null);
+      setSelectedDigitization(new Set());
+    } catch (err: any) {
+      setDigitization([]);
+      setQueueHasMore(false);
+      toast({ title: "Could not load digitization queue", description: err?.message, variant: "destructive" });
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
+  // Debounce the queue search box so we don't hit the server on every keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setQueueSearch(queueSearchInput);
+      setQueuePage(0);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [queueSearchInput]);
+
+  const queueBranchKey = queueBranchIds.join(",");
+  useEffect(() => {
+    if (loading) return;
+    fetchDigitization();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, queueBranchKey, queueStatus, enrichFilter, queueSearch, queuePage]);
+
   // Load the enrichment cron status when a super admin opens Settings.
   useEffect(() => {
     if (activeTab === "settings" && role === "super_admin") fetchEnrichCron();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, role]);
 
 
@@ -636,31 +763,16 @@ const Library = () => {
     if (selectedBranchId && item.branch_id !== selectedBranchId) return false;
     return true;
   });
-  const filteredDigitization = digitization.filter((record) => {
-    if (selectedBranchId) return record.branch_id === selectedBranchId;
-    if (!record.branch_id) return true;
-    const branch = branches.find((row) => row.id === record.branch_id);
-    if (!branch) return false;
-    if (libraryCampusId !== "all" && branch.campus_id !== libraryCampusId) return false;
-    if (selectedInstitutionId && branch.institution_id !== selectedInstitutionId) return false;
-    if (assignmentScopedUser && !myAssignedBranchIds.has(branch.id)) return false;
-    return true;
-  });
+  // The queue page is already scoped + filtered by the server RPC.
+  const filteredDigitization = digitization;
   const activeLoans = visibleLoans.filter((loan) => loan.status === "active" || loan.status === "overdue");
   const overdueLoans = activeLoans.filter((loan) => isBefore(new Date(`${loan.due_on}T00:00:00`), today));
   const dueTodayLoans = activeLoans.filter((loan) => loan.due_on === format(today, "yyyy-MM-dd"));
   const scopedBookIds = new Set(filteredItems.map((item) => item.book_id));
   const lowCopyTitles = books.filter((book) => scopedBookIds.has(book.id) && filteredItems.filter((item) => item.book_id === book.id && item.status === "available").length === 0);
   const damagedOrLost = filteredItems.filter((item) => item.status === "damaged" || item.status === "lost");
-  const pendingDigitization = filteredDigitization.filter((record) => ["captured", "matched", "needs_review"].includes(record.status));
-  // Review queue after applying the auto-fetch filter (the visible/selectable list).
-  const reviewList = filteredDigitization.filter((r) => {
-    if (enrichFilter === "enriched") return r.enrichment_status === "enriched";
-    if (enrichFilter === "no_match") return r.enrichment_status === "no_match";
-    if (enrichFilter === "not_tried") return !r.enrichment_status;
-    if (enrichFilter === "missing_cover") return !r.cover_image_url;
-    return true;
-  });
+  const pendingDigitization = digitizationSummary?.pending ?? 0;
+  const reviewList = filteredDigitization;
 
   const requireLibraryScope = () => {
     if (!scopeReady) {
@@ -1007,7 +1119,14 @@ const Library = () => {
     try {
       const branchId = await ensureDefaultBranch();
       const isbn = normalizeIsbn(digitizeForm.isbn || digitizeForm.scanned_barcode);
-      const duplicateReason = findDuplicateReason({ isbn, barcode: digitizeForm.scanned_barcode, branchId });
+      let duplicateReason = findDuplicateReason({ isbn, barcode: digitizeForm.scanned_barcode, branchId });
+      if (!duplicateReason && digitizeForm.scanned_barcode.trim()) {
+        const { data } = await (supabase as any).rpc("library_existing_accessions", {
+          _branch_id: branchId,
+          _accessions: [digitizeForm.scanned_barcode.trim()],
+        });
+        if ((data || []).length) duplicateReason = "Barcode already imported or catalogued";
+      }
       if (duplicateReason && !window.confirm(`${duplicateReason}.\n\nCapture it anyway (it will be flagged as a duplicate)?`)) {
         setSaving(null);
         return;
@@ -1036,6 +1155,7 @@ const Library = () => {
       toast({ title: duplicateReason ? "Captured as duplicate" : "Digitization record captured", description: duplicateReason || (Object.keys(suggested).length ? "Metadata matched and queued for review." : "Queued for librarian review.") });
       setDigitizeForm({ isbn: "", scanned_barcode: "", source: "barcode", raw_ocr_text: "" });
       fetchLibrary();
+      fetchDigitization();
     } catch (err: any) {
       toast({ title: "Digitization failed", description: err.message, variant: "destructive" });
     } finally {
@@ -1082,6 +1202,21 @@ const Library = () => {
         .single();
       if (batchError) throw batchError;
 
+      // Ask the server which accessions already exist (staging or catalog) for this
+      // branch, so re-importing a register can't create thousands of duplicates the
+      // way the Nursing register was imported twice.
+      const accessionCandidates = Array.from(new Set(
+        filled.map((row) => cell(row, "accession")).filter(Boolean),
+      ));
+      const existingAccessions = new Set<string>();
+      for (let i = 0; i < accessionCandidates.length; i += 500) {
+        const { data } = await (supabase as any).rpc("library_existing_accessions", {
+          _branch_id: branchId,
+          _accessions: accessionCandidates.slice(i, i + 500),
+        });
+        (data || []).forEach((value: string) => existingAccessions.add(String(value).toLowerCase()));
+      }
+
       const records = [];
       const seen = emptySeen();
       let dupCount = 0;
@@ -1092,7 +1227,10 @@ const Library = () => {
         if (!accession && !title && !author) continue; // skip blank/spacer rows
         const isbn = normalizeIsbn(cell(row, "isbn"));
         const barcode = cell(row, "barcode") || null;
-        const duplicateReason = findDuplicateReason({ isbn, accession, barcode, branchId }, seen);
+        let duplicateReason = findDuplicateReason({ isbn, accession, barcode, branchId }, seen);
+        if (!duplicateReason && accession && existingAccessions.has(accession.trim().toLowerCase())) {
+          duplicateReason = "Accession already imported or catalogued";
+        }
         if (duplicateReason) dupCount += 1;
         rememberSeen(seen, { isbn, accession, barcode });
         // ISBN-less registers never hit the network; only look up when an ISBN is present.
@@ -1152,6 +1290,7 @@ const Library = () => {
       }
       toast({ title: "Import queued", description: `${records.length} book rows added${dupCount ? `, ${dupCount} flagged as duplicates` : ""}.` });
       fetchLibrary();
+      fetchDigitization();
     } catch (err: any) {
       toast({ title: "Library import failed", description: err.message, variant: "destructive" });
     } finally {
@@ -1210,6 +1349,7 @@ const Library = () => {
         return next;
       });
       fetchLibrary();
+      fetchDigitization();
     } catch (err: any) {
       toast({ title: "Approval failed", description: err.message, variant: "destructive" });
     } finally {
@@ -1227,7 +1367,7 @@ const Library = () => {
       });
       if (error) throw error;
       toast({ title: "Record rejected" });
-      fetchLibrary();
+      fetchDigitization();
     } catch (err: any) {
       toast({ title: "Reject failed", description: err.message, variant: "destructive" });
     } finally {
@@ -1246,7 +1386,7 @@ const Library = () => {
       });
       if (error) throw error;
       toast({ title: "Record marked duplicate" });
-      fetchLibrary();
+      fetchDigitization();
     } catch (err: any) {
       toast({ title: "Duplicate update failed", description: err.message, variant: "destructive" });
     } finally {
@@ -1327,6 +1467,7 @@ const Library = () => {
       setReviewEdits((cur) => ({ ...cur, [record.id]: { ...reviewEdit(record), ...res.overlay } }));
       toast({ title: "Enriched from web", description: `${res.filled} field(s) filled${res.cover ? " + cover" : ""}.` });
       fetchLibrary();
+      fetchDigitization();
     } catch (err: any) {
       toast({ title: "Auto-fill failed", description: err.message, variant: "destructive" });
     } finally {
@@ -1357,9 +1498,11 @@ const Library = () => {
       }
       toast({ title: "Bulk enrich complete", description: `${matched}/${queue.length} matched · ${filledFields} fields filled · ${covers} covers.` });
       fetchLibrary();
+      fetchDigitization();
     } catch (err: any) {
       toast({ title: "Bulk enrich stopped", description: err.message, variant: "destructive" });
       fetchLibrary();
+      fetchDigitization();
     } finally {
       setBulkEnrich(null);
     }
@@ -1414,7 +1557,7 @@ const Library = () => {
       });
       if (error || !data?.ok) throw new Error(data?.error || error?.message || "Upload failed");
       toast({ title: "Cover uploaded" });
-      fetchLibrary();
+      fetchDigitization();
     } catch (err: any) {
       toast({ title: "Cover upload failed", description: err.message, variant: "destructive" });
     } finally {
@@ -1443,8 +1586,98 @@ const Library = () => {
       toast({ title: `${deleted} record(s) deleted`, description: deleted < ids.length ? `${ids.length - deleted} skipped (no access)` : undefined });
       setSelectedDigitization(new Set());
       fetchLibrary();
+      fetchDigitization();
     } catch (err: any) {
       toast({ title: "Delete failed", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  // Flag repeat / already-catalogued accessions so the pending queue is clean
+  // before a bulk approval run.
+  const handleMarkDuplicates = async () => {
+    if (!canDigitize) return;
+    setSaving("mark-dupes");
+    try {
+      const { data, error } = await (supabase as any).rpc("library_mark_duplicate_accessions", {
+        _branch_ids: queueBranchIds,
+      });
+      if (error) throw error;
+      const marked = Number(data ?? 0);
+      toast({
+        title: marked ? `${marked} duplicate row(s) flagged` : "No duplicates found",
+        description: marked ? "They now sit under the Duplicate filter." : "Every pending accession is unique.",
+      });
+      fetchDigitization();
+      fetchLibrary();
+    } catch (err: any) {
+      toast({ title: "Duplicate scan failed", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  // Approve in server-sized batches (each batch mints catalog titles + accessions).
+  // `ids` null means "everything pending in the current view".
+  const runBulkApprove = async (ids: string[] | null) => {
+    if (!canCatalog && !isOversightRole && !isSuperAdmin) return;
+    setSaving("bulk-approve");
+    setBulkApprove({ approved: 0, failed: 0, remaining: ids ? ids.length : pendingDigitization });
+    let approved = 0;
+    let failed = 0;
+    let remaining = 0;
+    let guard = 0;
+    try {
+      if (!ids) {
+        // Clean the queue first so duplicate accessions don't burn approval attempts.
+        await (supabase as any).rpc("library_mark_duplicate_accessions", {
+          _branch_ids: queueBranchIds,
+        });
+      }
+      do {
+        const { data, error } = await (supabase as any).rpc("library_bulk_approve_digitization", {
+          _record_ids: ids,
+          _branch_ids: ids ? null : queueBranchIds,
+          _batch_id: null,
+          _limit: 50,
+        });
+        if (error) throw error;
+        const row = Array.isArray(data) ? data[0] : data;
+        const batchApproved = Number(row?.approved ?? 0);
+        const batchFailed = Number(row?.failed ?? 0);
+        approved += batchApproved;
+        failed += batchFailed;
+        remaining = Number(row?.remaining ?? 0);
+        setBulkApprove({ approved, failed, remaining });
+        if (batchApproved === 0 && batchFailed === 0) break;
+        guard += 1;
+      } while (remaining > 0 && guard < 500);
+      toast({
+        title: `${approved} book(s) approved to catalog`,
+        description: `${failed ? `${failed} skipped · ` : ""}${remaining} still pending. Accessions were generated from the register.`,
+      });
+      setSelectedDigitization(new Set());
+      await fetchLibrary();
+      await fetchDigitization();
+    } catch (err: any) {
+      toast({ title: "Bulk approval failed", description: err.message, variant: "destructive" });
+      fetchDigitization();
+    } finally {
+      setBulkApprove(null);
+      setSaving(null);
+    }
+  };
+
+  const handlePlaceHold = async (bookId: string) => {
+    setSaving(`hold-${bookId}`);
+    try {
+      const { error } = await (supabase as any).rpc("library_place_hold", { _book_id: bookId });
+      if (error) throw error;
+      toast({ title: "Hold placed", description: "The library will set this title aside when a copy is free." });
+      fetchLibrary();
+    } catch (err: any) {
+      toast({ title: "Could not place hold", description: err.message, variant: "destructive" });
     } finally {
       setSaving(null);
     }
@@ -1494,8 +1727,23 @@ const Library = () => {
     printWindow.document.close();
   };
 
-  if (loading) {
+  if (loading || permissionsLoading) {
     return <PageLoader />;
+  }
+
+  if (isPatronOnly) {
+    return (
+      <PatronLibrary
+        role={role}
+        items={filteredItems}
+        loans={visibleLoans}
+        holds={holds}
+        query={query}
+        setQuery={setQuery}
+        saving={saving}
+        onHold={handlePlaceHold}
+      />
+    );
   }
 
   return (
@@ -1510,6 +1758,13 @@ const Library = () => {
           <Button variant="outline" size="sm" onClick={fetchLibrary}><RefreshCw className="mr-2 h-4 w-4" /> Refresh</Button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          <span>Could not load library data: {loadError}</span>
+          <Button variant="outline" size="sm" onClick={fetchLibrary}>Retry</Button>
+        </div>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(360px,0.9fr)]">
         <Card>
@@ -1603,7 +1858,7 @@ const Library = () => {
                 <div className="flex flex-wrap gap-2 text-xs">
                   <Badge variant="outline">{filteredItems.length} copies</Badge>
                   <Badge variant="outline">{activeLoans.length} active loans</Badge>
-                  <Badge variant="outline">{pendingDigitization.length} pending digitization</Badge>
+                  <Badge variant="outline">{pendingDigitization} pending digitization</Badge>
                   {selectedBranchId && <Badge variant="outline">{selectedBranchCourseCount} courses enabled</Badge>}
                 </div>
               </div>
@@ -1653,18 +1908,18 @@ const Library = () => {
         )}
       </div>
 
-      <Tabs value={activeTab} onValueChange={(tab) => setSearchParams({ tab })} className="space-y-4">
+      <Tabs value={effectiveTab} onValueChange={(tab) => setSearchParams({ tab })} className="space-y-4">
         <TabsList className="flex h-auto flex-wrap justify-start">
-          <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-          <TabsTrigger value="catalog">Catalog</TabsTrigger>
-          <TabsTrigger value="circulation">Issue / Return</TabsTrigger>
-          <TabsTrigger value="inventory">Inventory</TabsTrigger>
-          <TabsTrigger value="digitization">Digitization</TabsTrigger>
-          <TabsTrigger value="authors">Authors</TabsTrigger>
-          <TabsTrigger value="publishers">Publishers</TabsTrigger>
-          <TabsTrigger value="members">Members</TabsTrigger>
-          <TabsTrigger value="reports">Reports</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
+          {tabVisibility.dashboard && <TabsTrigger value="dashboard">Dashboard</TabsTrigger>}
+          {tabVisibility.catalog && <TabsTrigger value="catalog">Catalog</TabsTrigger>}
+          {tabVisibility.circulation && <TabsTrigger value="circulation">Issue / Return</TabsTrigger>}
+          {tabVisibility.inventory && <TabsTrigger value="inventory">Inventory</TabsTrigger>}
+          {tabVisibility.digitization && <TabsTrigger value="digitization">Digitization</TabsTrigger>}
+          {tabVisibility.authors && <TabsTrigger value="authors">Authors</TabsTrigger>}
+          {tabVisibility.publishers && <TabsTrigger value="publishers">Publishers</TabsTrigger>}
+          {tabVisibility.members && <TabsTrigger value="members">Members</TabsTrigger>}
+          {tabVisibility.reports && <TabsTrigger value="reports">Reports</TabsTrigger>}
+          {tabVisibility.settings && <TabsTrigger value="settings">Settings</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="dashboard" className="space-y-4">
@@ -1672,7 +1927,7 @@ const Library = () => {
             <StatCard title="Active Loans" value={activeLoans.length} icon={BookOpen} />
             <StatCard title="Overdue" value={overdueLoans.length} icon={AlertTriangle} tone="danger" />
             <StatCard title="Due Today" value={dueTodayLoans.length} icon={Clock} />
-            <StatCard title="Pending Digitization" value={pendingDigitization.length} icon={FileSearch} />
+            <StatCard title="Pending Digitization" value={pendingDigitization} icon={FileSearch} />
             <StatCard title="Catalog Titles" value={scopedBookIds.size} icon={LibraryIcon} />
             <StatCard title="Physical Copies" value={filteredItems.length} icon={Barcode} />
             <StatCard title="No Available Copy" value={lowCopyTitles.length} icon={Search} />
@@ -1841,25 +2096,68 @@ const Library = () => {
             </Card>
           </div>
           <Card>
-            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-              <CardTitle className="text-base">Review Queue</CardTitle>
-              {canDigitize && filteredDigitization.length > 0 && (
-                <div className="flex flex-wrap items-center gap-3">
-                  <select
-                    value={enrichFilter}
-                    onChange={(e) => { setEnrichFilter(e.target.value as typeof enrichFilter); setSelectedDigitization(new Set()); }}
-                    className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs text-foreground"
-                  >
-                    <option value="all">All ({filteredDigitization.length})</option>
-                    <option value="enriched">Auto-fetch ✓ ({filteredDigitization.filter((r) => r.enrichment_status === "enriched").length})</option>
-                    <option value="no_match">Auto-fetch failed ({filteredDigitization.filter((r) => r.enrichment_status === "no_match").length})</option>
-                    <option value="not_tried">Not tried ({filteredDigitization.filter((r) => !r.enrichment_status).length})</option>
-                    <option value="missing_cover">Missing cover ({filteredDigitization.filter((r) => !r.cover_image_url).length})</option>
-                  </select>
+            <CardHeader className="space-y-3">
+              <div className="flex flex-row flex-wrap items-center justify-between gap-3">
+                <CardTitle className="text-base">Review Queue</CardTitle>
+                <span className="text-xs text-muted-foreground">
+                  {digitizationSummary
+                    ? `${digitizationSummary.pending} pending · ${digitizationSummary.approved} approved · ${digitizationSummary.duplicate} duplicate`
+                    : "—"}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={queueStatus}
+                  onChange={(e) => { setQueueStatus(e.target.value as typeof queueStatus); setQueuePage(0); setSelectedDigitization(new Set()); }}
+                  className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+                >
+                  <option value="pending">Pending ({digitizationSummary?.pending ?? 0})</option>
+                  <option value="all">All ({digitizationSummary?.total ?? 0})</option>
+                  <option value="approved">Approved ({digitizationSummary?.approved ?? 0})</option>
+                  <option value="duplicate">Duplicate ({digitizationSummary?.duplicate ?? 0})</option>
+                  <option value="rejected">Rejected ({digitizationSummary?.rejected ?? 0})</option>
+                </select>
+                <select
+                  value={enrichFilter}
+                  onChange={(e) => { setEnrichFilter(e.target.value as typeof enrichFilter); setQueuePage(0); setSelectedDigitization(new Set()); }}
+                  className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+                >
+                  <option value="all">Any auto-fetch</option>
+                  <option value="enriched">Auto-fetch ✓ ({digitizationSummary?.enriched ?? 0})</option>
+                  <option value="no_match">Auto-fetch failed ({digitizationSummary?.no_match ?? 0})</option>
+                  <option value="not_tried">Not tried ({digitizationSummary?.not_tried ?? 0})</option>
+                  <option value="missing_cover">Missing cover ({digitizationSummary?.missing_cover ?? 0})</option>
+                </select>
+                <input
+                  value={queueSearchInput}
+                  onChange={(e) => setQueueSearchInput(e.target.value)}
+                  placeholder="Search title, author, accession, ISBN…"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground sm:w-64"
+                />
+                {canDigitize && (
+                  <Button type="button" variant="outline" size="sm" disabled={saving === "mark-dupes"} onClick={handleMarkDuplicates}>
+                    <AlertTriangle className="mr-2 h-4 w-4" />
+                    Flag duplicates
+                  </Button>
+                )}
+                {canDigitize && (
                   <Button type="button" variant="outline" size="sm" disabled={!!bulkEnrich} onClick={() => handleBulkEnrich(50)}>
                     {bulkEnrich ? <ButtonOrb state="working" /> : <FileSearch className="mr-2 h-4 w-4" />}
                     {bulkEnrich ? `Enriching ${bulkEnrich.done}/${bulkEnrich.total}…` : "Auto-fill next 50"}
                   </Button>
+                )}
+                {canCatalog && (
+                  <Button type="button" size="sm" disabled={!!bulkApprove || pendingDigitization === 0} onClick={() => runBulkApprove(null)}>
+                    {bulkApprove ? <ButtonOrb state="working" onFilled /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                    Approve all pending ({pendingDigitization})
+                  </Button>
+                )}
+                {canCatalog && selectedDigitization.size > 0 && (
+                  <Button type="button" size="sm" disabled={!!bulkApprove} onClick={() => runBulkApprove([...selectedDigitization])}>
+                    Approve selected ({selectedDigitization.size})
+                  </Button>
+                )}
+                {canDigitize && reviewList.length > 0 && (
                   <label className="flex items-center gap-2 text-xs text-muted-foreground">
                     <input
                       type="checkbox"
@@ -1868,18 +2166,26 @@ const Library = () => {
                       ref={(el) => { if (el) el.indeterminate = selectedDigitization.size > 0 && selectedDigitization.size < reviewList.length; }}
                       onChange={(e) => setSelectedDigitization(e.target.checked ? new Set(reviewList.map((r) => r.id)) : new Set())}
                     />
-                    Select all
+                    Select page
                   </label>
-                  <Button type="button" variant="destructive" size="sm" disabled={selectedDigitization.size === 0 || saving === "bulk-delete"} onClick={handleBulkDeleteDigitization}>
+                )}
+                {canDigitize && selectedDigitization.size > 0 && (
+                  <Button type="button" variant="destructive" size="sm" disabled={saving === "bulk-delete"} onClick={handleBulkDeleteDigitization}>
                     {saving === "bulk-delete" ? <ButtonOrb state="working" onFilled /> : <Trash2 className="mr-2 h-4 w-4" />}
-                    Delete selected{selectedDigitization.size > 0 ? ` (${selectedDigitization.size})` : ""}
+                    Delete selected
                   </Button>
+                )}
+              </div>
+              {bulkApprove && (
+                <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary">
+                  <ButtonOrb state="working" onFilled />
+                  Approving batches — {bulkApprove.approved} approved · {bulkApprove.failed} skipped · {bulkApprove.remaining} remaining
                 </div>
               )}
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {reviewList.length === 0 ? <EmptyRow text={filteredDigitization.length === 0 ? "No digitization records yet" : "No records match this filter"} /> : reviewList.map((record) => {
+                {reviewList.length === 0 ? <EmptyRow text={queueLoading ? "Loading records…" : (queueSearch || enrichFilter !== "all" || queueStatus !== "pending" ? "No records match these filters" : "No digitization records yet")} /> : reviewList.map((record) => {
                   const values = reviewEdit(record);
                   const signals = duplicateSignals(record);
                   const canApproveRecord = canCatalog && ["captured", "matched", "needs_review"].includes(record.status);
@@ -1980,6 +2286,21 @@ const Library = () => {
                     </div>
                   );
                 })}
+              </div>
+              <div className="mt-4 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span>
+                  {queueLoading
+                    ? "Loading…"
+                    : `Page ${queuePage + 1} · showing ${reviewList.length}${queueHasMore ? "+" : ""} record${reviewList.length === 1 ? "" : "s"}`}
+                </span>
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm" disabled={queuePage === 0 || queueLoading} onClick={() => setQueuePage((page) => Math.max(0, page - 1))}>
+                    Previous
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" disabled={!queueHasMore || queueLoading} onClick={() => setQueuePage((page) => page + 1)}>
+                    Next
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -2374,6 +2695,130 @@ const Library = () => {
     </div>
   );
 };
+
+// Faculty / student discovery experience: browse the shared catalog, see your own
+// loans and holds, and place a hold when every copy is out.
+function PatronLibrary({
+  role, items, loans, holds, query, setQuery, saving, onHold,
+}: {
+  role: string | null;
+  items: LibraryItem[];
+  loans: LibraryLoan[];
+  holds: LibraryHold[];
+  query: string;
+  setQuery: (v: string) => void;
+  saving: string | null;
+  onHold: (bookId: string) => void;
+}) {
+  const grouped = useMemo(() => {
+    const map = new Map<string, { bookId: string; title: string; authors: string[] | null; cover: string | null; total: number; available: number; shelf: string | null }>();
+    for (const item of items) {
+      const key = item.book_id;
+      const isAvailable = item.status === "available";
+      const existing = map.get(key);
+      if (existing) {
+        existing.total += 1;
+        if (isAvailable) existing.available += 1;
+        if (!existing.shelf && item.shelf_location) existing.shelf = item.shelf_location;
+      } else {
+        map.set(key, {
+          bookId: key,
+          title: item.library_books?.title || "Untitled book",
+          authors: item.library_books?.authors ?? null,
+          cover: item.library_books?.cover_url ?? null,
+          total: 1,
+          available: isAvailable ? 1 : 0,
+          shelf: item.shelf_location,
+        });
+      }
+    }
+    return [...map.values()];
+  }, [items]);
+
+  const heldBookIds = new Set(holds.filter((hold) => hold.status === "active" || hold.status === "ready").map((hold) => hold.book_id));
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Library</h1>
+          <p className="text-sm text-muted-foreground mt-1">Search the catalog, see your loans and holds</p>
+        </div>
+        <Badge variant="outline" className="gap-1"><ShieldCheck className="h-3 w-3" /> {role?.replace(/_/g, " ") || "User"}</Badge>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle className="text-base">Catalog</CardTitle>
+            <div className="relative w-full sm:w-80">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search title, author, ISBN…" className="w-full rounded-xl border border-input bg-background py-2 pl-10 pr-3 text-sm" />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="divide-y divide-border rounded-xl border border-border">
+            {grouped.length === 0 ? <EmptyRow text={query ? "No catalog matches" : "No books in the catalog yet"} /> : grouped.map((row) => (
+              <div key={row.bookId} className="flex items-center justify-between gap-3 p-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  {row.cover ? (
+                    <img src={row.cover} alt="" className="h-12 w-9 shrink-0 rounded border border-border object-cover" />
+                  ) : (
+                    <div className="flex h-12 w-9 shrink-0 items-center justify-center rounded border border-dashed border-border text-muted-foreground"><BookOpen className="h-4 w-4" /></div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{row.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {authorsLabel(row.authors)} · {row.available > 0 ? `${row.available} of ${row.total} available` : "all copies issued"}
+                      {row.shelf ? ` · shelf ${row.shelf}` : ""}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Badge variant={row.available > 0 ? "outline" : "secondary"}>{row.available > 0 ? "available" : "issued"}</Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={saving === `hold-${row.bookId}` || heldBookIds.has(row.bookId)}
+                    onClick={() => onHold(row.bookId)}
+                  >
+                    {saving === `hold-${row.bookId}` ? <ButtonOrb state="working" /> : heldBookIds.has(row.bookId) ? "Requested" : "Hold"}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader><CardTitle className="text-base">My Loans</CardTitle></CardHeader>
+          <CardContent><LoanList loans={loans.filter((loan) => loan.status === "active" || loan.status === "overdue" || loan.status === "returned")} /></CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">My Holds</CardTitle></CardHeader>
+          <CardContent>
+            <div className="divide-y divide-border rounded-xl border border-border">
+              {holds.length === 0 ? <EmptyRow text="No holds yet" /> : holds.map((hold) => (
+                <div key={hold.id} className="flex items-center justify-between gap-3 p-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {grouped.find((row) => row.bookId === hold.book_id)?.title || "Held title"}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">requested {new Date(hold.created_at).toLocaleDateString("en-IN")}</p>
+                  </div>
+                  <Badge variant={hold.status === "active" || hold.status === "ready" ? "outline" : "secondary"}>{hold.status}</Badge>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
 
 function StatCard({ title, value, icon: Icon, tone }: { title: string; value: number; icon: any; tone?: "danger" }) {
   return (

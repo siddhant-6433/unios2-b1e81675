@@ -19,6 +19,10 @@ const mobileWork = readFileSync("mobile/app/(staff)/(tabs)/work.tsx", "utf8");
 const mobileAuth = readFileSync("mobile/contexts/AuthContext.tsx", "utf8");
 const mobileLibrary = readFileSync("mobile/app/(family)/library.tsx", "utf8");
 const lookupFunction = readFileSync("supabase/functions/library-book-lookup/index.ts", "utf8");
+const librarianAccessMigration = readFileSync(
+  "supabase/migrations/20260922171823_library_librarian_access_and_bulk_approval.sql",
+  "utf8",
+);
 
 describe("library module", () => {
   it("adds librarian as a first-class role and exposes it in admin role surfaces", () => {
@@ -191,6 +195,49 @@ describe("library module", () => {
     expect(mobileLibrary).toContain("branch_id: selectedBranchId");
     expect(mobileLibrary).toContain("library-book-lookup");
     expect(mobileLibrary).toContain("canOperate ? 'Scan, digitize, and audit books' : 'Search catalog and current loans'");
+  });
+
+  it("makes the librarian role operational without a manual staff assignment", () => {
+    // The librarian gets campus-scoped operational access by role, but an explicit
+    // assignment still overrides the fallback (so auditors stay restricted).
+    expect(librarianAccessMigration).toContain("public.library_user_has_explicit_assignment");
+    expect(librarianAccessMigration).toContain("public.has_role(_user_id, 'librarian'::public.app_role)");
+    expect(librarianAccessMigration).toContain("NOT public.library_user_has_explicit_assignment(_user_id)");
+    expect(librarianAccessMigration).toContain("public.user_has_campus_scope(_user_id)");
+    expect(librarianAccessMigration).toContain("_action IN ('view', 'catalog', 'circulate', 'inventory', 'digitize', 'export')");
+    // Principal/campus_admin get read oversight of the queue.
+    expect(librarianAccessMigration).toContain("public.library_can_view_digitization");
+    expect(librarianAccessMigration).toContain('CREATE POLICY "Library staff view digitization records"');
+  });
+
+  it("approves imported registers in bulk with accession generation and duplicate handling", () => {
+    expect(librarianAccessMigration).toContain("public.library_bulk_approve_digitization");
+    expect(librarianAccessMigration).toContain("public.library_mark_duplicate_accessions");
+    expect(librarianAccessMigration).toContain("public.library_existing_accessions");
+    expect(librarianAccessMigration).toContain("Duplicate accession in queue");
+    expect(librarianAccessMigration).toContain("Accession already in catalog");
+    // Reuses the single-record approval (18-arg overload) so accession minting stays consistent.
+    expect(librarianAccessMigration).toContain("PERFORM public.library_approve_digitization_record(");
+    // Existing branches get loan rules backfilled.
+    expect(librarianAccessMigration).toContain("INSERT INTO public.library_settings (branch_id, borrowing_days");
+    // Patron self-service holds.
+    expect(librarianAccessMigration).toContain("public.library_place_hold");
+  });
+
+  it("pages and filters the digitization queue on the server instead of a 200-row fetch", () => {
+    expect(librarianAccessMigration).toContain("public.library_list_digitization_records");
+    expect(librarianAccessMigration).toContain("public.library_digitization_summary");
+    expect(libraryPage).toContain("library_list_digitization_records");
+    expect(libraryPage).toContain("library_digitization_summary");
+    expect(libraryPage).toContain("library_mark_duplicate_accessions");
+    expect(libraryPage).toContain("library_bulk_approve_digitization");
+    expect(libraryPage).toContain("library_existing_accessions");
+    expect(libraryPage).toContain("Approve all pending");
+    expect(libraryPage).toContain("fetchDigitization");
+    // Patron (faculty/student) discovery view.
+    expect(libraryPage).toContain("function PatronLibrary(");
+    expect(libraryPage).toContain("library_place_hold");
+    expect(libraryPage).toContain("isPatronOnly");
   });
 
   it("normalizes external ISBN metadata lookup through one edge function", () => {
