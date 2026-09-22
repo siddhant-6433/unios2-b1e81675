@@ -432,37 +432,11 @@ async function provisionStudent(
   };
 
   if (student.lead_id && newRows.length > 0) {
-    const { data: appPayments } = await db
-      .from("lead_payments")
-      .select("id, amount")
-      .eq("lead_id", student.lead_id)
-      .eq("type", "application_fee")
-      .eq("status", "confirmed")
-      .order("created_at");
-
-    const appQueue = (appPayments || []).map((p: any) => ({ id: p.id, remaining: Number(p.amount || 0) }));
-    let remainingApplicationCredit = appQueue.reduce((s, p) => s + p.remaining, 0);
-
-    if (remainingApplicationCredit > 0) {
-      const newSeatRows = newRows
-        .filter((r: any) => r.term === "year_1" && /SEAT|BLOCK/i.test(`${r.fee_code_code || ""} ${r.fee_code_name || ""}`))
-        .sort((a: any, b: any) => String(a.fee_code_code || "").localeCompare(String(b.fee_code_code || "")));
-
-      for (const row of newSeatRows) {
-        if (remainingApplicationCredit <= 0) break;
-        const netDue = Math.max(
-          0,
-          Number(row.total_amount) - Number(row.concession || 0) - Number(row.paid_amount || 0),
-        );
-        if (netDue <= 0) continue;
-        const credit = Math.min(remainingApplicationCredit, netDue);
-        row.paid_amount = Number(row.paid_amount || 0) + credit;
-        if (row.paid_amount >= Number(row.total_amount) - Number(row.concession || 0)) row.status = "paid";
-        remainingApplicationCredit -= credit;
-        drawFrom(appQueue, row, credit);
-      }
-    }
-
+    // Application-fee receipts are NOT credited to the year-1 seat-block (or
+    // any other course head) here. They belong on the student's Application
+    // Fee head and are booked by reconcile_application_fee after this
+    // provisioner finishes. Crediting them to seat-block made the seat balance
+    // and the unallocated credit each read ₹1,000 low (DAOTT 2026-28, N652).
     const { data: toks } = await db
       .from("lead_payments")
       .select("id, amount")
@@ -519,6 +493,7 @@ async function provisionStudent(
     // School PAN/AN often provisions once, then the offer is approved later.
     // Re-running must still sync concessions.
     await syncLedgerConcessions(db, studentId);
+    await reconcileApplicationFee(db, student.lead_id);
     return 0;
   }
 
@@ -571,8 +546,21 @@ async function provisionStudent(
   // provisioning and later waiver edits (via the offer_waivers trigger) always
   // agree — no need to re-provision to pick up a waiver.
   await syncLedgerConcessions(db, studentId);
+  await reconcileApplicationFee(db, student.lead_id);
 
   return newRows.length;
+}
+
+// Books confirmed application-fee receipts onto the student's Application Fee
+// head (FORM-FEE / NB-REG / MR-REG) via the canonical SQL reconciler. Never a
+// course head. No-op for students with no portal application fee.
+async function reconcileApplicationFee(
+  db: ReturnType<typeof createClient>,
+  leadId: string | null,
+): Promise<void> {
+  if (!leadId) return;
+  const { error } = await db.rpc("reconcile_application_fee", { _lead_id: leadId });
+  if (error) console.warn(`[provision-student-fees] application-fee reconcile failed: ${error.message}`);
 }
 
 async function syncLedgerConcessions(

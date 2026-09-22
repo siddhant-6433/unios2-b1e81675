@@ -12,9 +12,11 @@ describe("edge provisioner writes payment links", () => {
     expect(edgeFn).toContain("creditLinks");
     expect(edgeFn).toContain("const drawFrom = (");
     expect(edgeFn).toContain('.from("fee_ledger_payments").insert(');
-    // Payment ids are needed for attribution, so both queues select id.
-    expect(edgeFn).toMatch(/\.select\("id, amount"\)[\s\S]{0,200}"application_fee"/);
+    // Payment ids are needed for attribution, so the token queue selects id.
+    // (Application fees are booked onto their own head by the SQL
+    // reconcile_application_fee, not by this provisioner.)
     expect(edgeFn).toMatch(/\.select\("id, amount"\)[\s\S]{0,200}"token_fee"/);
+    expect(edgeFn).not.toMatch(/\.eq\("type", "application_fee"\)/);
   });
 
   it("drains credit already applied on an earlier run before attributing", () => {
