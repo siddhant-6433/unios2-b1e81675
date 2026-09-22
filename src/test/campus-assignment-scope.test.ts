@@ -6,11 +6,17 @@ const appSidebar = readFileSync("src/components/layout/AppSidebar.tsx", "utf8");
 const studentsPage = readFileSync("src/pages/Students.tsx", "utf8");
 
 describe("campus assignment scoping", () => {
-  it("only lets super admins select all campuses", () => {
-    expect(campusContext).toContain('const canSelectAllCampuses = role === "super_admin"');
+  it("only lets org-wide roles select all campuses", () => {
+    expect(campusContext).toContain("const ORG_WIDE_CAMPUS_ROLES = new Set([\"super_admin\", \"admission_head\"])");
+    expect(campusContext).toContain("const canSelectAllCampuses = role !== null && ORG_WIDE_CAMPUS_ROLES.has(role)");
     expect(campusContext).toContain('if (id === "all" && !canSelectAllCampuses) return;');
     expect(campusContext).toContain("visibleCampuses = matches");
     expect(campusContext).toContain("setSelectedCampusId(NO_ASSIGNED_CAMPUS_ID)");
+  });
+
+  it("scopes only non-org-wide roles by their assigned campuses", () => {
+    expect(campusContext).toContain("if (role && !ORG_WIDE_CAMPUS_ROLES.has(role)) {");
+    expect(campusContext).not.toContain('role !== "super_admin"');
   });
 
   it("does not render the All Campuses selector option for scoped users", () => {
