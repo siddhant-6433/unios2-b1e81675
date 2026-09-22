@@ -77,6 +77,29 @@ describe("classifyCloudCallPoll", () => {
     });
     expect(classifyCloudCallPoll(row({ status: "completed" }), OPTS)).toEqual({ kind: "terminal-bare" });
   });
+
+  it("walks a full cloud call without ever ending it early", () => {
+    const stuckAfterMs = 8 * 60 * 1000;
+    const at = (elapsedMs: number) => ({ elapsedMs, stuckAfterMs });
+
+    // 1. Placed — counsellor phone ringing.
+    expect(classifyCloudCallPoll(row({ status: "initiated" }), at(3_000))).toEqual({ kind: "ringing" });
+    // 2. Counsellor picked up, student leg now dialing (parent stays initiated).
+    expect(classifyCloudCallPoll(row({ status: "initiated" }), at(10_000))).toEqual({ kind: "ringing" });
+    // 3. Student answered — /bridge-b-status writes status=in_progress.
+    const connected = row({ status: "in_progress", student_connected_at: "2026-09-22T10:00:00Z" });
+    expect(classifyCloudCallPoll(connected, at(20_000))).toEqual({ kind: "connected" });
+    // 4. Mid-conversation, well past the ring timeout — still connected.
+    //    (This is where the old code flipped to "ended" and dialed the next lead.)
+    expect(classifyCloudCallPoll(connected, at(30 * 60 * 1000))).toEqual({ kind: "connected" });
+    // 5. Student hangs up — only now does it become terminal.
+    expect(
+      classifyCloudCallPoll(
+        row({ status: "completed", student_connected_at: "2026-09-22T10:00:00Z" }),
+        at(31 * 60 * 1000),
+      ),
+    ).toEqual({ kind: "terminal-connected" });
+  });
 });
 
 describe("isCancelledDisposition", () => {
