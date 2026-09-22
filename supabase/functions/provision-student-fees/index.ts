@@ -21,11 +21,12 @@ const HOSTEL_TYPE_CODE: Record<string, string> = {
   ac_individual: "NB-IBA",
 };
 
-/** Day boarding fee code */
+/** Day boarding fee code (a separate profile from boarders) */
 const DAY_BOARDING_CODE = "NB-DBA";
 
-/** Security deposit code (boarders only) */
-const SECURITY_DEPOSIT_CODE = "NB-SEC";
+/** Boarder-only security deposit codes: Beacon and Mirai. These are tagged
+ *  category 'enrollment', so they must be matched by code, not category. */
+const SECURITY_DEPOSIT_CODES = ["NB-SEC", "MR-SEC"];
 
 /** Quarter due dates: q1→Apr 10, q2→Jul 10, q3→Oct 10, q4→Jan 10 */
 function quarterDueDate(term: string, year: number): string | null {
@@ -196,14 +197,31 @@ async function provisionStudent(
   if (!items || items.length === 0) throw new Error("Fee structure has no items");
 
   // 4. Filter items by student profile
-  const studentType = (student.student_type || "day_scholar").toLowerCase();
+  // student_type is free text in practice: "day_scholar" and "Day Scholar" are
+  // the same; "hostel", "boarder", and "HOSTELER" all mean a boarder. "Day
+  // Boarder" is its own profile.
+  const studentTypeRaw = String(student.student_type || "day_scholar")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, " ");
+  const isDayScholar = studentTypeRaw === "day scholar";
+  const isDayBoarder = studentTypeRaw === "day boarder";
+  const isBoarder = ["boarder", "hostel", "hosteler"].includes(studentTypeRaw);
   const transportRequired = student.transport_required === true;
   const transportZone = student.transport_zone || null;
   const hostelType = student.hostel_type || null;
 
+  const isSecurityDeposit = (code: string) =>
+    SECURITY_DEPOSIT_CODES.includes(code.toUpperCase());
+
   const filtered = items.filter((item: any) => {
     const code: string = item.fee_codes?.code || "";
     const category: string = item.fee_codes?.category || "";
+
+    // Security deposit → boarders only. Checked before the category branches
+    // because the code is tagged 'enrollment' (not 'hostel'), which is what
+    // put "Beacon Security Deposit (Boarders Only)" on day scholars.
+    if (isSecurityDeposit(code)) return isBoarder;
 
     // Tuition → always include
     if (category === "tuition") return true;
@@ -224,16 +242,15 @@ async function provisionStudent(
 
     // Hostel / boarding
     if (category === "hostel") {
-      if (studentType === "day_scholar") return false;
+      if (isDayScholar) return false;
 
       // Day boarder → only NB-DBA
-      if (studentType === "day_boarder" || studentType === "day boarder") {
+      if (isDayBoarder) {
         return code === DAY_BOARDING_CODE;
       }
 
-      // Boarder → matching hostel code OR security deposit
-      if (studentType === "boarder") {
-        if (code === SECURITY_DEPOSIT_CODE) return true;
+      // Boarder (hostel / boarder / hosteler) → matching hostel code
+      if (isBoarder) {
         if (!hostelType) return false;
         const expectedCode = HOSTEL_TYPE_CODE[hostelType];
         return code === expectedCode;
