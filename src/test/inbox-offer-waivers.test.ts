@@ -4,22 +4,19 @@ import { describe, expect, it } from "vitest";
 const inbox = readFileSync("src/pages/Inbox.tsx", "utf8");
 
 describe("Inbox offer waiver badge and reload behavior", () => {
-  it("counts pending offer waivers with an exact server-side aggregate, not planner estimates", () => {
-    // The Inbox no longer ships every pending row to the client to count it —
-    // get_inbox_counts() runs an exact count(*) per queue server-side (RLS
-    // still scopes it). Planner estimates remain banned.
-    expect(inbox).toContain('rpc("get_inbox_counts")');
-    expect(inbox).not.toContain('count: "planned"');
-    expect(inbox).not.toContain('{ count: "planned", head: true }');
+  it("counts pending offer waivers from actual rows instead of planner estimates", () => {
+    expect(inbox).not.toContain('.from("offer_waivers")\n            .select("id", { count: "planned", head: true })');
+    expect(inbox).toContain('.from("offer_waivers")\n            .select("id, offer_letters(lead_id)")');
+    expect(inbox).toContain("(r.value as any).count ?? (r.value as any).data?.length ?? 0");
   });
 
-  it("keeps the sidebar counts tied to the aggregate RPC and the loaded rows", () => {
+  it("keeps sidebar counts tied to the fetched inbox rows", () => {
     expect(inbox).not.toContain('{ count: "planned", head: true }');
-    expect(inbox).toContain('rpc("get_inbox_counts")');
     expect(inbox).toContain("const commitItems = useCallback");
     expect(inbox).toContain("setCounts((prev) => prev[cat] === nextItems.length");
     expect(inbox).toContain("const categoryDisplayCount = (cat: InboxCategory)");
     expect(inbox).toContain("cat.id === selected && !loading ? items.length : cat.count");
+    expect(inbox).toContain('.from("whatsapp_conversations" as any)\n            .select("phone")');
   });
 
   it("loads pending waiver rows before resolving related offer data", () => {
