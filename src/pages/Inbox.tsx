@@ -10,6 +10,7 @@ import { Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle, Exte
 import { cn } from "@/lib/utils";
 import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
 import { feeTermLabel } from "@/lib/feeTermLabels";
+import { summarizeConcessionLedger } from "@/lib/feeConcession";
 import { exportRowsCsv } from "@/lib/xlsxExport";
 import { pendingAnDocSummary, type PendingAnDocStatus } from "@/lib/pendingAnGeneration";
 import {
@@ -42,8 +43,14 @@ interface FeeConcessionItem {
   student_name: string;
   admission_no: string | null;
   fee_code: string | null;
+  fee_name: string | null;
   term: string | null;
   fee_total: number | null;
+  /** Concession already approved on this ledger row (offer waivers + prior concessions). */
+  fee_concession: number;
+  fee_paid: number;
+  fee_balance: number | null;
+  fee_due_date: string | null;
   type: string;
   value: number;
   reason: string | null;
@@ -922,7 +929,7 @@ export default function Inbox() {
           .select(`
             id, student_id, type, value, reason, created_at,
             students:student_id(name, admission_no, pre_admission_no, login_disabled, archived_at, deleted_at),
-            fee_ledger:fee_ledger_id(term, total_amount, fee_codes:fee_code_id(code, name)),
+            fee_ledger:fee_ledger_id(term, total_amount, concession, paid_amount, balance, due_date, fee_codes:fee_code_id(code, name)),
             requester:requested_by(display_name)
           `)
           .in("status", ["pending_principal", "pending_super_admin"])
@@ -936,8 +943,13 @@ export default function Inbox() {
             student_name: c.students?.name || "—",
             admission_no: c.students?.admission_no || c.students?.pre_admission_no || null,
             fee_code: c.fee_ledger?.fee_codes?.code || null,
+            fee_name: c.fee_ledger?.fee_codes?.name || null,
             term: c.fee_ledger?.term || null,
             fee_total: c.fee_ledger?.total_amount ?? null,
+            fee_concession: Number(c.fee_ledger?.concession || 0),
+            fee_paid: Number(c.fee_ledger?.paid_amount || 0),
+            fee_balance: c.fee_ledger?.balance ?? null,
+            fee_due_date: c.fee_ledger?.due_date ?? null,
             type: c.type,
             value: Number(c.value),
             reason: c.reason,
@@ -1691,13 +1703,23 @@ export default function Inbox() {
 
     if (selected === "fee_concessions") {
       const c = item as FeeConcessionItem;
+      const s = summarizeConcessionLedger({
+        total: c.fee_total,
+        existing: c.fee_concession,
+        type: c.type,
+        value: c.value,
+        paid: c.fee_paid,
+      });
       return (
         <button key={c.id} className={baseClass} onClick={() => setSelectedItem(c)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{c.student_name}</p>
               <p className="text-xs text-muted-foreground truncate">
-                {c.fee_code || "Fee"} · {c.type === "flat" ? fmtINR(c.value) : `${c.value}%`}
+                {c.fee_code || "Fee"} · {c.type === "percentage" ? `${c.value}% → ` : ""}−{fmtINR(s.requested)}
+              </p>
+              <p className="text-[11px] text-muted-foreground/80 truncate">
+                net after waiver {fmtINR(s.netAfterWaiver)}
               </p>
             </div>
             <span className="text-[10px] text-warning-foreground font-medium shrink-0">Pending</span>
@@ -2188,9 +2210,13 @@ export default function Inbox() {
 
     if (selected === "fee_concessions") {
       const c = selectedItem as FeeConcessionItem;
-      const effective = c.type === "flat"
-        ? c.value
-        : Math.round(((c.fee_total || 0) * c.value) / 100);
+      const s = summarizeConcessionLedger({
+        total: c.fee_total,
+        existing: c.fee_concession,
+        type: c.type,
+        value: c.value,
+        paid: c.fee_paid,
+      });
       return (
         <div className="p-5 space-y-5">
           <div>
@@ -2198,21 +2224,46 @@ export default function Inbox() {
             {c.admission_no && <p className="text-sm text-muted-foreground font-mono">{c.admission_no}</p>}
           </div>
 
-          <div className="rounded-xl border border-border bg-card divide-y divide-border">
-            <Row label="Fee Head" value={`${c.fee_code || "—"}${c.term ? ` · ${c.term}` : ""}`} />
-            <Row label="Fee Amount" value={fmtINR(c.fee_total)} />
-            <Row label="Concession" value={c.type === "flat" ? fmtINR(c.value) : `${c.value}%`} />
-            <Row label="Reduces Balance By" value={fmtINR(effective)} highlight />
-            <Row label="Requested By" value={c.requested_by_name || "—"} />
-            <Row label="Requested On" value={fmtDate(c.created_at)} />
+          {/* The exact ledger item the waiver lands on, with the waiver applied
+              line by line: fee, what is already waived, this request, and the
+              net payable after it. */}
+          <div>
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Fee ledger item</p>
+            <div className="overflow-hidden rounded-xl border border-border bg-card">
+              <div className="border-b border-border bg-muted/40 px-4 py-2.5">
+                <p className="text-sm font-medium text-foreground">
+                  {c.fee_code || "Fee Head"}{c.fee_name ? ` · ${c.fee_name}` : ""}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {c.term ? feeTermLabel(c.term) : "—"}{c.fee_due_date ? ` · due ${fmtDate(c.fee_due_date)}` : ""}
+                </p>
+              </div>
+              <div className="divide-y divide-border">
+                <Row label="Fee amount" value={fmtINR(s.total)} />
+                {s.existing > 0 && <Row label="Already waived" value={`−${fmtINR(s.existing)}`} />}
+                <Row label="This request" value={`−${fmtINR(s.requested)}`} />
+                <Row label="Net payable after waiver" value={fmtINR(s.netAfterWaiver)} highlight />
+                {s.paid > 0 && <Row label="Already paid" value={fmtINR(s.paid)} />}
+                {c.fee_balance != null && <Row label="Balance now" value={fmtINR(c.fee_balance)} />}
+                <Row label="Balance after waiver" value={fmtINR(s.projectedBalance)} />
+              </div>
+            </div>
           </div>
 
-          {c.reason && (
-            <div className="rounded-xl border border-border bg-muted/30 p-3">
-              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Reason</p>
-              <p className="mt-1 text-sm text-foreground">{c.reason}</p>
-            </div>
-          )}
+          <div className="rounded-xl border border-border bg-muted/30 p-3">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Concession requested</p>
+            <p className="mt-1 text-sm text-foreground">
+              {c.type === "flat"
+                ? fmtINR(s.requested)
+                : `${c.value}% of ${fmtINR(s.total)} = ${fmtINR(s.requested)}`}
+              <span className="text-muted-foreground"> off this head</span>
+            </p>
+            <p className="mt-2.5 text-[10px] uppercase tracking-wide text-muted-foreground">Reason</p>
+            <p className="mt-1 text-sm text-foreground">{c.reason || "—"}</p>
+            <p className="mt-2.5 text-[11px] text-muted-foreground">
+              Requested by {c.requested_by_name || "—"} · {fmtDate(c.created_at)}
+            </p>
+          </div>
 
           <div className="flex gap-2">
             <Button
