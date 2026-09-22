@@ -72,14 +72,16 @@ export function LiveCallBar() {
       // (one writer), not by every open CRM tab. The UI still has a local
       // display cutoff below so a delayed cron cannot leave the navbar stuck.
 
-      // Pull recent initiated calls. Connected calls can legitimately remain
-      // initiated until hangup, so use a wider DB lookback and apply a stricter
+      // Pull recent active calls. The voice agent flips a connected bridge
+      // call to status='in_progress' the moment the student answers, so the
+      // query must include it too — otherwise the bar drops the call the
+      // instant it connects. Keep a wider DB lookback and apply a stricter
       // client-side cutoff only to calls where the student never connected.
       const cutoff = new Date(currentTime - LIVE_CALL_LOOKBACK_MS).toISOString();
       let query = supabase
         .from("ai_call_records" as any)
         .select("id, call_uuid, lead_id, student_connected_at, disposition, created_at, caller_user_id, call_type, is_live_transfer, transfer_reason")
-        .eq("status", "initiated")
+        .in("status", ["initiated", "in_progress"])
         .in("call_type", ["manual", "inbound"])
         .gte("created_at", cutoff)
         .order("created_at", { ascending: false })
@@ -105,7 +107,8 @@ export function LiveCallBar() {
         .from("ai_call_records" as any)
         .select("call_uuid")
         .in("call_uuid", uuids)
-        .neq("status", "initiated");
+        .neq("status", "initiated")
+        .neq("status", "in_progress");
       const doneUuids = new Set((terminal || []).map((t: any) => t.call_uuid));
       const activeRecords = records.filter((r: any) => {
         if (doneUuids.has(r.call_uuid)) return false;

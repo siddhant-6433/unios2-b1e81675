@@ -655,6 +655,11 @@ export default function CloudDialer() {
 
   // Poll for call end — checks ai_call_records for our call_uuid
   const startPolling = (callId: string) => {
+    // A previous call's interval must not survive into the next call. An
+    // orphaned poll keeps reading its old call row and can later fire
+    // auto-disposition/auto-next against whichever call is live now — placing
+    // a second call while the counsellor is still connected.
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     callIdRef.current = callId;
     pollStartTimeRef.current = Date.now();
     const poll = async () => {
@@ -666,8 +671,18 @@ export default function CloudDialer() {
 
       if (!data) return; // Record not created yet — keep polling
 
-      // ── Phase: Still initiated (call in progress) ──
-      if (data.status === "initiated") {
+      // ── Phase: Still active (ringing or connected) ──
+      // The voice agent flips status to 'in_progress' the moment the student
+      // answers (bridge-b-status), while the counsellor's parent leg stays
+      // 'initiated' until hangup. Treat every non-terminal status as live —
+      // otherwise a connected call is misread as ended on the next tick, the
+      // dialer auto-marks call_back, and it rings the counsellor for the next
+      // lead while they are still mid-conversation (simultaneous calls).
+      const activeStatus = data.status === "initiated"
+        || data.status === "in_progress"
+        || data.status === "in-progress"
+        || data.status === "answered";
+      if (activeStatus) {
         if (data.student_connected_at && !data.disposition) {
           // Student answered! Transition to "connected" + show disposition buttons
           setCallState(prev => prev.status !== "connected"
@@ -1413,10 +1428,14 @@ export default function CloudDialer() {
     if (activeListId) refetchCallLists();
 
     if (currentIdx < queue.length - 1) {
+      // Capture the next lead now: placeCall() closes over currentLead from
+      // this render, so a bare setTimeout(() => placeCall()) re-dials the lead
+      // we just finished instead of advancing to the next one.
+      const nextLead = queue[currentIdx + 1];
       setCurrentIdx(prev => prev + 1);
       // Auto-place next call if dialer is active and not paused
       if (dialerActive && !paused) {
-        setTimeout(() => placeCall(), 1000);
+        setTimeout(() => placeCall(nextLead), 1000);
       }
     } else {
       setDialerActive(false);
