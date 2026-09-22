@@ -632,13 +632,16 @@ Deno.serve(async (req) => {
     // hardcoded TEMPLATES path, which keeps its by-array-position mapping).
     let urlButtonIndexes: number[] = [];
     let templateLanguage = "en";
+    // WABA the template lives in (null = default). A template can only be sent
+    // from a number in its own WABA, so this pins the sender below.
+    let templateWabaId: string | null = null;
     let templateDef = TEMPLATES[template_key];
     if (!templateDef) {
       // A template can exist in multiple languages (e.g. en + hi) — maybeSingle
       // would error on >1 row and read as "Unknown template". Take one, English first.
       const { data: dynamicRows, error: dynamicErr } = await admin
         .from("whatsapp_templates")
-        .select("name, status, placeholder_count, has_media, header_format, components, language")
+        .select("name, status, placeholder_count, has_media, header_format, components, language, waba_id")
         .eq("name", template_key)
         .eq("status", "APPROVED")
         .order("language", { ascending: true })
@@ -674,6 +677,7 @@ Deno.serve(async (req) => {
       const dynCount = Number((dynamicTemplate as any).placeholder_count || 0);
       const dynLanguage = String((dynamicTemplate as any).language || "").trim();
       if (dynLanguage) templateLanguage = dynLanguage;
+      templateWabaId = ((dynamicTemplate as any).waba_id as string | null) || null;
       templateDef = {
         name: (dynamicTemplate as any).name,
         params: Array.from({ length: dynCount }, (_v, i) => `param_${i + 1}`),
@@ -830,6 +834,7 @@ Deno.serve(async (req) => {
       }
       : {
         route: channelRoute,
+        wabaId: templateWabaId,
       }, waPhone, {
       name: templateDef.name,
       language: templateLanguage,
