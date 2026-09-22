@@ -13,6 +13,7 @@ import { useAuth } from "@/contexts/AuthContext";
 export interface Campus { id: string; name: string; code: string | null }
 export interface Institution { id: string; name: string; code: string | null; campus_id: string }
 export interface Department { id: string; name: string; code: string | null; institution_id: string }
+export interface CourseUnit { id: string; name: string; code: string | null; department_id: string }
 
 // Roles the students RLS already scopes to an assigned campus. Mirrored here so
 // HR staff at one campus don't get a picker full of campuses they can't touch.
@@ -23,6 +24,7 @@ export function useOrgUnits() {
   const [allCampuses, setAllCampuses] = useState<Campus[]>([]);
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [courses, setCourses] = useState<CourseUnit[]>([]);
   const [assignedCampus, setAssignedCampus] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
@@ -31,10 +33,11 @@ export function useOrgUnits() {
     (async () => {
       const { data: userData } = await supabase.auth.getUser();
       const uid = userData.user?.id;
-      const [cam, inst, dept, prof] = await Promise.all([
+      const [cam, inst, dept, crs, prof] = await Promise.all([
         supabase.from("campuses").select("id, name, code").order("name"),
         supabase.from("institutions").select("id, name, code, campus_id").order("name"),
         supabase.from("departments").select("id, name, code, institution_id").order("name"),
+        supabase.from("courses").select("id, name, code, department_id").order("name"),
         uid
           ? supabase.from("profiles").select("campus").eq("user_id", uid).maybeSingle()
           : Promise.resolve({ data: null }),
@@ -43,6 +46,7 @@ export function useOrgUnits() {
       setAllCampuses((cam.data as Campus[]) || []);
       setInstitutions((inst.data as Institution[]) || []);
       setDepartments((dept.data as Department[]) || []);
+      setCourses((crs.data as CourseUnit[]) || []);
       setAssignedCampus((prof.data as { campus?: string } | null)?.campus || "");
       setLoading(false);
     })();
@@ -62,6 +66,13 @@ export function useOrgUnits() {
     campusId ? institutions.filter((i) => i.campus_id === campusId) : [];
   const departmentsFor = (institutionId: string | null | undefined) =>
     institutionId ? departments.filter((d) => d.institution_id === institutionId) : [];
+  const coursesFor = (departmentId: string | null | undefined) =>
+    departmentId ? courses.filter((c) => c.department_id === departmentId) : [];
+  const coursesForInstitution = (institutionId: string | null | undefined) => {
+    if (!institutionId) return [];
+    const deptIds = new Set(departmentsFor(institutionId).map((d) => d.id));
+    return courses.filter((c) => deptIds.has(c.department_id));
+  };
 
   /**
    * Resolve a free-text campus/institution/department name from an imported
@@ -82,8 +93,11 @@ export function useOrgUnits() {
     allCampuses,
     institutions,
     departments,
+    courses,
     institutionsFor,
     departmentsFor,
+    coursesFor,
+    coursesForInstitution,
     matchByName,
     /** Auto-select when the user is scoped to exactly one campus. */
     lockedCampusId: campuses.length === 1 ? campuses[0].id : "",
