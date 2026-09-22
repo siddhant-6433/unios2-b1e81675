@@ -32,6 +32,13 @@ describe("Video review is shared between Inbox and the Video Approvals page", ()
     expect(embed).toContain("toVideoEmbedUrl(url)");
   });
 
+  it("offers an open-in-source escape hatch under the inline player", () => {
+    // Cross-origin iframes hide load/access failures (e.g. a Drive file not
+    // shared "anyone with link"), so the player always carries a fallback link.
+    expect(embed).toContain("Video not loading?");
+    expect(embed).toContain("Open in {videoSourceLabel(url)}");
+  });
+
   it("sends the full video row to the Inbox panel", () => {
     expect(inbox).toContain("video: v as VideoRow");
     expect(inbox).toContain("video={v.video}");
