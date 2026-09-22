@@ -22,7 +22,7 @@ describe("AppSidebar access policy wiring", () => {
   });
 
   it("hides all-campus selection for campus-scoped non-super-admins", () => {
-    expect(campusContext).toContain("Any non-super-admin is branch-scoped");
+    expect(campusContext).toContain("Campus-scoped roles see only their assigned campuses");
     expect(campusContext).toContain("setSelectedCampusId(NO_ASSIGNED_CAMPUS_ID)");
     expect(sidebar).toContain('{canSelectAllCampuses && <option value="all">All Campuses</option>}');
     expect(sidebar).toContain("No assigned campus");
