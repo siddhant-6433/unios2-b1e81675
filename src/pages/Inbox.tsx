@@ -441,6 +441,10 @@ export default function Inbox() {
   const visibleCategories = countsLoaded
     ? roleAllowedCategories.filter((c) => categoryDisplayCount(c) > 0)
     : [];
+  // The whole sidebar/list is gated on one aggregate counts fetch. Until it
+  // lands the page is genuinely still loading — not empty — so the cards and
+  // list must show a loader rather than 0 / "All clear".
+  const countsLoading = !countsLoaded;
   const visibleCategoryIds = visibleCategories.map((c) => c.id).join("|");
   const requestedCategory = searchParams.get("category") as CategoryId | null;
   const selectedCategory = roleAllowedCategories.find((c) => c.id === selected);
@@ -592,16 +596,18 @@ export default function Inbox() {
     const concessionRows = rowsOf(10);
     const offerEditRows = rowsOf(12);
 
-    const hiddenLeads = await fetchHiddenLeadIds([
-      ...waiverRows.map(nestedOfferLeadId),
-      ...abvmuRows.map((r) => r.lead_id),
-      ...offerApprovalRows.map((r) => r.lead_id),
-      ...applicationRows.map((r) => r.lead_id),
-      ...offerEditRows.map(nestedOfferLeadId),
-    ]);
-    const hiddenStudents = await fetchHiddenStudentIds([
-      ...contactRows.map((r) => r.student_id),
-      ...concessionRows.map((r) => r.student_id),
+    const [hiddenLeads, hiddenStudents] = await Promise.all([
+      fetchHiddenLeadIds([
+        ...waiverRows.map(nestedOfferLeadId),
+        ...abvmuRows.map((r) => r.lead_id),
+        ...offerApprovalRows.map((r) => r.lead_id),
+        ...applicationRows.map((r) => r.lead_id),
+        ...offerEditRows.map(nestedOfferLeadId),
+      ]),
+      fetchHiddenStudentIds([
+        ...contactRows.map((r) => r.student_id),
+        ...concessionRows.map((r) => r.student_id),
+      ]),
     ]);
 
     setCounts({
@@ -2769,15 +2775,24 @@ export default function Inbox() {
           <div className="mt-4 grid grid-cols-2 gap-2">
             <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
               <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Open</p>
-              <p className="mt-0.5 text-lg font-semibold text-foreground">{totalVisibleCount}</p>
+              <p className="mt-0.5 text-lg font-semibold text-foreground">
+                {countsLoading ? <OrbLoader state="searching" size={20} /> : totalVisibleCount}
+              </p>
             </div>
             <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
               <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Selected</p>
-              <p className="mt-0.5 text-lg font-semibold text-foreground">{selectedDisplayCount}</p>
+              <p className="mt-0.5 text-lg font-semibold text-foreground">
+                {countsLoading ? <OrbLoader state="searching" size={20} /> : selectedDisplayCount}
+              </p>
             </div>
           </div>
         </div>
         <nav className="flex-1 overflow-y-auto p-3 space-y-1.5">
+          {countsLoading && (
+            <div className="flex h-24 items-center justify-center">
+              <OrbLoader state="searching" />
+            </div>
+          )}
           {countsLoaded && visibleCategories.length === 0 && (
             <p className="px-3 py-3 text-xs text-muted-foreground">No open inbox items</p>
           )}
@@ -2869,7 +2884,7 @@ export default function Inbox() {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto bg-background/60">
-          {loading && items.length === 0 ? (
+          {countsLoading || (loading && items.length === 0) ? (
             <div className="flex h-40 items-center justify-center">
               <OrbLoader state="searching" />
             </div>
