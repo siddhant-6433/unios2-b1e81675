@@ -46,6 +46,7 @@ import { isLeadCallDisposition, resolveCallDispositionTransition, resolveLeadTra
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import { loadWhatsAppTemplateCatalog } from "@/lib/whatsappTemplateCatalog";
 import { startCloudCall, cloudCallTarget } from "@/lib/startCloudCall";
+import { classifyCloudCallPoll, isCancelledDisposition } from "@/lib/cloudCallPoll";
 
 const CourseInfoPanel = lazy(() =>
   import("@/components/leads/CourseInfoPanel").then((m) => ({ default: m.CourseInfoPanel })));
@@ -671,74 +672,69 @@ export default function CloudDialer() {
 
       if (!data) return; // Record not created yet — keep polling
 
-      // ── Phase: Still active (ringing or connected) ──
-      // The voice agent flips status to 'in_progress' the moment the student
-      // answers (bridge-b-status), while the counsellor's parent leg stays
-      // 'initiated' until hangup. Treat every non-terminal status as live —
-      // otherwise a connected call is misread as ended on the next tick, the
-      // dialer auto-marks call_back, and it rings the counsellor for the next
-      // lead while they are still mid-conversation (simultaneous calls).
-      const activeStatus = data.status === "initiated"
-        || data.status === "in_progress"
-        || data.status === "in-progress"
-        || data.status === "answered";
-      if (activeStatus) {
-        if (data.student_connected_at && !data.disposition) {
-          // Student answered! Transition to "connected" + show disposition buttons
-          setCallState(prev => prev.status !== "connected"
-            ? { ...prev, status: "connected" }
-            : prev
-          );
-        } else if (data.disposition) {
-          // Auto-disposed during ringing (busy/not_answered/voicemail).
-          // Cancelled is not a disposition and must not count as a call.
-          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-          if (data.disposition === "cancelled" || data.disposition === "cancelled_by_counsellor") {
-            handleCancelledCall();
+      // ── Classify the row (pure; unit-tested in src/lib/cloudCallPoll.ts) ──
+      // Status ownership: 'initiated' = ringing, 'in_progress' = student
+      // answered (set by /bridge-b-status). Treating only 'initiated' as live
+      // made a connected call look ended, so the dialer auto-marked call_back
+      // and rang the next lead while the counsellor was still mid-call.
+      const elapsedMs = pollStartTimeRef.current ? Date.now() - pollStartTimeRef.current : 0;
+      // The generated ai_call_records types have broken relationships, so the
+      // row comes back as a SelectQueryError union; narrow it once here.
+      const row = data as unknown as {
+        status: string | null;
+        disposition: string | null;
+        student_connected_at: string | null;
+        duration_seconds: number | null;
+      };
+      const phase = classifyCloudCallPoll(
+        { status: row.status, disposition: row.disposition, student_connected_at: row.student_connected_at },
+        { elapsedMs, stuckAfterMs: 8 * 60 * 1000 },
+      );
+
+      const stopPolling = () => {
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      };
+      // Cancellation is not a disposition and must not count as a call.
+      const applyAutoDisposition = (disposition: string) =>
+        isCancelledDisposition(disposition) ? handleCancelledCall() : handleAutoDisposition(disposition);
+
+      switch (phase.kind) {
+        case "connected":
+          // Student answered — show disposition buttons, keep polling.
+          setCallState(prev => prev.status !== "connected" ? { ...prev, status: "connected" } : prev);
+          return;
+        case "ringing":
+          return;
+        case "auto-dispose":
+          stopPolling();
+          applyAutoDisposition(phase.disposition);
+          return;
+
+        case "terminal-connected": {
+          // Was connected, now ended, no disposition — show disposition panel.
+          stopPolling();
+          const serverDur = row.duration_seconds || 0;
+          const preDispo = preDispositionRef.current;
+          if (preDispo) {
+            preDispositionRef.current = null;
+            setCallState(prev => ({ ...prev, elapsed: serverDur }));
+            await finalizeDisposition(preDispo, serverDur);
           } else {
-            handleAutoDisposition(data.disposition);
+            setCallState(prev => ({ ...prev, status: "ended", elapsed: serverDur }));
+            setAutoNextTimer(60);
           }
-        } else {
-          // Still ringing — but if we've been polling > 8 min, the call is stuck
-          // (voice-agent context was lost, bridge-hangup never updated the record).
-          const elapsed = pollStartTimeRef.current ? Date.now() - pollStartTimeRef.current : 0;
-          if (elapsed > 8 * 60 * 1000) {
-            if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-            handleAutoDisposition("not_answered");
-          }
+          setStats(prev => ({ ...prev, connected: prev.connected + 1, totalTalkTime: prev.totalTalkTime + serverDur }));
+          return;
         }
-        return;
-      }
-
-      // ── Phase: Terminal status (call is over) ──
-      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-
-      const serverDur = data.duration_seconds || 0;
-      const serverDisp = data.disposition;
-
-      if (data.student_connected_at && !serverDisp) {
-        // Was connected, now ended, no disposition — show disposition panel
-        const preDispo = preDispositionRef.current;
-        if (preDispo) {
-          preDispositionRef.current = null;
-          setCallState(prev => ({ ...prev, elapsed: serverDur }));
-          await finalizeDisposition(preDispo, serverDur);
-        } else {
-          setCallState(prev => ({ ...prev, status: "ended", elapsed: serverDur }));
-          setAutoNextTimer(60);
-        }
-        setStats(prev => ({ ...prev, connected: prev.connected + 1, totalTalkTime: prev.totalTalkTime + serverDur }));
-      } else if (serverDisp) {
-        // Auto-disposed (busy/not_answered/voicemail). Cancelled is not a
-        // disposition and must not count as a call.
-        if (serverDisp === "cancelled" || serverDisp === "cancelled_by_counsellor") {
+        case "terminal-auto":
+          stopPolling();
+          applyAutoDisposition(phase.disposition);
+          return;
+        case "terminal-bare":
+          // Never connected and no disposition — do not count as a call.
+          stopPolling();
           handleCancelledCall();
-        } else {
-          handleAutoDisposition(serverDisp);
-        }
-      } else {
-        // No student connection and no disposition. Do not count this as a call.
-        handleCancelledCall();
+          return;
       }
     };
     // Poll every 3 seconds
