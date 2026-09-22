@@ -42,6 +42,15 @@ export function VideoEmbed({
           loading="lazy"
         />
       </div>
+      {/* A cross-origin iframe never tells us whether it loaded, so always offer
+          the escape hatch — e.g. a Drive file that isn't shared "anyone with the
+          link" renders an access-denied frame with no way out otherwise. */}
+      <p className="bg-black px-2 py-1 text-center text-[10px] text-white/60">
+        Video not loading?{" "}
+        <a href={url} target="_blank" rel="noreferrer" className="underline hover:text-white/90">
+          Open in {videoSourceLabel(url)}
+        </a>
+      </p>
     </div>
   );
 }
