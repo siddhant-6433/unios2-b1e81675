@@ -254,7 +254,7 @@ AS $$
   WHERE d.branch_id IS NOT NULL
     AND public.library_can_view_digitization(auth.uid(), d.branch_id)
     AND (_branch_ids IS NULL OR d.branch_id = ANY(_branch_ids))
-    AND (_statuses IS NULL OR d.status = ANY(_statuses))
+    AND (_statuses IS NULL OR d.status::text = ANY(_statuses))
     AND (
       _enrichment IS NULL OR _enrichment = 'all'
       OR (_enrichment = 'enriched' AND d.enrichment_status = 'enriched')

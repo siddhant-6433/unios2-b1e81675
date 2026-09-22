@@ -23,6 +23,10 @@ const librarianAccessMigration = readFileSync(
   "supabase/migrations/20260922171823_library_librarian_access_and_bulk_approval.sql",
   "utf8",
 );
+const libraryQueuePerfMigration = readFileSync(
+  "supabase/migrations/20260922180544_library_digitization_queue_perf_and_grants.sql",
+  "utf8",
+);
 
 describe("library module", () => {
   it("adds librarian as a first-class role and exposes it in admin role surfaces", () => {
@@ -263,6 +267,17 @@ describe("library module", () => {
     const permissionContext = readFileSync("src/contexts/PermissionContext.tsx", "utf8");
     expect(permissionContext).toContain("library_staff_assignments");
     expect(permissionContext).toContain('next.add("library:catalog")');
+  });
+
+  it("evaluates queue access once per branch, not per record, and locks RPCs to authenticated", () => {
+    expect(libraryQueuePerfMigration).toContain("public.library_accessible_branch_ids");
+    expect(libraryQueuePerfMigration).toContain("public.library_queue_branch_ids");
+    expect(libraryQueuePerfMigration).toContain("d.branch_id = ANY(v_branches)");
+    expect(libraryQueuePerfMigration).toContain("d.branch_id = ANY(a.ids)");
+    expect(libraryQueuePerfMigration).toContain("d.status::text = ANY(_statuses)");
+    // Postgres grants EXECUTE to PUBLIC by default; revoke it so anon can't reach them.
+    expect(libraryQueuePerfMigration).toContain("REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC");
+    expect(libraryQueuePerfMigration).toContain("REVOKE EXECUTE ON FUNCTION %s FROM anon");
   });
 
   it("normalizes external ISBN metadata lookup through one edge function", () => {
