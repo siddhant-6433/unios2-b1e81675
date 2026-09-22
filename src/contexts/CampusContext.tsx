@@ -10,17 +10,19 @@ export interface Campus {
 
 const NO_ASSIGNED_CAMPUS_ID = "00000000-0000-0000-0000-000000000000";
 
-// Roles whose data access is org-wide rather than scoped to an assigned campus.
-// Mirrors the database: super_admin bypasses campus RLS entirely, and
-// admission_head is granted org-wide read (see the admission-head org-wide
-// campus scope migration). Every other staff role is restricted to its assigned
-// campus(es) and fails closed to NO_ASSIGNED_CAMPUS_ID when it has none.
+// Roles whose data access is not driven by the campus dropdown.
+// Mirrors the database: super_admin bypasses campus RLS entirely, admission_head
+// is org-wide, and principal is scoped in RLS by assigned campus OR institution
+// OR course (see the user data access grants migration) so it must not be
+// filtered down to a single campus here. Every other staff role is restricted to
+// its assigned campus(es) and fails closed to NO_ASSIGNED_CAMPUS_ID when it has
+// none.
 //
 // This exists so the "no assigned campus" sentinel is never treated as a real
 // campus filter by callers that do `selectedCampusId !== "all"`. Passing the
 // sentinel UUID through produced queries like `campus_id = '000...0'`, which
 // match nothing and blanked the whole CRM for an unassigned admission head.
-const ORG_WIDE_CAMPUS_ROLES = new Set(["super_admin", "admission_head"]);
+const ORG_WIDE_CAMPUS_ROLES = new Set(["super_admin", "admission_head", "principal"]);
 
 interface CampusContextType {
   campuses: Campus[];
