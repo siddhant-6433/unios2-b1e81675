@@ -156,7 +156,7 @@ describe("library module", () => {
     expect(libraryPage).toContain("requireLibraryScope");
     expect(libraryPage).toContain("library_staff_assignments");
     expect(libraryPage).toContain("handleAssignStaff");
-    expect(libraryPage).toContain("Librarians for");
+    expect(libraryPage).toContain("Library Access Matrix");
     expect(libraryPage).toContain('from("library_books")');
     expect(libraryPage).toContain('from("library_items")');
     expect(libraryPage).toContain('from("library_loans")');
@@ -238,6 +238,27 @@ describe("library module", () => {
     expect(libraryPage).toContain("function PatronLibrary(");
     expect(libraryPage).toContain("library_place_hold");
     expect(libraryPage).toContain("isPatronOnly");
+  });
+
+  it("exposes an operable library access matrix for granular grant/revoke", () => {
+    // Server API: roster + upsert + revoke, guarded by manage_settings.
+    expect(librarianAccessMigration).toContain("public.library_access_matrix");
+    expect(librarianAccessMigration).toContain("public.library_set_access");
+    expect(librarianAccessMigration).toContain("public.library_remove_access");
+    expect(librarianAccessMigration).toContain("You do not have permission to manage library access");
+    expect(librarianAccessMigration).toContain("ON CONFLICT (branch_id, user_id) DO UPDATE");
+    // UI: editable capability matrix in Library settings.
+    expect(libraryPage).toContain("library_access_matrix");
+    expect(libraryPage).toContain("library_set_access");
+    expect(libraryPage).toContain("library_remove_access");
+    expect(libraryPage).toContain("ACCESS_CAPABILITY_KEYS");
+    expect(libraryPage).toContain("handleUpdateAccess");
+    expect(libraryPage).toContain("handleMatrixGrant");
+    expect(libraryPage).toContain("handleRemoveAccess");
+    // Assignment-derived capabilities surface in the permission layer.
+    const permissionContext = readFileSync("src/contexts/PermissionContext.tsx", "utf8");
+    expect(permissionContext).toContain("library_staff_assignments");
+    expect(permissionContext).toContain('next.add("library:catalog")');
   });
 
   it("normalizes external ISBN metadata lookup through one edge function", () => {

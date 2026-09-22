@@ -185,6 +185,23 @@ type DigitizationSummary = {
   missing_cover: number;
 };
 
+type AccessMatrixRow = {
+  user_id: string;
+  display_name: string | null;
+  email: string | null;
+  phone: string | null;
+  app_role: string | null;
+  assignment_id: string | null;
+  assignment_role: LibraryStaffAssignment["assignment_role"] | null;
+  can_catalog: boolean;
+  can_circulate: boolean;
+  can_inventory: boolean;
+  can_digitize: boolean;
+  can_manage_settings: boolean;
+  active: boolean;
+  has_assignment: boolean;
+};
+
 type LibraryHold = {
   id: string;
   book_id: string;
@@ -215,6 +232,17 @@ type DigitizationReviewEdit = {
 
 const tabKeys = ["dashboard", "catalog", "circulation", "inventory", "digitization", "authors", "publishers", "members", "reports", "settings"];
 const today = startOfToday();
+
+// The editable primitives behind the §4.2 access matrix. View is implicit for any
+// grant; Approve is derived from Catalog and Export from Inventory/Circulate/Settings.
+const ACCESS_CAPABILITY_KEYS = ["can_catalog", "can_circulate", "can_inventory", "can_digitize", "can_manage_settings"] as const;
+const ACCESS_CAPABILITY_LABELS: Record<string, string> = {
+  can_catalog: "Catalog",
+  can_circulate: "Circulate",
+  can_inventory: "Inventory",
+  can_digitize: "Digitize",
+  can_manage_settings: "Settings",
+};
 
 function authorsLabel(authors?: string[] | null) {
   return authors?.length ? authors.join(", ") : "Unknown author";
@@ -352,6 +380,9 @@ const Library = () => {
   const [queueLoading, setQueueLoading] = useState(false);
   const [holds, setHolds] = useState<LibraryHold[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [accessMatrix, setAccessMatrix] = useState<AccessMatrixRow[]>([]);
+  const [accessMatrixLoading, setAccessMatrixLoading] = useState(false);
+  const [accessSearch, setAccessSearch] = useState("");
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [branches, setBranches] = useState<LibraryBranch[]>([]);
@@ -493,10 +524,10 @@ const Library = () => {
   const myAssignedBranchIds = useMemo(() => {
     return new Set(staffAssignments.filter((assignment) => assignment.user_id === user?.id && assignment.active).map((assignment) => assignment.branch_id));
   }, [staffAssignments, user?.id]);
-  // A librarian is scoped to their explicit assignments *only when they have some*.
-  // Otherwise they fall back to their campus (mirrors the SQL role fallback), so a
-  // freshly-created librarian account can operate without an admin pre-assigning them.
-  const assignmentScopedUser = role === "librarian" && !isLibraryAdministrator && myAssignedBranchIds.size > 0;
+  // Non-admins who hold explicit assignments are scoped to those branches. A librarian
+  // with none falls back to their campus (mirrors the SQL role fallback), so a freshly
+  // created librarian account can operate without an admin pre-assigning them.
+  const assignmentScopedUser = !isLibraryAdministrator && myAssignedBranchIds.size > 0;
 
   const visibleBranches = useMemo(() => {
     return branches.filter((branch) => {
@@ -619,6 +650,114 @@ const Library = () => {
   const canManageSelectedLibrary = isLibraryAdministrator
     || selectedUserAssignment?.assignment_role === "manager"
     || selectedUserAssignment?.can_manage_settings === true;
+
+  // Server-backed roster for the access matrix (authoritative, unlike the
+  // own-rows-only staffAssignments list).
+  const fetchAccessMatrix = async () => {
+    if (!selectedBranchId || !canManageSelectedLibrary) {
+      setAccessMatrix([]);
+      return;
+    }
+    setAccessMatrixLoading(true);
+    try {
+      const { data, error } = await (supabase as any).rpc("library_access_matrix", { _branch_id: selectedBranchId });
+      if (error) throw error;
+      setAccessMatrix((data || []) as AccessMatrixRow[]);
+    } catch (err: any) {
+      setAccessMatrix([]);
+      toast({ title: "Could not load access matrix", description: err.message, variant: "destructive" });
+    } finally {
+      setAccessMatrixLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (effectiveTab === "settings") fetchAccessMatrix();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveTab, selectedBranchId, canManageSelectedLibrary]);
+
+  const matrixRows = useMemo(() => {
+    const q = accessSearch.trim().toLowerCase();
+    if (!q) return accessMatrix.filter((row) => row.has_assignment);
+    return accessMatrix.filter((row) =>
+      [row.display_name, row.email, row.app_role].some((value) => String(value || "").toLowerCase().includes(q)),
+    );
+  }, [accessMatrix, accessSearch]);
+
+  const handleMatrixGrant = async (row: AccessMatrixRow) => {
+    if (!canManageSelectedLibrary || !selectedBranchId) return;
+    const defaults = assignmentDefaults("librarian");
+    setSaving(`access-${row.user_id}`);
+    try {
+      const { error } = await (supabase as any).rpc("library_set_access", {
+        _branch_id: selectedBranchId,
+        _user_id: row.user_id,
+        _assignment_role: "librarian",
+        _can_catalog: defaults.can_catalog,
+        _can_circulate: defaults.can_circulate,
+        _can_inventory: defaults.can_inventory,
+        _can_digitize: defaults.can_digitize,
+        _can_manage_settings: defaults.can_manage_settings,
+        _active: true,
+      });
+      if (error) throw error;
+      toast({ title: "Library access granted", description: `${row.display_name || row.email || "Staff member"} can now work this library.` });
+      fetchAccessMatrix();
+      fetchLibrary();
+    } catch (err: any) {
+      toast({ title: "Could not grant access", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleUpdateAccess = async (
+    row: AccessMatrixRow,
+    patch: Partial<Pick<AccessMatrixRow, "assignment_role" | "can_catalog" | "can_circulate" | "can_inventory" | "can_digitize" | "can_manage_settings" | "active">>,
+  ) => {
+    if (!canManageSelectedLibrary || !selectedBranchId) return;
+    const next = { ...row, ...patch };
+    setAccessMatrix((current) => current.map((r) => (r.user_id === row.user_id ? next : r)));
+    setSaving(`access-${row.user_id}`);
+    try {
+      const { error } = await (supabase as any).rpc("library_set_access", {
+        _branch_id: selectedBranchId,
+        _user_id: row.user_id,
+        _assignment_role: next.assignment_role || "librarian",
+        _can_catalog: next.can_catalog,
+        _can_circulate: next.can_circulate,
+        _can_inventory: next.can_inventory,
+        _can_digitize: next.can_digitize,
+        _can_manage_settings: next.can_manage_settings,
+        _active: next.active,
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      toast({ title: "Access update failed", description: err.message, variant: "destructive" });
+      fetchAccessMatrix();
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleRemoveAccess = async (row: AccessMatrixRow) => {
+    if (!canManageSelectedLibrary || !selectedBranchId) return;
+    if (!window.confirm(`Remove all library access for ${row.display_name || row.email || "this user"}?`)) return;
+    setSaving(`access-${row.user_id}`);
+    try {
+      const { error } = await (supabase as any).rpc("library_remove_access", { _branch_id: selectedBranchId, _user_id: row.user_id });
+      if (error) throw error;
+      toast({ title: "Library access removed" });
+      setAccessMatrix((current) => current.map((r) => (r.user_id === row.user_id
+        ? { ...r, has_assignment: false, assignment_id: null, assignment_role: null, active: false, can_catalog: false, can_circulate: false, can_inventory: false, can_digitize: false, can_manage_settings: false }
+        : r)));
+      fetchLibrary();
+    } catch (err: any) {
+      toast({ title: "Could not remove access", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
+  };
   const selectedScopeCampusId = selectedBranch?.campus_id || selectedInstitution?.campus_id || (libraryCampusId !== "all" ? libraryCampusId : "");
   const selectedScopeInstitutionId = selectedBranch?.institution_id || selectedInstitutionId;
   // A branch serves its own institution plus any explicitly mapped extras (shared libraries).
@@ -865,21 +1004,6 @@ const Library = () => {
         description: err.code === "23505" ? "This librarian is already assigned to the selected library." : err.message,
         variant: "destructive",
       });
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  const handleRemoveStaff = async (assignment: LibraryStaffAssignment) => {
-    if (!canManageSelectedLibrary) return;
-    setSaving(`staff-${assignment.id}`);
-    try {
-      const { error } = await (supabase as any).from("library_staff_assignments").delete().eq("id", assignment.id);
-      if (error) throw error;
-      toast({ title: "Assignment removed" });
-      fetchLibrary();
-    } catch (err: any) {
-      toast({ title: "Remove assignment failed", description: err.message, variant: "destructive" });
     } finally {
       setSaving(null);
     }
@@ -2590,9 +2714,10 @@ const Library = () => {
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
+              <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                 <Users className="h-4 w-4" />
-                Librarians for {selectedBranch?.name || "Selected Library"}
+                Library Access Matrix
+                <span className="text-sm font-normal text-muted-foreground">— {selectedBranch?.name || "Selected Library"}</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -2651,43 +2776,140 @@ const Library = () => {
                   </Button>
                 </form>
               )}
-              <div className="divide-y divide-border rounded-xl border border-border">
-                {!selectedBranchId ? (
-                  <EmptyRow text="Select a library to manage librarians" />
-                ) : selectedBranchAssignments.length === 0 ? (
-                  <EmptyRow text={canManageSelectedLibrary ? "No librarians assigned to this library yet" : "No librarian assignments visible"} />
-                ) : selectedBranchAssignments.map((assignment) => (
-                  <div key={assignment.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
-                    <div>
-                      <p className="text-sm font-medium text-foreground">
-                        {assignment.profiles?.display_name || assignment.profiles?.email || assignment.profiles?.phone || assignment.user_id}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{assignment.assignment_role} · {[
-                        assignment.can_catalog && "catalog",
-                        assignment.can_circulate && "circulate",
-                        assignment.can_inventory && "inventory",
-                        assignment.can_digitize && "digitize",
-                        assignment.can_manage_settings && "settings",
-                      ].filter(Boolean).join(", ") || "view only"}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
+              {!selectedBranchId ? (
+                <EmptyRow text="Select a library to manage librarians" />
+              ) : !canManageSelectedLibrary ? (
+                <div className="divide-y divide-border rounded-xl border border-border">
+                  {selectedBranchAssignments.length === 0 ? (
+                    <EmptyRow text="No librarian assignments visible" />
+                  ) : selectedBranchAssignments.map((assignment) => (
+                    <div key={assignment.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {assignment.profiles?.display_name || assignment.profiles?.email || assignment.profiles?.phone || assignment.user_id}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{assignment.assignment_role} · {[
+                          assignment.can_catalog && "catalog",
+                          assignment.can_circulate && "circulate",
+                          assignment.can_inventory && "inventory",
+                          assignment.can_digitize && "digitize",
+                          assignment.can_manage_settings && "settings",
+                        ].filter(Boolean).join(", ") || "view only"}</p>
+                      </div>
                       <Badge variant={assignment.active ? "outline" : "secondary"}>{assignment.active ? "active" : "inactive"}</Badge>
-                      {canManageSelectedLibrary && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={saving === `staff-${assignment.id}`}
-                          onClick={() => handleRemoveStaff(assignment)}
-                        >
-                          {saving === `staff-${assignment.id}` ? <ButtonOrb state="working" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                          Remove
-                        </Button>
-                      )}
                     </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <p className="max-w-xl text-xs text-muted-foreground">
+                      Tick a capability to grant or revoke it instantly. Anyone listed here gets an explicit
+                      assignment, which <span className="font-medium text-foreground">overrides the campus-wide librarian default</span> — so they are limited to exactly the capabilities below.
+                    </p>
+                    <input
+                      value={accessSearch}
+                      onChange={(e) => setAccessSearch(e.target.value)}
+                      placeholder="Search staff to add…"
+                      className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground sm:w-64"
+                    />
                   </div>
-                ))}
-              </div>
+                  <div className="overflow-x-auto rounded-xl border border-border">
+                    <table className="w-full min-w-[900px] text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                          <th className="p-2 font-medium">Person</th>
+                          <th className="p-2 font-medium">Role</th>
+                          <th className="p-2 text-center font-medium">View</th>
+                          {ACCESS_CAPABILITY_KEYS.map((key) => (
+                            <th key={key} className="p-2 text-center font-medium">{ACCESS_CAPABILITY_LABELS[key]}</th>
+                          ))}
+                          <th className="p-2 text-center font-medium">Approve</th>
+                          <th className="p-2 text-center font-medium">Export</th>
+                          <th className="p-2 text-center font-medium">Active</th>
+                          <th className="p-2 text-right font-medium">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {accessMatrixLoading ? (
+                          <tr><td colSpan={12} className="p-4 text-center text-sm text-muted-foreground"><ButtonOrb state="working" className="mx-auto" /> Loading access…</td></tr>
+                        ) : matrixRows.length === 0 ? (
+                          <tr><td colSpan={12}><EmptyRow text={accessSearch ? "No matching staff" : "No one has explicit access yet — search above to add staff."} /></td></tr>
+                        ) : matrixRows.map((row) => {
+                          const isManager = row.assignment_role === "manager";
+                          const eff = (key: typeof ACCESS_CAPABILITY_KEYS[number]) => row.has_assignment && (isManager || row[key]);
+                          const rowSaving = saving === `access-${row.user_id}`;
+                          return (
+                            <tr key={row.user_id} className="align-middle">
+                              <td className="p-2">
+                                <p className="font-medium text-foreground">{row.display_name || row.email || row.user_id}</p>
+                                <p className="text-xs text-muted-foreground">{row.email || row.phone || "no contact"}{row.app_role ? ` · ${row.app_role.replace(/_/g, " ")}` : ""}</p>
+                              </td>
+                              <td className="p-2">
+                                {row.has_assignment ? (
+                                  <select
+                                    value={row.assignment_role || "librarian"}
+                                    disabled={rowSaving}
+                                    onChange={(e) => handleUpdateAccess(row, { assignment_role: e.target.value as LibraryStaffAssignment["assignment_role"] })}
+                                    className="rounded-lg border border-input bg-background px-2 py-1 text-xs text-foreground disabled:opacity-50"
+                                  >
+                                    {["manager", "librarian", "assistant", "auditor"].map((option) => (
+                                      <option key={option} value={option}>{option}</option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">no access</span>
+                                )}
+                              </td>
+                              <td className="p-2 text-center">{row.has_assignment ? <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-600" /> : <span className="text-muted-foreground">—</span>}</td>
+                              {ACCESS_CAPABILITY_KEYS.map((key) => (
+                                <td key={key} className="p-2 text-center">
+                                  {row.has_assignment ? (
+                                    <input
+                                      type="checkbox"
+                                      className="h-4 w-4 rounded border-border"
+                                      checked={eff(key)}
+                                      disabled={isManager || rowSaving}
+                                      onChange={(e) => handleUpdateAccess(row, { [key]: e.target.checked } as Partial<AccessMatrixRow>)}
+                                    />
+                                  ) : <span className="text-muted-foreground">—</span>}
+                                </td>
+                              ))}
+                              <td className="p-2 text-center">{eff("can_catalog") ? <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-600" /> : <span className="text-muted-foreground">—</span>}</td>
+                              <td className="p-2 text-center">{(eff("can_inventory") || eff("can_circulate") || eff("can_manage_settings")) ? <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-600" /> : <span className="text-muted-foreground">—</span>}</td>
+                              <td className="p-2 text-center">
+                                {row.has_assignment ? (
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4 rounded border-border"
+                                    checked={row.active}
+                                    disabled={rowSaving}
+                                    onChange={(e) => handleUpdateAccess(row, { active: e.target.checked })}
+                                  />
+                                ) : <span className="text-muted-foreground">—</span>}
+                              </td>
+                              <td className="p-2 text-right">
+                                {rowSaving ? (
+                                  <ButtonOrb state="working" />
+                                ) : row.has_assignment ? (
+                                  <Button type="button" variant="outline" size="sm" onClick={() => handleRemoveAccess(row)}>
+                                    <Trash2 className="mr-2 h-4 w-4" /> Remove
+                                  </Button>
+                                ) : (
+                                  <Button type="button" size="sm" onClick={() => handleMatrixGrant(row)}>Grant access</Button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    View is implicit for anyone with access. Approve is derived from Catalog; Export from Inventory, Circulate or Settings. “manager” enables everything.
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

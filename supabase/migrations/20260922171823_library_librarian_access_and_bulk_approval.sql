@@ -594,7 +594,151 @@ WHERE NOT EXISTS (
 );
 
 -- ---------------------------------------------------------------------------
--- 13. Indexes backing the paged queue + duplicate marking.
+-- 13. Library access matrix — the §4.2 capability matrix, operable from the UI.
+--     Super admin (or anyone with manage_settings on the branch) can grant,
+--     adjust, suspend and revoke access per user, per library. This is the
+--     authoritative write path for `library_staff_assignments`.
+-- ---------------------------------------------------------------------------
+
+-- Roster for a branch: every active non-student/parent profile, with this
+-- branch's assignment (if any) and its capability flags.
+CREATE OR REPLACE FUNCTION public.library_access_matrix(_branch_id uuid)
+RETURNS TABLE (
+  user_id uuid,
+  display_name text,
+  email text,
+  phone text,
+  app_role text,
+  assignment_id uuid,
+  assignment_role text,
+  can_catalog boolean,
+  can_circulate boolean,
+  can_inventory boolean,
+  can_digitize boolean,
+  can_manage_settings boolean,
+  active boolean,
+  has_assignment boolean
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT public.library_user_can_access_branch(auth.uid(), _branch_id, 'manage_settings') THEN
+    RAISE EXCEPTION 'You do not have permission to manage library access';
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    p.user_id,
+    p.display_name,
+    p.email,
+    p.phone,
+    public.get_user_role(p.user_id)::text,
+    a.id,
+    a.assignment_role,
+    coalesce(a.can_catalog, false),
+    coalesce(a.can_circulate, false),
+    coalesce(a.can_inventory, false),
+    coalesce(a.can_digitize, false),
+    coalesce(a.can_manage_settings, false),
+    coalesce(a.active, false),
+    (a.id IS NOT NULL)
+  FROM public.profiles p
+  LEFT JOIN public.library_staff_assignments a
+    ON a.branch_id = _branch_id
+   AND a.user_id = p.user_id
+  WHERE p.archived_at IS NULL
+    AND p.login_disabled = false
+    AND (
+      a.id IS NOT NULL
+      OR coalesce(public.get_user_role(p.user_id)::text, '') NOT IN ('student', 'parent')
+    )
+  ORDER BY (a.id IS NOT NULL) DESC, p.display_name NULLS LAST;
+END;
+$$;
+
+-- Grant or adjust a user's access on one library (upsert).
+CREATE OR REPLACE FUNCTION public.library_set_access(
+  _branch_id uuid,
+  _user_id uuid,
+  _assignment_role text,
+  _can_catalog boolean DEFAULT true,
+  _can_circulate boolean DEFAULT true,
+  _can_inventory boolean DEFAULT true,
+  _can_digitize boolean DEFAULT true,
+  _can_manage_settings boolean DEFAULT false,
+  _active boolean DEFAULT true
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_id uuid;
+  v_profile uuid;
+BEGIN
+  IF NOT public.library_user_can_access_branch(auth.uid(), _branch_id, 'manage_settings') THEN
+    RAISE EXCEPTION 'You do not have permission to manage library access';
+  END IF;
+  IF _assignment_role NOT IN ('manager', 'librarian', 'assistant', 'auditor') THEN
+    RAISE EXCEPTION 'Invalid library role %', _assignment_role;
+  END IF;
+
+  SELECT id INTO v_profile FROM public.profiles WHERE user_id = _user_id LIMIT 1;
+
+  INSERT INTO public.library_staff_assignments (
+    branch_id, user_id, profile_id, assignment_role,
+    can_catalog, can_circulate, can_inventory, can_digitize, can_manage_settings,
+    active, created_by
+  )
+  VALUES (
+    _branch_id, _user_id, v_profile, _assignment_role,
+    _can_catalog, _can_circulate, _can_inventory, _can_digitize, _can_manage_settings,
+    _active, auth.uid()
+  )
+  ON CONFLICT (branch_id, user_id) DO UPDATE SET
+    profile_id = EXCLUDED.profile_id,
+    assignment_role = EXCLUDED.assignment_role,
+    can_catalog = EXCLUDED.can_catalog,
+    can_circulate = EXCLUDED.can_circulate,
+    can_inventory = EXCLUDED.can_inventory,
+    can_digitize = EXCLUDED.can_digitize,
+    can_manage_settings = EXCLUDED.can_manage_settings,
+    active = EXCLUDED.active,
+    updated_at = now()
+  RETURNING id INTO v_id;
+
+  RETURN v_id;
+END;
+$$;
+
+-- Revoke a user's access on one library.
+CREATE OR REPLACE FUNCTION public.library_remove_access(_branch_id uuid, _user_id uuid)
+RETURNS int
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_deleted int := 0;
+BEGIN
+  IF NOT public.library_user_can_access_branch(auth.uid(), _branch_id, 'manage_settings') THEN
+    RAISE EXCEPTION 'You do not have permission to manage library access';
+  END IF;
+
+  DELETE FROM public.library_staff_assignments a
+  WHERE a.branch_id = _branch_id
+    AND a.user_id = _user_id;
+  GET DIAGNOSTICS v_deleted = ROW_COUNT;
+  RETURN v_deleted;
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 14. Indexes backing the paged queue + duplicate marking.
 -- ---------------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_library_digitization_records_branch_accession
   ON public.library_digitization_records (branch_id, lower(btrim(accession_no)))
@@ -609,3 +753,6 @@ GRANT EXECUTE ON FUNCTION public.library_mark_duplicate_accessions(uuid[]) TO au
 GRANT EXECUTE ON FUNCTION public.library_bulk_approve_digitization(uuid[], uuid[], uuid, int) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.library_delete_digitization_batch(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.library_place_hold(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.library_access_matrix(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.library_set_access(uuid, uuid, text, boolean, boolean, boolean, boolean, boolean, boolean) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.library_remove_access(uuid, uuid) TO authenticated;

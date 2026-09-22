@@ -77,6 +77,14 @@ This is implemented in SQL by `library_user_has_explicit_assignment`, consulted 
 
 ### 4.2 Matrix (effective access)
 
+> This matrix is **operable from the UI**: Library → Settings → **Library Access Matrix**
+> (super admin, or anyone with `manage_settings` on the branch). Each row is a person,
+> each column a capability; ticking grants, unticking revokes, `Remove` deletes the
+> assignment and `Active` suspends it without losing the configuration. Writes go through
+> `library_set_access` / `library_remove_access`; the roster comes from
+> `library_access_matrix`. `View` is implicit for anyone with access, and `Approve` /
+> `Export` are derived (see the note under the table).
+
 | Capability | super_admin | principal / campus_admin | librarian (no assignment) | librarian (assigned) | faculty | student |
 |---|---|---|---|---|---|---|
 | View branches/settings | all | own campus | — | own branches | — | — |
@@ -174,6 +182,9 @@ New in this branch (`20260922171823_library_librarian_access_and_bulk_approval.s
 | `library_bulk_approve_digitization(uuid[], uuid[], uuid, int)` | Batched approval minting accessions |
 | `library_delete_digitization_batch(uuid)` | Remove a mistaken import batch |
 | `library_place_hold(uuid)` | Patron hold with lazy member resolution |
+| `library_access_matrix(uuid)` | Roster + current capabilities for the access matrix |
+| `library_set_access(...)` | Upsert a user's per-branch capabilities (grant / adjust / suspend) |
+| `library_remove_access(uuid, uuid)` | Revoke a user's access on a branch |
 | Settings backfill + accession index | Loan rules for legacy branches; faster dedupe |
 
 Rewritten: `library_user_can_access_branch`, `library_user_has_any_assignment`, and the
@@ -193,6 +204,10 @@ backfill, index.
 - **Flag duplicates** and **Approve all pending / Approve selected** with live progress.
 - Import pre-checks existing accessions against the server.
 - Tab visibility per role; `PatronLibrary` for faculty/students (catalog + holds + loans).
+- **Library Access Matrix** in Settings: per-person, per-capability grant/revoke/suspend,
+  with a searchable roster of any non-student/parent staff member.
+- `PermissionContext` unions capabilities from the caller's own library assignments, so a
+  grant made in the matrix surfaces in the UI for roles other than `librarian`.
 - Load failures surface an inline error with retry instead of a blank page.
 
 **Tests** — `src/test/library-module.test.ts` extended (13 tests) to assert the role
