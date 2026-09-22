@@ -44,10 +44,13 @@ describe("Inbox offer waiver badge and reload behavior", () => {
     expect(inbox).toContain("setSelected(cat.id);");
   });
 
-  it("hides zero-count inbox queues from the sidebar", () => {
+  it("hides zero-count inbox queues but keeps the selected one pinned", () => {
     expect(inbox).toContain("const roleAllowedCategories = allCategories.filter");
     expect(inbox).toContain("const visibleCategories = countsLoaded");
-    expect(inbox).toContain("roleAllowedCategories.filter((c) => categoryDisplayCount(c) > 0)");
+    // A queue with no items is hidden — except the one the user just clicked,
+    // whose count momentarily reads 0 until its items load. Without the pin the
+    // auto-select effect snaps every click back to the first queue.
+    expect(inbox).toContain("roleAllowedCategories.filter((c) => categoryDisplayCount(c) > 0 || c.id === selected)");
     expect(inbox).toContain("No open inbox items");
     expect(inbox).not.toContain('displayCount === 0 ? "All clear"');
   });

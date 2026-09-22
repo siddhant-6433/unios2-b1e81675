@@ -438,8 +438,13 @@ export default function Inbox() {
   );
   const categoryDisplayCount = (cat: InboxCategory) =>
     cat.id === selected && !loading ? items.length : cat.count;
+  // Keep the currently selected queue visible even while its items are still
+  // loading. On click we clear `items`, so categoryDisplayCount briefly reads 0
+  // for the just-selected queue; without pinning it, the auto-select effect
+  // below treats the selection as gone and snaps back to the first visible
+  // queue (Offer Waivers) — so every click landed on Offer Waivers.
   const visibleCategories = countsLoaded
-    ? roleAllowedCategories.filter((c) => categoryDisplayCount(c) > 0)
+    ? roleAllowedCategories.filter((c) => categoryDisplayCount(c) > 0 || c.id === selected)
     : [];
   // The whole sidebar/list is gated on one aggregate counts fetch. Until it
   // lands the page is genuinely still loading — not empty — so the cards and
