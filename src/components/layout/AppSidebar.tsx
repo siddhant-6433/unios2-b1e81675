@@ -141,6 +141,7 @@ const academicsSubMenu: MenuItem[] = [
   { title: "Digitization Queue", url: "/library?tab=digitization", icon: Barcode, permission: "library:digitize" },
   { title: "Members", url: "/library?tab=members", icon: Users, permission: "library:circulate" },
   { title: "Reports", url: "/library?tab=reports", icon: BarChart3, permission: "library:export" },
+  { title: "Access Matrix", url: "/library?tab=access", icon: ShieldCheck, permission: "library:manage_settings" },
   { title: "Settings", url: "/library?tab=settings", icon: Settings, permission: "library:manage_settings" },
 ];
 

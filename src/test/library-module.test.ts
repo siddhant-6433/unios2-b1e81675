@@ -156,7 +156,7 @@ describe("library module", () => {
     expect(libraryPage).toContain("requireLibraryScope");
     expect(libraryPage).toContain("library_staff_assignments");
     expect(libraryPage).toContain("handleAssignStaff");
-    expect(libraryPage).toContain("Library Access Matrix");
+    expect(libraryPage).toContain("Access Matrix");
     expect(libraryPage).toContain('from("library_books")');
     expect(libraryPage).toContain('from("library_items")');
     expect(libraryPage).toContain('from("library_loans")');
@@ -247,14 +247,18 @@ describe("library module", () => {
     expect(librarianAccessMigration).toContain("public.library_remove_access");
     expect(librarianAccessMigration).toContain("You do not have permission to manage library access");
     expect(librarianAccessMigration).toContain("ON CONFLICT (branch_id, user_id) DO UPDATE");
-    // UI: editable capability matrix in Library settings.
+    // UI: editable capability matrix, promoted to its own tab.
     expect(libraryPage).toContain("library_access_matrix");
     expect(libraryPage).toContain("library_set_access");
     expect(libraryPage).toContain("library_remove_access");
-    expect(libraryPage).toContain("ACCESS_CAPABILITY_KEYS");
     expect(libraryPage).toContain("handleUpdateAccess");
     expect(libraryPage).toContain("handleMatrixGrant");
     expect(libraryPage).toContain("handleRemoveAccess");
+    expect(libraryPage).toContain('<TabsContent value="access"');
+    expect(sidebar).toContain('title: "Access Matrix"');
+    const accessMatrix = readFileSync("src/components/library/LibraryAccessMatrix.tsx", "utf8");
+    expect(accessMatrix).toContain("Library Access Matrix");
+    expect(accessMatrix).toContain("ACCESS_CAPABILITY_KEYS");
     // Assignment-derived capabilities surface in the permission layer.
     const permissionContext = readFileSync("src/contexts/PermissionContext.tsx", "utf8");
     expect(permissionContext).toContain("library_staff_assignments");
