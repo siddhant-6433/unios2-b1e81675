@@ -20,6 +20,7 @@ import {
   nestedOfferLeadId,
   nestedStudent,
 } from "@/lib/staffQueueVisibility";
+import { VideoReviewPanel, type VideoRow } from "@/components/video/VideoReviewPanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -216,6 +217,8 @@ interface VideoApprovalInboxItem {
   content_type: string;
   editor_name: string;
   created_at: string;
+  /** Full video row for the shared review panel (embed, history, corrections). */
+  video: VideoRow;
 }
 
 interface VoiceMessageItem {
@@ -231,9 +234,6 @@ interface VoiceMessageItem {
 }
 
 type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | OfferEditItem | CertificateApprovalItem | HrDocumentApprovalItem | PendingAnItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
-
-// Label a source link by host so the inbox doesn't say "Drive" for a YouTube URL.
-const videoSourceLabel = (url: string) => /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1153,7 +1153,7 @@ export default function Inbox() {
       } else if (cat === "video_approvals") {
         const { data, error } = await supabase
           .from("videos" as any)
-          .select("id, title, drive_url, brand, content_type, editor_id, created_at")
+          .select("*")
           .eq("status", "pending_approval")
           .order("created_at", { ascending: false })
           .limit(100);
@@ -1176,6 +1176,7 @@ export default function Inbox() {
             content_type: v.content_type,
             editor_name: nameById[v.editor_id] || "—",
             created_at: v.created_at,
+            video: v as VideoRow,
           } as VideoApprovalInboxItem));
         commitItems(cat, nextItems);
       } else if (cat === "voice_messages") {
@@ -1534,40 +1535,6 @@ export default function Inbox() {
     }
   };
 
-  const decideVideo = async (video: VideoApprovalInboxItem, decision: "approved" | "rejected") => {
-    if (!isSuperAdmin) return;
-    let rejection_reason: string | null = null;
-    if (decision === "rejected") {
-      const r = window.prompt("Reason for rejection:");
-      if (r === null) return;
-      if (!r.trim()) { toast({ title: "A reason is required to reject", variant: "destructive" }); return; }
-      rejection_reason = r.trim();
-    }
-    setProcessing(video.id);
-    try {
-      const { error } = await supabase.from("videos" as any).update({
-        status: decision,
-        approved_by: user?.id ?? null,
-        approved_at: new Date().toISOString(),
-        rejection_reason,
-      }).eq("id", video.id);
-      if (error) throw error;
-      // On approval, ping the editor on WhatsApp to post & submit the links.
-      if (decision === "approved") {
-        supabase.functions.invoke("video-notify", {
-          body: { event: "approved", video_id: video.id },
-        }).catch(() => { /* non-fatal */ });
-      }
-      toast({ title: decision === "approved" ? "Video approved" : "Video rejected" });
-      setSelectedItem(null);
-      loadItems("video_approvals");
-      fetchCounts();
-    } catch (e: any) {
-      toast({ title: "Action failed", description: e.message, variant: "destructive" });
-    } finally {
-      setProcessing(null);
-    }
-  };
 
   const toggleVoicePlay = async (msg: VoiceMessageItem) => {
     if (playingId === msg.id) {
@@ -2701,55 +2668,12 @@ export default function Inbox() {
     if (selected === "video_approvals") {
       const v = selectedItem as VideoApprovalInboxItem;
       return (
-        <div className="p-5 space-y-5">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">{v.title}</h3>
-            <p className="text-sm text-muted-foreground">{v.editor_name}</p>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card divide-y divide-border">
-            <Row label="Brand" value={VIDEO_BRAND_LABEL[v.brand as VideoBrand] || v.brand} />
-            <Row label="Submitted" value={fmtDate(v.created_at)} />
-          </div>
-
-          <a href={v.drive_url} target="_blank" rel="noreferrer"
-             className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10">
-            <ExternalLink className="h-4 w-4" /> Open {videoSourceLabel(v.drive_url)} Link
-          </a>
-
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              className="flex-1 bg-success/90 hover:bg-success text-white"
-              disabled={!isSuperAdmin || processing === v.id}
-              onClick={() => decideVideo(v, "approved")}
-            >
-              {processing === v.id ? (
-                <ButtonOrb state="working" onFilled />
-              ) : (
-                <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
-              )}
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              className="flex-1"
-              disabled={!isSuperAdmin || processing === v.id}
-              onClick={() => decideVideo(v, "rejected")}
-            >
-              <XCircle className="h-4 w-4 mr-1.5" />Reject
-            </Button>
-          </div>
-
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            onClick={() => navigate("/video-approvals")}
-          >
-            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-            Open Video Approvals
-          </Button>
+        <div className="p-5">
+          <VideoReviewPanel
+            video={v.video}
+            editorName={v.editor_name}
+            onDone={() => { loadItems("video_approvals"); fetchCounts(); }}
+          />
         </div>
       );
     }
