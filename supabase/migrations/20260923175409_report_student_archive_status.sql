@@ -1,3 +1,4 @@
+-- keep-migration-version: this version is already recorded in production migration history.
 -- report student archive status
 CREATE OR REPLACE FUNCTION public.report_student_archive_status(_student_ids uuid[])
 RETURNS jsonb

@@ -1,3 +1,4 @@
+-- keep-migration-version: this version is already recorded in production migration history.
 -- candidate document pendency report
 CREATE OR REPLACE FUNCTION public.candidate_document_pendency_report(_campus_ids uuid[] DEFAULT NULL)
 RETURNS jsonb
