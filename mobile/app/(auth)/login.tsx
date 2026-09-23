@@ -24,11 +24,51 @@ import { spacing, radius } from '../../theme/tokens';
 type StaffStep = 'main' | 'whatsapp' | 'whatsapp_otp' | 'email';
 type WhatsAppSignInState = 'idle' | 'starting' | 'waiting' | 'expired' | 'failed';
 
-// Brand palette — deliberately fixed to the web palette so the app matches the
-// UniOs portal rather than the device theme.
+// Brand palette — deliberately fixed to the web portal's light palette so the
+// login matches UniOs regardless of the device theme.
 const BRAND = '#0035C5';
 const WHATSAPP = '#25D366';
 const WHATSAPP_DARK = '#1DA851';
+
+// Mirrors the web light tokens in src/index.css (--background, --card, --ink…).
+const WEB = {
+  canvas: '#F9FAFB',
+  card: '#FFFFFF',
+  line: '#DFE2E7',
+  input: '#EAEDF0',
+  ink: '#151D28',
+  inkSecondary: '#647387',
+  inkMuted: '#94A0AE',
+  danger: '#B91C1C',
+  dangerBg: '#FDE5E3',
+  greenBg: '#DDFBE6',
+  greenFg: '#166534',
+};
+
+// Shape-compatible with the theme colors the shared sub-components expect.
+const webColors = {
+  canvas: WEB.canvas,
+  card: WEB.card,
+  line: WEB.line,
+  ink: WEB.ink,
+  inkSecondary: WEB.inkSecondary,
+  inkMuted: WEB.inkMuted,
+  accent: BRAND,
+  accentSoft: '#E1EEFF',
+  success: WEB.greenFg,
+  danger: WEB.danger,
+  pillBg: BRAND,
+  pillFg: '#FFFFFF',
+  tint: {
+    yellow: { bg: '#FEF4D5', fg: '#7A5600' },
+    blue: { bg: '#E1EEFF', fg: BRAND },
+    purple: { bg: '#EDE5FC', fg: '#5B21B6' },
+    red: { bg: WEB.dangerBg, fg: WEB.danger },
+    green: { bg: WEB.greenBg, fg: WEB.greenFg },
+    orange: { bg: '#FDE8D4', fg: '#9A3412' },
+    neutral: { bg: '#EEF0F4', fg: '#4B5563' },
+  },
+};
 const GOOGLE_G = {
   blue: '#4285F4',
   green: '#34A853',
@@ -85,6 +125,7 @@ export default function LoginScreen() {
   const [waIntentId, setWaIntentId] = useState<string | null>(null);
   const [waClientSecret, setWaClientSecret] = useState<string | null>(null);
   const [waDeepLink, setWaDeepLink] = useState<string | null>(null);
+  const [showMore, setShowMore] = useState(false);
 
   useEffect(() => {
     if (!authLoading && session) router.replace('/');
@@ -291,9 +332,9 @@ export default function LoginScreen() {
     );
   }
 
-  // ── Staff: multi-method, matching the web portal ──────────────────────────
+  // ── Staff: two primary options, the rest behind "See more options" ────────
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: colors.canvas }]}>
+    <SafeAreaView style={[styles.root, { backgroundColor: webColors.canvas }]}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
@@ -303,22 +344,22 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <Brand colors={colors} title="NIMT Staff" tagline="Sign in to UniOs" />
+          <Brand colors={webColors} title="NIMT Staff" tagline="Sign in to UniOs" />
 
-          {error ? <ErrorBox colors={colors} text={error} /> : null}
+          {error ? <ErrorBox colors={webColors} text={error} /> : null}
 
           {step === 'main' && (
             <View style={styles.stack}>
               {waState === 'waiting' ? (
-                <View style={[styles.waCard, { borderColor: WHATSAPP }]}>
+                <View style={[styles.waCard, { borderColor: WHATSAPP, backgroundColor: webColors.card }]}>
                   <ActivityIndicator color={WHATSAPP_DARK} />
-                  <Text style={[styles.waCardTitle, { color: colors.ink }]}>Waiting for WhatsApp</Text>
-                  <Text style={[styles.waCardText, { color: colors.inkSecondary }]}>
+                  <Text style={[styles.waCardTitle, { color: webColors.ink }]}>Waiting for WhatsApp</Text>
+                  <Text style={[styles.waCardText, { color: webColors.inkSecondary }]}>
                     Send the prefilled message from WhatsApp to finish signing in.
                   </Text>
                   {waDeepLink ? (
                     <TouchableOpacity
-                      style={[styles.outlineBtn, { borderColor: WHATSAPP }]}
+                      style={[styles.outlineBtn, { borderColor: WHATSAPP, backgroundColor: webColors.card }]}
                       onPress={() => Linking.openURL(waDeepLink).catch(() => {})}
                     >
                       <WhatsAppGlyph size={18} color={WHATSAPP_DARK} />
@@ -328,13 +369,14 @@ export default function LoginScreen() {
                     </TouchableOpacity>
                   ) : null}
                   <TouchableOpacity onPress={startWhatsAppSignIn} style={styles.linkBtn}>
-                    <Text style={[styles.linkText, { color: colors.inkSecondary }]}>
+                    <Text style={[styles.linkText, { color: webColors.inkSecondary }]}>
                       Try a different number
                     </Text>
                   </TouchableOpacity>
                 </View>
               ) : (
                 <>
+                  {/* The two primary options */}
                   <TouchableOpacity
                     style={[styles.primaryBtn, { backgroundColor: WHATSAPP }]}
                     onPress={startWhatsAppSignIn}
@@ -352,50 +394,69 @@ export default function LoginScreen() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.primaryBtn, { backgroundColor: BRAND }]}
-                    onPress={() => {
-                      setError(null);
-                      resetWhatsAppSignIn();
-                      setStep('whatsapp');
-                    }}
+                    style={[styles.outlineBtn, { borderColor: webColors.line, backgroundColor: webColors.card }]}
+                    onPress={handleGoogle}
+                    disabled={loading}
                     activeOpacity={0.85}
                   >
-                    <Text style={styles.primaryBtnText}>Login with WhatsApp OTP</Text>
+                    {loading ? (
+                      <ActivityIndicator color={BRAND} />
+                    ) : (
+                      <>
+                        <GoogleGlyph size={20} />
+                        <Text style={[styles.outlineBtnText, { color: webColors.ink }]}>
+                          Sign in with Google
+                        </Text>
+                      </>
+                    )}
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[styles.outlineBtn, { borderColor: colors.line, backgroundColor: colors.card }]}
-                    onPress={() => {
-                      setError(null);
-                      resetWhatsAppSignIn();
-                      setStep('email');
-                    }}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={[styles.outlineBtnText, { color: colors.ink }]}>Login with email</Text>
-                  </TouchableOpacity>
+                  {/* Secondary options revealed on demand */}
+                  {showMore ? (
+                    <>
+                      <TouchableOpacity
+                        style={[styles.primaryBtn, { backgroundColor: BRAND }]}
+                        onPress={() => {
+                          setError(null);
+                          resetWhatsAppSignIn();
+                          setStep('whatsapp');
+                        }}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.primaryBtnText}>Login with WhatsApp OTP</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.outlineBtn, { borderColor: webColors.line, backgroundColor: webColors.card }]}
+                        onPress={() => {
+                          setError(null);
+                          resetWhatsAppSignIn();
+                          setStep('email');
+                        }}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[styles.outlineBtnText, { color: webColors.ink }]}>
+                          Login with email
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity onPress={() => setShowMore(false)} style={styles.linkBtn}>
+                        <Text style={[styles.linkText, { color: webColors.inkSecondary }]}>
+                          Show fewer options
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <TouchableOpacity onPress={() => setShowMore(true)} style={styles.linkBtn}>
+                      <Text style={[styles.linkText, { color: BRAND }]}>See more options</Text>
+                    </TouchableOpacity>
+                  )}
 
                   {(waState === 'expired' || waState === 'failed') && (
                     <TouchableOpacity onPress={startWhatsAppSignIn} style={styles.linkBtn}>
                       <Text style={[styles.linkText, { color: BRAND }]}>Try WhatsApp sign-in again</Text>
                     </TouchableOpacity>
                   )}
-
-                  <View style={styles.orRow}>
-                    <View style={[styles.orLine, { backgroundColor: colors.line }]} />
-                    <Text style={[styles.orText, { color: colors.inkMuted }]}>or</Text>
-                    <View style={[styles.orLine, { backgroundColor: colors.line }]} />
-                  </View>
-
-                  <TouchableOpacity
-                    style={[styles.outlineBtn, { borderColor: colors.line, backgroundColor: colors.card }]}
-                    onPress={handleGoogle}
-                    disabled={loading}
-                    activeOpacity={0.85}
-                  >
-                    <GoogleGlyph size={20} />
-                    <Text style={[styles.outlineBtnText, { color: colors.ink }]}>Continue with Google</Text>
-                  </TouchableOpacity>
                 </>
               )}
             </View>
@@ -404,7 +465,7 @@ export default function LoginScreen() {
           {step === 'whatsapp' && (
             <View style={styles.stack}>
               <WhatsAppPhoneForm
-                colors={colors}
+                colors={webColors}
                 phone={phone}
                 setPhone={setPhone}
                 setError={setError}
@@ -418,14 +479,14 @@ export default function LoginScreen() {
                 }}
                 style={styles.linkBtn}
               >
-                <Text style={[styles.linkText, { color: colors.inkSecondary }]}>Back</Text>
+                <Text style={[styles.linkText, { color: webColors.inkSecondary }]}>Back</Text>
               </TouchableOpacity>
             </View>
           )}
 
           {step === 'whatsapp_otp' && (
             <WhatsAppOtpForm
-              colors={colors}
+              colors={webColors}
               phone={phone}
               otp={otp}
               setOtp={setOtp}
@@ -446,14 +507,14 @@ export default function LoginScreen() {
 
           {step === 'email' && (
             <View style={styles.stack}>
-              <Text style={[styles.label, { color: colors.ink }]}>Work email</Text>
+              <Text style={[styles.label, { color: webColors.ink }]}>Work email</Text>
               <TextInput
                 style={[
                   styles.input,
-                  { backgroundColor: colors.card, borderColor: colors.line, color: colors.ink },
+                  { backgroundColor: webColors.card, borderColor: webColors.line, color: webColors.ink },
                 ]}
                 placeholder="you@nimt.ac.in"
-                placeholderTextColor={colors.inkMuted}
+                placeholderTextColor={webColors.inkMuted}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -463,14 +524,14 @@ export default function LoginScreen() {
                   setError(null);
                 }}
               />
-              <Text style={[styles.label, { color: colors.ink }]}>Password</Text>
+              <Text style={[styles.label, { color: webColors.ink }]}>Password</Text>
               <TextInput
                 style={[
                   styles.input,
-                  { backgroundColor: colors.card, borderColor: colors.line, color: colors.ink },
+                  { backgroundColor: webColors.card, borderColor: webColors.line, color: webColors.ink },
                 ]}
                 placeholder="••••••••"
-                placeholderTextColor={colors.inkMuted}
+                placeholderTextColor={webColors.inkMuted}
                 secureTextEntry
                 value={password}
                 onChangeText={(t) => {
@@ -490,7 +551,7 @@ export default function LoginScreen() {
                   <Text style={styles.primaryBtnText}>Sign in</Text>
                 )}
               </TouchableOpacity>
-              <Text style={[styles.hint, { color: colors.inkMuted }]}>
+              <Text style={[styles.hint, { color: webColors.inkMuted }]}>
                 Same email and password as the UniOs web portal.
               </Text>
               <TouchableOpacity
@@ -500,12 +561,12 @@ export default function LoginScreen() {
                 }}
                 style={styles.linkBtn}
               >
-                <Text style={[styles.linkText, { color: colors.inkSecondary }]}>Back</Text>
+                <Text style={[styles.linkText, { color: webColors.inkSecondary }]}>Back</Text>
               </TouchableOpacity>
             </View>
           )}
 
-          <Terms colors={colors} />
+          <Terms colors={webColors} />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -747,14 +808,16 @@ const styles = StyleSheet.create({
     height: 92,
     borderRadius: radius.xl,
     backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: WEB.line,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.md,
     shadowColor: '#000',
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.08,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
+    elevation: 3,
   },
   logoImg: { width: 68, height: 68 },
   title: { fontSize: 28, fontWeight: '700', letterSpacing: -0.5 },
