@@ -14,6 +14,8 @@ import { MyEngagementPanel } from "@/components/hr/MyEngagementPanel";
 import { MyPayslipsPanel } from "@/components/hr/MyPayslipsPanel";
 import { MyAssetsPanel } from "@/components/hr/MyAssetsPanel";
 import { MyLeaveCalendarPanel } from "@/components/hr/MyLeaveCalendarPanel";
+import { MySettlementPanel } from "@/components/hr/MySettlementPanel";
+import { MyAdvancesPanel } from "@/components/hr/MyAdvancesPanel";
 
 // HR self-service. This is the entire app for the non_teaching role, and the
 // "my own record" view for everyone else — hence permission hr:self, which is
@@ -187,6 +189,8 @@ const MyHr = () => {
             ["performance", "My Performance"],
             ["requests", "Requests"],
             ["assets", "My Assets"],
+            ["advances", "Advances"],
+            ["settlement", "Settlement"],
             ["engagement", "Announcements"],
             ["directory", "Directory"],
             ["holidays", "Holidays"],
@@ -333,6 +337,14 @@ const MyHr = () => {
 
         <TabsContent value="assets" className="mt-6">
           <MyAssetsPanel />
+        </TabsContent>
+
+        <TabsContent value="advances" className="mt-6">
+          <MyAdvancesPanel />
+        </TabsContent>
+
+        <TabsContent value="settlement" className="mt-6">
+          <MySettlementPanel />
         </TabsContent>
 
         <TabsContent value="engagement" className="mt-6">

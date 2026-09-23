@@ -175,6 +175,8 @@ const hrSubMenu: MenuItem[] = [
   { title: "Reports", url: "/hr-reports", icon: BarChart3, permission: "hr:view" },
   { title: "Org Chart", url: "/hr-org", icon: GitMerge, permission: "hr:view" },
   { title: "Assets", url: "/hr-assets", icon: FolderOpen, permission: "hr:assets_manage" },
+  { title: "Advances", url: "/hr-advances", icon: CreditCard, permission: "hr:expenses_approve" },
+  { title: "Full & Final", url: "/hr-settlements", icon: LogOut, permission: "hr:employees_edit" },
   { title: "Settings", url: "/hr-settings", icon: Settings, permission: "hr:employees_edit" },
 ];
 

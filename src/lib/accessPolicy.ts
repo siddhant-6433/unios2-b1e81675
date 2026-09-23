@@ -198,6 +198,8 @@ export const STAFF_ROUTE_POLICIES: readonly RoutePolicy[] = [
   { path: "/hr-reports", permission: "hr:view", staffOnly: true },
   { path: "/hr-org", permission: "hr:view", staffOnly: true },
   { path: "/hr-assets", permission: "hr:assets_manage", staffOnly: true },
+  { path: "/hr-settlements", permission: "hr:employees_edit", staffOnly: true },
+  { path: "/hr-advances", permission: "hr:expenses_approve", staffOnly: true },
   { path: "/hr-settings", permission: "hr:employees_edit", staffOnly: true },
   { path: "/admin", anyPermission: ["campuses_courses:view", "user_management:view", "permissions:view"], staffOnly: true },
   { path: "/id-card-center", roles: ["super_admin", "principal", "office_admin", "office_assistant", "school_coordinator", "campus_admin"], anyPermission: ["hr:view"], staffOnly: true },

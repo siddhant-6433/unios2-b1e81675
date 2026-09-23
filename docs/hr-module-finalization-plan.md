@@ -356,3 +356,32 @@ Shipped on top of §12.
 - F&F settlement computation; expense-advance settle-ups; encashment/comp-off.
 - Custom fields, e-sign, assets↔payroll depreciation.
 - Mobile: consolidate the duplicated leave modal and wire the stubbed Finances/Documents tabs (untestable here without a simulator/credentials).
+
+---
+
+## 14. Phase 3 — full & final settlement + expense advances
+
+Shipped on top of §13.
+
+### Backend — 2 migrations
+| Migration (slug) | What it does |
+|---|---|
+| `hr_expense_advances` | `expense_advances` with a derived `outstanding` balance; `issue_advance` / `settle_advance` (partial recovery supported) / `recover_advances_for_cycle` (idempotent ad-hoc deductions); `expense_advances_inbox` view. |
+| `hr_fnf_settlement` | `employee_settlements` + `employee_settlement_lines` snapshots; `compute_exit_settlement` (final-month salary, leave encashment, gratuity, less notice recovery and outstanding advances); `finalize_exit_settlement`; `mark_exit_settlement_paid` (marks advances recovered); config keys for divisors/thresholds. |
+
+### Frontend
+- **F&F:** `SettlementPanel` (compute → review itemised lines → finalize → mark paid, with PDF) + `/hr-settlements`; `MySettlementPanel` self view.
+- **Advances:** `AdvancesPanel` (issue, partial/full recovery, summary) + `/hr-advances`; `MyAdvancesPanel` self view.
+- **Payroll:** "Advances" action on a run recovers open advances as deductions.
+- MyHr gains **Advances** and **Settlement** tabs.
+
+### Verification (phase 3)
+- `npm run build` — passes.
+- New pure-logic tests: settlement (22), advances (15) → 37.
+- `src/test/hr-phase3-guardrails.test.ts` (10 tests).
+- `npm test` — failure set still identical to the `origin/main` baseline (17 files / 19 tests, unrelated); **+47 passing tests** vs phase 2.
+- `npm run lint:access` — no new violations.
+
+### Remaining deferred
+- Encashment/comp-off leave flows; custom employee fields; e-sign; asset depreciation ↔ payroll.
+- Mobile: consolidate the duplicated leave modal and wire the stubbed Finances/Documents tabs (needs a simulator/credentials to test).

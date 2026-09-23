@@ -310,6 +310,25 @@ export default function HrPayroll() {
     });
   };
 
+  /** Recover open employee advances as ad-hoc deductions for this run. */
+  const recoverAdvances = async () => {
+    if (!openCycle) return;
+    setBusy("advances");
+    const { data, error } = await supabase.rpc(
+      "recover_advances_for_cycle" as never, { _cycle_id: openCycle.id } as never,
+    );
+    setBusy(null);
+    if (error) {
+      toast({ title: "Could not recover advances", description: error.message, variant: "destructive" });
+      return;
+    }
+    await fetchLines(openCycle.id);
+    toast({
+      title: `Advances applied to ${(data as number) ?? 0} employees`,
+      description: "Open advances are added as other deductions. Settle them from the Advances screen after payment.",
+    });
+  };
+
   const setStatus = async (status: Cycle["status"]) => {
     if (!openCycle) return;
     setBusy(status);
@@ -479,6 +498,10 @@ export default function HrPayroll() {
             <Button size="sm" variant="outline" onClick={applyAdjustments} disabled={busy !== null || lines.length === 0}
               title="Apply approved unpaid leave (LOP) and approved expense reimbursements">
               <RefreshCw className="h-4 w-4 mr-1.5" /> Leave & expenses
+            </Button>
+            <Button size="sm" variant="outline" onClick={recoverAdvances} disabled={busy !== null || lines.length === 0}
+              title="Add open employee advances as deductions">
+              <IndianRupee className="h-4 w-4 mr-1.5" /> Advances
             </Button>
             <Button size="sm" variant="outline" onClick={computeAll} disabled={busy !== null || lines.length === 0}>
               <Calculator className="h-4 w-4 mr-1.5" /> Calculate

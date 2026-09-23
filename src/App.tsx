@@ -110,6 +110,8 @@ const HrHelpdesk           = lazy(() => import("./pages/HrHelpdesk"));
 const HrReports            = lazy(() => import("./pages/HrReports"));
 const HrOrg                = lazy(() => import("./pages/HrOrg"));
 const HrAssets             = lazy(() => import("./pages/HrAssets"));
+const HrSettlements        = lazy(() => import("./pages/HrSettlements"));
+const HrAdvances           = lazy(() => import("./pages/HrAdvances"));
 const HrSettings           = lazy(() => import("./pages/HrSettings"));
 const ConsultantCreditNotes = lazy(() => import("./pages/ConsultantCreditNotes"));
 const ParentPortal         = lazy(() => import("./pages/ParentPortal"));
@@ -384,6 +386,8 @@ const App = () => (
                       <Route path="/hr-reports" element={<RequirePermission module="hr" action="view"><HrReports /></RequirePermission>} />
                       <Route path="/hr-org" element={<RequirePermission module="hr" action="view"><HrOrg /></RequirePermission>} />
                       <Route path="/hr-assets" element={<RequirePermission module="hr" action="assets_manage"><HrAssets /></RequirePermission>} />
+                      <Route path="/hr-settlements" element={<RequirePermission module="hr" action="employees_edit"><HrSettlements /></RequirePermission>} />
+                      <Route path="/hr-advances" element={<RequirePermission module="hr" action="expenses_approve"><HrAdvances /></RequirePermission>} />
                       <Route path="/hr-settings" element={<RequirePermission module="hr" action="employees_edit"><HrSettings /></RequirePermission>} />
 
                       {/* Admin — user_management:view */}
