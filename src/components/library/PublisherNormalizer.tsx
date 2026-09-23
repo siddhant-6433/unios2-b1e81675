@@ -2,9 +2,9 @@
 //
 // Imported registers carry hundreds of shorthands/typos for the same houses. A
 // seeded alias dictionary resolves most of them automatically; this component lets
-// staff consolidate the rest: map an unresolved string to a canonical name (which
-// adds an alias and rewrites the staging/catalog rows), review the resulting groups,
-// and prune aliases.
+// staff consolidate the rest: inspect the actual books behind a name, map an
+// unresolved string to a canonical name (which adds an alias and rewrites the
+// staging/catalog rows), review the resulting groups, and prune aliases.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CheckCircle2, Layers, Trash2, Wand2 } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Layers, Printer, Trash2, Wand2 } from "lucide-react";
 
 type UsageRow = {
   publisher: string;
@@ -23,6 +23,19 @@ type UsageRow = {
   is_resolved: boolean;
 };
 type AliasRow = { alias_norm: string; canonical_name: string; canonical_norm: string };
+type PublisherRecord = {
+  source: string;
+  accession_no: string | null;
+  title: string | null;
+  branch_name: string | null;
+  status: string | null;
+};
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[char] || char));
+}
 
 export function PublisherNormalizer({ canManage, active }: { canManage: boolean; active: boolean }) {
   const { toast } = useToast();
@@ -32,6 +45,9 @@ export function PublisherNormalizer({ canManage, active }: { canManage: boolean;
   const [mapInputs, setMapInputs] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [recordsByKey, setRecordsByKey] = useState<Record<string, PublisherRecord[]>>({});
+  const [loadingKey, setLoadingKey] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -53,6 +69,60 @@ export function PublisherNormalizer({ canManage, active }: { canManage: boolean;
     return () => clearTimeout(t);
   }, [active, canManage]);
 
+  const loadRecords = async (key: string) => {
+    setLoadingKey(key);
+    try {
+      const { data, error } = await (supabase as any).rpc("library_publisher_records", { _publisher: key, _limit: 400 });
+      if (error) throw error;
+      setRecordsByKey((cur) => ({ ...cur, [key]: (data || []) as PublisherRecord[] }));
+    } catch (err: any) {
+      toast({ title: "Could not load books", description: err.message, variant: "destructive" });
+    } finally {
+      setLoadingKey(null);
+    }
+  };
+
+  const toggleRecords = (key: string) => {
+    if (expandedKey === key) {
+      setExpandedKey(null);
+      return;
+    }
+    setExpandedKey(key);
+    if (!recordsByKey[key]) loadRecords(key);
+  };
+
+  const handlePrintRecords = (key: string, label: string) => {
+    const rows = recordsByKey[key] || [];
+    if (!rows.length) return;
+    const html = `<!doctype html><html><head><title>${escapeHtml(label)} — accession list</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 16px; color:#111; }
+        h1 { font-size: 15px; margin: 0 0 2px; }
+        p.sub { font-size: 11px; color:#555; margin: 0 0 12px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; }
+        th { background: #eee; }
+      </style></head><body>
+      <h1>${escapeHtml(label)}</h1>
+      <p class="sub">NIMT Library — ${rows.length} record(s) to verify on shelf</p>
+      <table><thead><tr><th>Accession</th><th>Title</th><th>Library</th><th>Where</th><th>Status</th></tr></thead>
+      <tbody>${rows.map((r) => `<tr>
+        <td>${escapeHtml(r.accession_no || "—")}</td>
+        <td>${escapeHtml(r.title || "—")}</td>
+        <td>${escapeHtml(r.branch_name || "—")}</td>
+        <td>${escapeHtml(r.source === "catalog" ? "Catalog" : "Review queue")}</td>
+        <td>${escapeHtml(r.status || "—")}</td>
+      </tr>`).join("")}</tbody></table>
+      <script>window.onload = () => window.print();</script></body></html>`;
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) {
+      toast({ title: "Popup blocked", description: "Allow popups to print the accession list.", variant: "destructive" });
+      return;
+    }
+    w.document.write(html);
+    w.document.close();
+  };
+
   const consolidated = async (label: string) => {
     const { data, error } = await (supabase as any).rpc("library_apply_publisher_canonicalization");
     if (error) throw error;
@@ -61,6 +131,8 @@ export function PublisherNormalizer({ canManage, active }: { canManage: boolean;
       title: label,
       description: `${row?.staging_updated ?? 0} staged rows + ${row?.books_updated ?? 0} book rows rewritten · ${row?.publishers_merged ?? 0} publisher entities merged.`,
     });
+    setRecordsByKey({});
+    setExpandedKey(null);
     await fetchData();
   };
 
@@ -121,6 +193,45 @@ export function PublisherNormalizer({ canManage, active }: { canManage: boolean;
   const totalRows = usage.reduce((sum, r) => sum + r.row_count, 0);
   const resolvedRows = usage.filter((r) => r.is_resolved).reduce((sum, r) => sum + r.row_count, 0);
 
+  const recordsPanel = (key: string, label: string) => {
+    if (expandedKey !== key) return null;
+    const rows = recordsByKey[key] || [];
+    return (
+      <div className="mt-2 rounded-xl border border-border bg-muted/20 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-medium text-muted-foreground">
+            {loadingKey === key ? "Loading books…" : `${rows.length} book${rows.length === 1 ? "" : "s"} on record`}
+          </p>
+          <Button type="button" variant="outline" size="sm" disabled={!rows.length} onClick={() => handlePrintRecords(key, label)}>
+            <Printer className="mr-2 h-4 w-4" /> Print accession list
+          </Button>
+        </div>
+        {rows.length === 0 && loadingKey !== key ? (
+          <p className="px-1 py-3 text-xs text-muted-foreground">No records currently carry this name.</p>
+        ) : (
+          <div className="max-h-72 overflow-y-auto rounded-lg border border-border bg-background">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-muted/60 text-left text-[10px] uppercase tracking-wide text-muted-foreground">
+                <tr><th className="p-2 font-medium">Accession</th><th className="p-2 font-medium">Title</th><th className="p-2 font-medium">Library</th><th className="p-2 font-medium">Where</th><th className="p-2 font-medium">Status</th></tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {rows.map((r, i) => (
+                  <tr key={`${r.accession_no}-${i}`}>
+                    <td className="p-2 font-mono text-foreground">{r.accession_no || "—"}</td>
+                    <td className="p-2 text-foreground">{r.title || "—"}</td>
+                    <td className="p-2 text-muted-foreground">{r.branch_name || "—"}</td>
+                    <td className="p-2 text-muted-foreground">{r.source === "catalog" ? "Catalog" : "Review queue"}</td>
+                    <td className="p-2 text-muted-foreground">{(r.status || "—").replace(/_/g, " ")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   if (!canManage) {
     return (
       <Card>
@@ -168,31 +279,38 @@ export function PublisherNormalizer({ canManage, active }: { canManage: boolean;
           </CardHeader>
           <CardContent>
             <p className="mb-3 text-sm text-muted-foreground">
-              Type the proper publisher name and press Map. It records an alias, rewrites matching rows, and
-              merges the canonical publisher.
+              Open <span className="font-medium text-foreground">View books</span> to see the accession numbers behind a
+              name, check the physical book, then type the correct publisher and press Map.
             </p>
             <div className="space-y-2">
               {unresolved.map((row) => (
-                <div key={row.publisher} className="flex flex-wrap items-center gap-2 rounded-xl border border-border p-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-foreground">{row.publisher}</p>
-                    <p className="text-xs text-muted-foreground">{row.row_count} row{row.row_count === 1 ? "" : "s"}{row.alias_norm ? ` · key “${row.alias_norm}”` : ""}</p>
+                <div key={row.publisher} className="rounded-xl border border-border p-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">{row.publisher}</p>
+                      <p className="text-xs text-muted-foreground">{row.row_count} row{row.row_count === 1 ? "" : "s"}{row.alias_norm ? ` · key “${row.alias_norm}”` : ""}</p>
+                    </div>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => toggleRecords(row.publisher)}>
+                      {expandedKey === row.publisher ? <ChevronDown className="mr-1 h-4 w-4" /> : <ChevronRight className="mr-1 h-4 w-4" />}
+                      View books
+                    </Button>
+                    <input
+                      value={mapInputs[row.publisher] || ""}
+                      onChange={(e) => setMapInputs((cur) => ({ ...cur, [row.publisher]: e.target.value }))}
+                      placeholder="Canonical publisher name"
+                      className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm sm:w-64"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={!mapInputs[row.publisher]?.trim() || saving === `map-${row.publisher}`}
+                      onClick={() => handleMap(row.publisher)}
+                    >
+                      {saving === `map-${row.publisher}` ? <ButtonOrb state="working" /> : null}
+                      Map
+                    </Button>
                   </div>
-                  <input
-                    value={mapInputs[row.publisher] || ""}
-                    onChange={(e) => setMapInputs((cur) => ({ ...cur, [row.publisher]: e.target.value }))}
-                    placeholder="Canonical publisher name"
-                    className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm sm:w-64"
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={!mapInputs[row.publisher]?.trim() || saving === `map-${row.publisher}`}
-                    onClick={() => handleMap(row.publisher)}
-                  >
-                    {saving === `map-${row.publisher}` ? <ButtonOrb state="working" /> : null}
-                    Map
-                  </Button>
+                  {recordsPanel(row.publisher, row.publisher)}
                 </div>
               ))}
             </div>
@@ -230,9 +348,14 @@ export function PublisherNormalizer({ canManage, active }: { canManage: boolean;
                     <div className="flex items-center gap-2">
                       <Badge variant="secondary">{info.variants.length} variant{info.variants.length === 1 ? "" : "s"}</Badge>
                       <Badge variant="outline">{info.rows} rows</Badge>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => toggleRecords(canonical)}>
+                        {expandedKey === canonical ? <ChevronDown className="mr-1 h-4 w-4" /> : <ChevronRight className="mr-1 h-4 w-4" />}
+                        View books
+                      </Button>
                     </div>
                   </div>
                   <p className="mt-1 truncate text-xs text-muted-foreground">{info.variants.sort().join(" · ")}</p>
+                  {recordsPanel(canonical, canonical)}
                 </div>
               ))
           )}

@@ -35,6 +35,10 @@ const myBranchesMigration = readFileSync(
   "supabase/migrations/20260923052956_library_my_branches_rpc.sql",
   "utf8",
 );
+const publisherRecordsMigration = readFileSync(
+  "supabase/migrations/20260923142236_library_publisher_records_rpc.sql",
+  "utf8",
+);
 const barcodeScanner = readFileSync("src/components/library/BarcodeScanner.tsx", "utf8");
 const publisherNormalizer = readFileSync("src/components/library/PublisherNormalizer.tsx", "utf8");
 
@@ -309,6 +313,14 @@ describe("library module", () => {
     expect(publisherNormalizer).toContain("library_publisher_usage");
     expect(publisherNormalizer).toContain("library_apply_publisher_canonicalization");
     expect(publisherNormalizer).toContain("library_set_publisher_alias");
+
+    // Drill-down: which books/accession numbers carry a name, so a librarian can
+    // check the shelf before choosing the correct publisher.
+    expect(publisherRecordsMigration).toContain("public.library_publisher_records");
+    expect(publisherRecordsMigration).toContain("library_canonical_publisher(d.publisher)");
+    expect(publisherNormalizer).toContain("library_publisher_records");
+    expect(publisherNormalizer).toContain("View books");
+    expect(publisherNormalizer).toContain("Print accession list");
   });
 
   it("scans barcodes from the phone camera on web and mobile", () => {
