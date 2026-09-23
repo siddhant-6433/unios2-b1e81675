@@ -279,6 +279,24 @@ const IdCardCenter = () => {
     });
   }, [activeRows, search, groupFilter, batchFilter, photoFilter, mode]);
 
+  const missingPhotoRows = useMemo(() => {
+    if (mode !== "students") return [];
+    const q = search.trim().toLowerCase();
+    return students.filter((row) => {
+      if (row.photoUrl) return false;
+      if (groupFilter !== "all" && row.group !== groupFilter) return false;
+      if (batchFilter !== "all" && row.extraValue !== batchFilter) return false;
+      if (!q) return true;
+      return (
+        row.name.toLowerCase().includes(q) ||
+        row.primaryNo.toLowerCase().includes(q) ||
+        row.secondaryNo.toLowerCase().includes(q) ||
+        row.subtitle.toLowerCase().includes(q) ||
+        row.group.toLowerCase().includes(q)
+      );
+    });
+  }, [students, search, groupFilter, batchFilter, mode]);
+
   const groups = useMemo(() => {
     return Array.from(new Set(activeRows.map((row) => row.group || "Unassigned")))
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -698,6 +716,17 @@ const IdCardCenter = () => {
           >
             <FileSpreadsheet className="h-4 w-4" /> Export CSV
           </Button>
+          {mode === "students" && (
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={() => exportCsv(missingPhotoRows, "students", "missing-photos", realRole === "super_admin")}
+              disabled={loading || missingPhotoRows.length === 0}
+              title="Download students without an ID card photo"
+            >
+              <Download className="h-4 w-4" /> Missing Photos ({missingPhotoRows.length})
+            </Button>
+          )}
           <Button variant="outline" className="gap-2" onClick={selectVisible} disabled={filteredRows.length === 0}>
             <UserCheck className="h-4 w-4" /> Select Visible
           </Button>
