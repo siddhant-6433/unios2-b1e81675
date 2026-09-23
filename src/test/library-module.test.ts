@@ -341,6 +341,9 @@ describe("library module", () => {
     expect(libraryPage).toContain("NIMT:ACC:");
     expect(libraryPage).toContain("qrSvgMarkup");
     expect(libraryPage).toContain("QRCodeSVG");
+    // Label layout: NIMT logo on top, title clamped to two lines at QR width.
+    expect(libraryPage).toContain("NIMT_LOGO_URL");
+    expect(libraryPage).toContain("-webkit-line-clamp: 2");
     // Scans decode the QR payload and fill the review record.
     expect(libraryPage).toContain("parseLibraryScan");
     expect(libraryPage).toContain('setScanner({ kind: "review", recordId: record.id })');

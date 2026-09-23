@@ -249,6 +249,9 @@ function escapeHtml(value: string) {
   }[char] || char));
 }
 
+// NIMT brand mark used on printed labels (same asset as receipts).
+const NIMT_LOGO_URL = "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/nimt-logo.png";
+
 // QR payload printed on a copy's label. Encodes NIMT + the accession number, so
 // any of our scan flows (issue, return, digitize, enrich) resolve the exact copy,
 // and a plain phone scanner still shows something meaningful.
@@ -1850,28 +1853,30 @@ const Library = () => {
     const html = `<!doctype html>
       <html>
         <head>
-          <title>NIMT Library QR Labels</title>
+          <title>NIMT QR Labels</title>
           <style>
             @page { size: A4; margin: 10mm; }
             body { font-family: Arial, sans-serif; margin: 0; color: #111; }
             .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-            .label { border: 1px solid #111; min-height: 132px; padding: 8px; break-inside: avoid; text-align: center; }
-            .library { font-size: 9px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; letter-spacing: .04em; }
-            .qr { margin: 4px auto 2px; width: 96px; height: 96px; }
+            .label { border: 1px solid #111; min-height: 196px; padding: 8px; break-inside: avoid; text-align: center; }
+            .brand { margin-bottom: 3px; }
+            .brand img { height: 18px; }
+            .brand span { font-size: 12px; font-weight: 800; letter-spacing: .12em; }
+            .qr { margin: 2px auto; width: 104px; height: 104px; }
             .qr svg { width: 100%; height: 100%; }
             .accession { font-size: 13px; font-weight: 800; letter-spacing: .02em; }
-            .nimt { font-size: 9px; font-weight: 700; color: #444; }
-            .title { font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
+            .nimt { font-size: 9px; font-weight: 700; color: #444; letter-spacing: .1em; }
+            .title { width: 112px; margin: 3px auto 0; font-size: 9px; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
           </style>
         </head>
         <body>
           <div class="grid">
             ${rows.map((item) => `
               <div class="label">
-                <div class="library">${escapeHtml(item.library_branches?.name || selectedBranchLabel)}</div>
+                <div class="brand"><img src="${NIMT_LOGO_URL}" alt="NIMT" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'" /><span style="display:none">NIMT</span></div>
                 <div class="qr">${qrSvgMarkup(libraryQrPayload(item.accession_no))}</div>
                 <div class="accession">${escapeHtml(item.accession_no)}</div>
-                <div class="nimt">NIMT Library</div>
+                <div class="nimt">NIMT</div>
                 <div class="title">${escapeHtml(item.library_books?.title || "Library book")}</div>
               </div>
             `).join("")}
