@@ -185,8 +185,8 @@ describe("library module", () => {
     expect(libraryPage).toContain("library_approve_digitization_record");
     expect(libraryPage).toContain("library_mark_digitization_duplicate");
     expect(libraryPage).toContain("library_reject_digitization_record");
-    expect(libraryPage).toContain("Accession Barcode Labels");
-    expect(libraryPage).toContain("code39Svg");
+    expect(libraryPage).toContain("Accession QR Labels");
+    expect(libraryPage).toContain("handlePrintQrLabels");
     expect(libraryPage).toContain("handleIssue");
     expect(libraryPage).toContain("handleReturn");
     expect(libraryPage).toContain("handleInventoryUpdate");
@@ -319,11 +319,23 @@ describe("library module", () => {
     // Wired into circulation + digitization.
     expect(libraryPage).toContain("BarcodeScanner");
     expect(libraryPage).toContain("handleScanDetected");
-    expect(libraryPage).toContain('setScanner("issue")');
-    expect(libraryPage).toContain('setScanner("return")');
-    expect(libraryPage).toContain('setScanner("digitize")');
+    expect(libraryPage).toContain('setScanner({ kind: "issue" })');
+    expect(libraryPage).toContain('setScanner({ kind: "return" })');
+    expect(libraryPage).toContain('setScanner({ kind: "digitize" })');
     expect(libraryPage).toContain("isbnFromScan");
     expect(libraryPage).toContain("Scan ISBN / barcode");
+    // QR labels encode NIMT + accession and print as QR, not Code 39.
+    expect(libraryPage).toContain("libraryQrPayload");
+    expect(libraryPage).toContain("NIMT:ACC:");
+    expect(libraryPage).toContain("qrSvgMarkup");
+    expect(libraryPage).toContain("QRCodeSVG");
+    // Scans decode the QR payload and fill the review record.
+    expect(libraryPage).toContain("parseLibraryScan");
+    expect(libraryPage).toContain('setScanner({ kind: "review", recordId: record.id })');
+    expect(libraryPage).toContain("Scan QR / barcode / ISBN");
+    // Mobile decodes the same payload.
+    expect(mobileLibrary).toContain("parseScanned");
+    expect(mobileLibrary).toContain("NIMT(?::ACC)");
     // Server RPC that resolves operable branches without an explicit assignment.
     expect(myBranchesMigration).toContain("public.library_my_branches");
     expect(myBranchesMigration).toContain("library_accessible_branch_ids");

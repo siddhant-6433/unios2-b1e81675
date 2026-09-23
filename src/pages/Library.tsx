@@ -20,6 +20,8 @@ import { CatalogEntityManager } from "@/components/library/CatalogEntityManager"
 import { LibraryAccessMatrix, type AccessMatrixRow, type AccessPatch } from "@/components/library/LibraryAccessMatrix";
 import { PublisherNormalizer } from "@/components/library/PublisherNormalizer";
 import { BarcodeScanner } from "@/components/library/BarcodeScanner";
+import { QRCodeSVG } from "qrcode.react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 type LibraryBook = {
   id: string;
@@ -247,35 +249,24 @@ function escapeHtml(value: string) {
   }[char] || char));
 }
 
-const code39Patterns: Record<string, string> = {
-  "0": "nnnwwnwnn", "1": "wnnwnnnnw", "2": "nnwwnnnnw", "3": "wnwwnnnnn", "4": "nnnwwnnnw",
-  "5": "wnnwwnnnn", "6": "nnwwwnnnn", "7": "nnnwnnwnw", "8": "wnnwnnwnn", "9": "nnwwnnwnn",
-  A: "wnnnnwnnw", B: "nnwnnwnnw", C: "wnwnnwnnn", D: "nnnnwwnnw", E: "wnnnwwnnn",
-  F: "nnwnwwnnn", G: "nnnnnwwnw", H: "wnnnnwwnn", I: "nnwnnwwnn", J: "nnnnwwwnn",
-  K: "wnnnnnnww", L: "nnwnnnnww", M: "wnwnnnnwn", N: "nnnnwnnww", O: "wnnnwnnwn",
-  P: "nnwnwnnwn", Q: "nnnnnnwww", R: "wnnnnnwwn", S: "nnwnnnwwn", T: "nnnnwnwwn",
-  U: "wwnnnnnnw", V: "nwwnnnnnw", W: "wwwnnnnnn", X: "nwnnwnnnw", Y: "wwnnwnnnn",
-  Z: "nwwnwnnnn", "-": "nwnnnnwnw", ".": "wwnnnnwnn", " ": "nwwnnnwnn", "$": "nwnwnwnnn",
-  "/": "nwnwnnnwn", "+": "nwnnnwnwn", "%": "nnnwnwnwn", "*": "nwnnwnwnn",
-};
+// QR payload printed on a copy's label. Encodes NIMT + the accession number, so
+// any of our scan flows (issue, return, digitize, enrich) resolve the exact copy,
+// and a plain phone scanner still shows something meaningful.
+function libraryQrPayload(accessionNo: string) {
+  return `NIMT:ACC:${accessionNo.trim()}`;
+}
 
-function code39Svg(value: string) {
-  const normalized = `*${value.toUpperCase().replace(/[^0-9A-Z ./$+%-]/g, "-")}*`;
-  const narrow = 2;
-  const wide = 5;
-  const height = 52;
-  let x = 0;
-  const rects: string[] = [];
-  for (const char of normalized) {
-    const pattern = code39Patterns[char] || code39Patterns["-"];
-    [...pattern].forEach((mark, index) => {
-      const width = mark === "w" ? wide : narrow;
-      if (index % 2 === 0) rects.push(`<rect x="${x}" y="0" width="${width}" height="${height}" />`);
-      x += width;
-    });
-    x += narrow;
-  }
-  return `<svg viewBox="0 0 ${x} ${height}" preserveAspectRatio="none" aria-label="${escapeHtml(value)}">${rects.join("")}</svg>`;
+// Decode a scanned value: our NIMT QR payload, a plain accession/barcode, or an
+// ISBN (EAN-13 978/979 or 10 digits).
+function parseLibraryScan(raw: string): { accession: string; isbn: string; value: string } {
+  const value = (raw || "").trim();
+  const qr = value.match(/^NIMT(?::ACC)?[:\-|/ ]+(.+)$/i);
+  const accession = qr ? qr[1].trim() : value;
+  return { accession, isbn: isbnFromScan(accession), value };
+}
+
+function qrSvgMarkup(value: string, size = 104) {
+  return renderToStaticMarkup(<QRCodeSVG value={value} size={size} level="M" marginSize={0} />);
 }
 
 function assignmentDefaults(role: LibraryStaffAssignment["assignment_role"]) {
@@ -408,7 +399,7 @@ const Library = () => {
   const [inventoryForm, setInventoryForm] = useState({ accession_no: "", status: "available", shelf_location: "", rack: "" });
   const [digitizeForm, setDigitizeForm] = useState({ isbn: "", scanned_barcode: "", source: "barcode", raw_ocr_text: "" });
   const [digitizePreview, setDigitizePreview] = useState<{ isbn: string; title?: string; authors?: string[]; publisher?: string } | null>(null);
-  const [scanner, setScanner] = useState<null | "issue" | "return" | "digitize">(null);
+  const [scanner, setScanner] = useState<null | { kind: "issue" | "return" | "digitize" | "review"; recordId?: string }>(null);
   const [reviewEdits, setReviewEdits] = useState<Record<string, DigitizationReviewEdit>>({});
   const [selectedDigitization, setSelectedDigitization] = useState<Set<string>>(new Set());
   const [enrichFilter, setEnrichFilter] = useState<"all" | "enriched" | "no_match" | "not_tried" | "missing_cover">("all");
@@ -1195,20 +1186,45 @@ const Library = () => {
 
   // Camera scan → fills the right field for the active flow. Digitize additionally
   // detects an ISBN, looks the book up, and previews the metadata before capture.
-  const handleScanDetected = async (value: string) => {
-    const kind = scanner;
+  const handleScanDetected = async (raw: string) => {
+    const { accession, isbn, value } = parseLibraryScan(raw);
+    const kind = scanner?.kind;
+
     if (kind === "issue") {
-      setCirculationForm((p) => ({ ...p, accession_no: value }));
-      toast({ title: "Barcode scanned", description: `${value} — enter the admission number, then Issue.` });
+      setCirculationForm((p) => ({ ...p, accession_no: accession || value }));
+      toast({ title: "Scanned", description: `${accession || value} — enter the admission number, then Issue.` });
       return;
     }
     if (kind === "return") {
-      setReturnAccession(value);
-      toast({ title: "Barcode scanned", description: `Ready to return ${value}.` });
+      setReturnAccession(accession || value);
+      toast({ title: "Scanned", description: `Ready to return ${accession || value}.` });
       return;
     }
-    const isbn = isbnFromScan(value);
-    setDigitizeForm((p) => ({ ...p, scanned_barcode: value, isbn: isbn || p.isbn }));
+    if (kind === "review" && scanner?.recordId) {
+      const record = digitization.find((r) => r.id === scanner.recordId);
+      if (record) {
+        setReviewEdits((cur) => {
+          const base = cur[record.id] || digitizationValues(record);
+          return {
+            ...cur,
+            [record.id]: {
+              ...base,
+              accession_no: accession || base.accession_no,
+              isbn: isbn || base.isbn,
+            },
+          };
+        });
+      }
+      toast({
+        title: "Captured into record",
+        description: isbn ? `ISBN ${isbn} added.` : `${accession || value} added as accession.`,
+      });
+      return;
+    }
+
+    // Digitize: an ISBN fills the ISBN field and previews metadata; anything else is
+    // stored as the accession/barcode.
+    setDigitizeForm((p) => ({ ...p, scanned_barcode: accession || value, isbn: isbn || p.isbn }));
     setDigitizePreview(isbn ? { isbn } : null);
     if (isbn) {
       try {
@@ -1221,8 +1237,8 @@ const Library = () => {
       }
     }
     toast({
-      title: isbn ? "ISBN scanned" : "Barcode scanned",
-      description: isbn ? `ISBN ${isbn} — details matched below, then Capture.` : `${value} recorded as an accession/barcode.`,
+      title: isbn ? "ISBN scanned" : "Code scanned",
+      description: isbn ? `ISBN ${isbn} — details matched below, then Capture.` : `${accession || value} recorded as an accession/barcode.`,
     });
   };
 
@@ -1825,7 +1841,7 @@ const Library = () => {
     }
   };
 
-  const handlePrintBarcodeLabels = () => {
+  const handlePrintQrLabels = () => {
     const rows = filteredItems.filter((item) => item.accession_no);
     if (!rows.length) {
       toast({ title: "No labels to print", description: "The current library filter has no accessioned books." });
@@ -1834,15 +1850,17 @@ const Library = () => {
     const html = `<!doctype html>
       <html>
         <head>
-          <title>Library Barcode Labels</title>
+          <title>NIMT Library QR Labels</title>
           <style>
             @page { size: A4; margin: 10mm; }
             body { font-family: Arial, sans-serif; margin: 0; color: #111; }
             .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-            .label { border: 1px solid #111; min-height: 82px; padding: 7px; break-inside: avoid; }
-            .library { font-size: 10px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-            .barcode svg { width: 100%; height: 38px; margin-top: 4px; }
-            .accession { font-size: 12px; font-weight: 700; text-align: center; letter-spacing: 0; margin-top: 2px; }
+            .label { border: 1px solid #111; min-height: 132px; padding: 8px; break-inside: avoid; text-align: center; }
+            .library { font-size: 9px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; letter-spacing: .04em; }
+            .qr { margin: 4px auto 2px; width: 96px; height: 96px; }
+            .qr svg { width: 100%; height: 100%; }
+            .accession { font-size: 13px; font-weight: 800; letter-spacing: .02em; }
+            .nimt { font-size: 9px; font-weight: 700; color: #444; }
             .title { font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
           </style>
         </head>
@@ -1851,8 +1869,9 @@ const Library = () => {
             ${rows.map((item) => `
               <div class="label">
                 <div class="library">${escapeHtml(item.library_branches?.name || selectedBranchLabel)}</div>
-                <div class="barcode">${code39Svg(item.accession_no)}</div>
+                <div class="qr">${qrSvgMarkup(libraryQrPayload(item.accession_no))}</div>
                 <div class="accession">${escapeHtml(item.accession_no)}</div>
+                <div class="nimt">NIMT Library</div>
                 <div class="title">${escapeHtml(item.library_books?.title || "Library book")}</div>
               </div>
             `).join("")}
@@ -1862,7 +1881,7 @@ const Library = () => {
       </html>`;
     const printWindow = window.open("", "_blank", "width=900,height=700");
     if (!printWindow) {
-      toast({ title: "Popup blocked", description: "Allow popups to print barcode labels.", variant: "destructive" });
+      toast({ title: "Popup blocked", description: "Allow popups to print QR labels.", variant: "destructive" });
       return;
     }
     printWindow.document.write(html);
@@ -2118,10 +2137,10 @@ const Library = () => {
             <Card className="col-span-full lg:hidden">
               <CardHeader className="pb-2"><CardTitle className="text-base">Scan with camera</CardTitle></CardHeader>
               <CardContent className="grid grid-cols-2 gap-3">
-                <Button type="button" disabled={!scopeReady} className="h-14 text-base" onClick={() => setScanner("issue")}>
+                <Button type="button" disabled={!scopeReady} className="h-14 text-base" onClick={() => setScanner({ kind: "issue" })}>
                   <Barcode className="mr-2 h-5 w-5" /> Issue
                 </Button>
-                <Button type="button" variant="outline" disabled={!scopeReady} className="h-14 text-base" onClick={() => setScanner("return")}>
+                <Button type="button" variant="outline" disabled={!scopeReady} className="h-14 text-base" onClick={() => setScanner({ kind: "return" })}>
                   <Barcode className="mr-2 h-5 w-5" /> Return
                 </Button>
               </CardContent>
@@ -2133,7 +2152,7 @@ const Library = () => {
               <form onSubmit={handleIssue} className="space-y-3">
                 <div className="flex items-end gap-2">
                   <div className="min-w-0 flex-1"><Input label="Accession / Barcode" value={circulationForm.accession_no} required disabled={!canCirculate || !scopeReady} onChange={(accession_no) => setCirculationForm((p) => ({ ...p, accession_no }))} /></div>
-                  <Button type="button" variant="outline" className="h-10 shrink-0" disabled={!canCirculate || !scopeReady} onClick={() => setScanner("issue")}>
+                  <Button type="button" variant="outline" className="h-10 shrink-0" disabled={!canCirculate || !scopeReady} onClick={() => setScanner({ kind: "issue" })}>
                     <Barcode className="mr-2 h-4 w-4" /> <span className="hidden sm:inline">Scan</span>
                   </Button>
                 </div>
@@ -2160,7 +2179,7 @@ const Library = () => {
             <CardContent className="space-y-4">
               <form onSubmit={handleReturn} className="flex gap-2">
                 <input value={returnAccession} disabled={!canCirculate || !scopeReady} onChange={(e) => setReturnAccession(e.target.value)} placeholder="Accession or barcode" className="min-w-0 flex-1 rounded-xl border border-input bg-background px-3 py-2 text-sm" />
-                <Button type="button" variant="outline" disabled={!canCirculate || !scopeReady} onClick={() => setScanner("return")}>
+                <Button type="button" variant="outline" disabled={!canCirculate || !scopeReady} onClick={() => setScanner({ kind: "return" })}>
                   <Barcode className="h-4 w-4" /> <span className="hidden sm:inline">Scan</span>
                 </Button>
                 <Button type="submit" disabled={!canCirculate || !scopeReady || saving === "return"}>
@@ -2200,7 +2219,7 @@ const Library = () => {
               <CardHeader><CardTitle className="text-base">Capture Offline Record</CardTitle></CardHeader>
               <CardContent>
                 <form onSubmit={handleDigitize} className="space-y-3">
-                  <Button type="button" className="h-12 w-full text-base" disabled={!canDigitize || !scopeReady} onClick={() => setScanner("digitize")}>
+                  <Button type="button" className="h-12 w-full text-base" disabled={!canDigitize || !scopeReady} onClick={() => setScanner({ kind: "digitize" })}>
                     <Barcode className="mr-2 h-5 w-5" /> Scan ISBN / barcode
                   </Button>
                   {digitizePreview && (
@@ -2258,16 +2277,18 @@ const Library = () => {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Printer className="h-4 w-4" />
-                  Accession Barcode Labels
+                  Accession QR Labels
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Print Code 39 labels for the currently filtered catalog. Paste them on books without reliable accession barcodes.
+                  Print NIMT QR labels for the currently filtered catalog. Each QR encodes
+                  <span className="font-mono text-foreground"> NIMT:ACC:&lt;accession&gt; </span>
+                  and scans straight into Issue, Return, Digitisation and enrichment.
                 </p>
-                <Button type="button" variant="outline" className="w-full" disabled={!canExport || filteredItems.length === 0} onClick={handlePrintBarcodeLabels}>
+                <Button type="button" variant="outline" className="w-full" disabled={!canExport || filteredItems.length === 0} onClick={handlePrintQrLabels}>
                   <Printer className="mr-2 h-4 w-4" />
-                  Print {filteredItems.length} Labels
+                  Print {filteredItems.length} QR Labels
                 </Button>
               </CardContent>
             </Card>
@@ -2436,6 +2457,10 @@ const Library = () => {
                         <Input label="Price" value={values.purchase_price} disabled={!canApproveRecord} onChange={(value) => setReviewEdit(record, "purchase_price", value)} />
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
+                        <Button type="button" variant="outline" size="sm" disabled={!canDigitize} onClick={() => setScanner({ kind: "review", recordId: record.id })}>
+                          <Barcode className="mr-2 h-4 w-4" />
+                          Scan QR / barcode / ISBN
+                        </Button>
                         <Button type="button" variant="outline" size="sm" disabled={!canApproveRecord || saving === `accession-${record.id}`} onClick={() => handleGenerateAccession(record)}>
                           {saving === `accession-${record.id}` ? <ButtonOrb state="working" /> : <Barcode className="mr-2 h-4 w-4" />}
                           Generate Accession
@@ -2864,7 +2889,12 @@ const Library = () => {
 
       <BarcodeScanner
         open={scanner !== null}
-        title={scanner === "issue" ? "Scan book to issue" : scanner === "return" ? "Scan book to return" : "Scan ISBN or barcode"}
+        title={
+          scanner?.kind === "issue" ? "Scan book to issue"
+            : scanner?.kind === "return" ? "Scan book to return"
+              : scanner?.kind === "review" ? "Scan barcode / QR / ISBN into record"
+                : "Scan ISBN, barcode or QR"
+        }
         onClose={() => setScanner(null)}
         onDetected={handleScanDetected}
       />
