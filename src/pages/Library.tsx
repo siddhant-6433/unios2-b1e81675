@@ -641,7 +641,14 @@ const Library = () => {
     }
     setAccessMatrixLoading(true);
     try {
-      const { data, error } = await (supabase as any).rpc("library_access_matrix", { _branch_id: selectedBranchId });
+      // The roster has thousands of profiles, so search + limit run on the server.
+      // With no search it returns people who already have access plus librarian-role
+      // candidates, so the matrix is never blank.
+      const { data, error } = await (supabase as any).rpc("library_access_matrix", {
+        _branch_id: selectedBranchId,
+        _search: accessSearch.trim() || null,
+        _limit: 100,
+      });
       if (error) throw error;
       setAccessMatrix((data || []) as AccessMatrixRow[]);
     } catch (err: any) {
@@ -652,18 +659,16 @@ const Library = () => {
     }
   };
 
+  // Reload on the Access Matrix tab, debounced while typing a search.
   useEffect(() => {
-    if (effectiveTab === "settings") fetchAccessMatrix();
+    if (effectiveTab !== "access") return;
+    const t = setTimeout(fetchAccessMatrix, 250);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveTab, selectedBranchId, canManageSelectedLibrary]);
+  }, [effectiveTab, selectedBranchId, canManageSelectedLibrary, accessSearch]);
 
-  const matrixRows = useMemo(() => {
-    const q = accessSearch.trim().toLowerCase();
-    if (!q) return accessMatrix.filter((row) => row.has_assignment);
-    return accessMatrix.filter((row) =>
-      [row.display_name, row.email, row.app_role].some((value) => String(value || "").toLowerCase().includes(q)),
-    );
-  }, [accessMatrix, accessSearch]);
+  // Server already filters + orders (assigned first, then candidates).
+  const matrixRows = accessMatrix;
 
   const handleMatrixGrant = async (row: AccessMatrixRow) => {
     if (!canManageSelectedLibrary || !selectedBranchId) return;

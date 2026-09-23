@@ -39,6 +39,10 @@ const publisherRecordsMigration = readFileSync(
   "supabase/migrations/20260923142236_library_publisher_records_rpc.sql",
   "utf8",
 );
+const accessMatrixSearchMigration = readFileSync(
+  "supabase/migrations/20260923150559_library_access_matrix_search.sql",
+  "utf8",
+);
 const barcodeScanner = readFileSync("src/components/library/BarcodeScanner.tsx", "utf8");
 const publisherNormalizer = readFileSync("src/components/library/PublisherNormalizer.tsx", "utf8");
 
@@ -276,6 +280,11 @@ describe("library module", () => {
     expect(libraryPage).toContain("handleRemoveAccess");
     expect(libraryPage).toContain('<TabsContent value="access"');
     expect(sidebar).toContain('title: "Access Matrix"');
+    // Fetches on the Access Matrix tab (not Settings) and searches server-side.
+    expect(libraryPage).toContain('effectiveTab !== "access"');
+    expect(libraryPage).toContain("_search: accessSearch.trim()");
+    expect(accessMatrixSearchMigration).toContain("library_access_matrix(uuid, text, int)");
+    expect(accessMatrixSearchMigration).toContain("public.get_user_role(p.user_id) = 'librarian'::public.app_role");
     const accessMatrix = readFileSync("src/components/library/LibraryAccessMatrix.tsx", "utf8");
     expect(accessMatrix).toContain("Library Access Matrix");
     expect(accessMatrix).toContain("ACCESS_CAPABILITY_KEYS");

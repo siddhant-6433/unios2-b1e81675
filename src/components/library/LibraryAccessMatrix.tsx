@@ -80,7 +80,7 @@ export function LibraryAccessMatrix({
         <p className="max-w-3xl text-xs text-muted-foreground">
           Tick a capability to grant or revoke it instantly. Anyone listed here holds an explicit assignment, which{" "}
           <span className="font-medium text-foreground">overrides the campus-wide librarian default</span> — they are
-          limited to exactly the capabilities below.
+          limited to exactly the capabilities below. Search by name, email or role to add someone who isn't listed.
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -105,7 +105,7 @@ export function LibraryAccessMatrix({
                 <tr><td colSpan={12} className="p-4 text-center text-sm text-muted-foreground"><ButtonOrb state="working" className="mx-auto" /> Loading access…</td></tr>
               ) : rows.length === 0 ? (
                 <tr><td colSpan={12} className="px-4 py-10 text-center text-sm text-muted-foreground">
-                  {search ? "No matching staff" : "No one has explicit access yet — search above to add staff."}
+                  {search ? "No staff match that search" : "No librarian-role staff yet — search above to add anyone."}
                 </td></tr>
               ) : rows.map((row) => {
                 const isManager = row.assignment_role === "manager";
