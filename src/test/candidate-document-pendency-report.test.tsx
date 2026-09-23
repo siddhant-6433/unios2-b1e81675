@@ -131,7 +131,7 @@ describe("candidate document report helpers", () => {
       stage: "all",
       upload: "Yes",
       studentStatus: "active",
-      pendency: ["pending"],
+      pendency: ["missing"],
       grade: "Class 1",
     });
 
@@ -186,7 +186,7 @@ describe("CandidateDocumentPendencyReport", () => {
     await screen.findByText("Asha Verma");
 
     fireEvent.change(screen.getByLabelText("Search candidates"), { target: { value: "Asha" } });
-    fireEvent.click(screen.getByRole("button", { name: /Export/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Excel" }));
 
     await waitFor(() => {
       expect(exportRowsXlsx).toHaveBeenCalledWith(
