@@ -139,8 +139,9 @@ const academicsSubMenu: MenuItem[] = [
   { title: "Issue / Return", url: "/library?tab=circulation", icon: Shuffle, permission: "library:circulate" },
   { title: "Inventory", url: "/library?tab=inventory", icon: ClipboardCheck, permission: "library:inventory" },
   { title: "Digitization Queue", url: "/library?tab=digitization", icon: Barcode, permission: "library:digitize" },
-  { title: "Members", url: "/library?tab=members", icon: Users, permission: "library:view" },
+  { title: "Members", url: "/library?tab=members", icon: Users, permission: "library:circulate" },
   { title: "Reports", url: "/library?tab=reports", icon: BarChart3, permission: "library:export" },
+  { title: "Access Matrix", url: "/library?tab=access", icon: ShieldCheck, permission: "library:manage_settings" },
   { title: "Settings", url: "/library?tab=settings", icon: Settings, permission: "library:manage_settings" },
 ];
 

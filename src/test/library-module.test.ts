@@ -19,6 +19,32 @@ const mobileWork = readFileSync("mobile/app/(staff)/(tabs)/work.tsx", "utf8");
 const mobileAuth = readFileSync("mobile/contexts/AuthContext.tsx", "utf8");
 const mobileLibrary = readFileSync("mobile/app/(family)/library.tsx", "utf8");
 const lookupFunction = readFileSync("supabase/functions/library-book-lookup/index.ts", "utf8");
+const librarianAccessMigration = readFileSync(
+  "supabase/migrations/20260922171823_library_librarian_access_and_bulk_approval.sql",
+  "utf8",
+);
+const libraryQueuePerfMigration = readFileSync(
+  "supabase/migrations/20260922180544_library_digitization_queue_perf_and_grants.sql",
+  "utf8",
+);
+const publisherCanonicalMigration = readFileSync(
+  "supabase/migrations/20260923044733_library_publisher_canonicalization.sql",
+  "utf8",
+);
+const myBranchesMigration = readFileSync(
+  "supabase/migrations/20260923052956_library_my_branches_rpc.sql",
+  "utf8",
+);
+const publisherRecordsMigration = readFileSync(
+  "supabase/migrations/20260923142236_library_publisher_records_rpc.sql",
+  "utf8",
+);
+const accessMatrixSearchMigration = readFileSync(
+  "supabase/migrations/20260923150559_library_access_matrix_search.sql",
+  "utf8",
+);
+const barcodeScanner = readFileSync("src/components/library/BarcodeScanner.tsx", "utf8");
+const publisherNormalizer = readFileSync("src/components/library/PublisherNormalizer.tsx", "utf8");
 
 describe("library module", () => {
   it("adds librarian as a first-class role and exposes it in admin role surfaces", () => {
@@ -152,7 +178,7 @@ describe("library module", () => {
     expect(libraryPage).toContain("requireLibraryScope");
     expect(libraryPage).toContain("library_staff_assignments");
     expect(libraryPage).toContain("handleAssignStaff");
-    expect(libraryPage).toContain("Librarians for");
+    expect(libraryPage).toContain("Access Matrix");
     expect(libraryPage).toContain('from("library_books")');
     expect(libraryPage).toContain('from("library_items")');
     expect(libraryPage).toContain('from("library_loans")');
@@ -167,8 +193,8 @@ describe("library module", () => {
     expect(libraryPage).toContain("library_approve_digitization_record");
     expect(libraryPage).toContain("library_mark_digitization_duplicate");
     expect(libraryPage).toContain("library_reject_digitization_record");
-    expect(libraryPage).toContain("Accession Barcode Labels");
-    expect(libraryPage).toContain("code39Svg");
+    expect(libraryPage).toContain("Accession QR Labels");
+    expect(libraryPage).toContain("handlePrintQrLabels");
     expect(libraryPage).toContain("handleIssue");
     expect(libraryPage).toContain("handleReturn");
     expect(libraryPage).toContain("handleInventoryUpdate");
@@ -187,10 +213,156 @@ describe("library module", () => {
     expect(mobileLibrary).toContain("library_issue_by_admission_no");
     expect(mobileLibrary).toContain("library_return_by_accession");
     expect(mobileLibrary).toContain("library_digitization_records");
-    expect(mobileLibrary).toContain("library_staff_assignments");
+    expect(mobileLibrary).toContain("library_my_branches");
+    // Only ISBN-shaped scans trigger a metadata lookup.
+    expect(mobileLibrary).toContain("startsWith('978')");
     expect(mobileLibrary).toContain("branch_id: selectedBranchId");
     expect(mobileLibrary).toContain("library-book-lookup");
     expect(mobileLibrary).toContain("canOperate ? 'Scan, digitize, and audit books' : 'Search catalog and current loans'");
+  });
+
+  it("makes the librarian role operational without a manual staff assignment", () => {
+    // The librarian gets campus-scoped operational access by role, but an explicit
+    // assignment still overrides the fallback (so auditors stay restricted).
+    expect(librarianAccessMigration).toContain("public.library_user_has_explicit_assignment");
+    expect(librarianAccessMigration).toContain("public.has_role(_user_id, 'librarian'::public.app_role)");
+    expect(librarianAccessMigration).toContain("NOT public.library_user_has_explicit_assignment(_user_id)");
+    expect(librarianAccessMigration).toContain("public.user_has_campus_scope(_user_id)");
+    expect(librarianAccessMigration).toContain("_action IN ('view', 'catalog', 'circulate', 'inventory', 'digitize', 'export')");
+    // Principal/campus_admin get read oversight of the queue.
+    expect(librarianAccessMigration).toContain("public.library_can_view_digitization");
+    expect(librarianAccessMigration).toContain('CREATE POLICY "Library staff view digitization records"');
+  });
+
+  it("approves imported registers in bulk with accession generation and duplicate handling", () => {
+    expect(librarianAccessMigration).toContain("public.library_bulk_approve_digitization");
+    expect(librarianAccessMigration).toContain("public.library_mark_duplicate_accessions");
+    expect(librarianAccessMigration).toContain("public.library_existing_accessions");
+    expect(librarianAccessMigration).toContain("Duplicate accession in queue");
+    expect(librarianAccessMigration).toContain("Accession already in catalog");
+    // Reuses the single-record approval (18-arg overload) so accession minting stays consistent.
+    expect(librarianAccessMigration).toContain("PERFORM public.library_approve_digitization_record(");
+    // Existing branches get loan rules backfilled.
+    expect(librarianAccessMigration).toContain("INSERT INTO public.library_settings (branch_id, borrowing_days");
+    // Patron self-service holds.
+    expect(librarianAccessMigration).toContain("public.library_place_hold");
+  });
+
+  it("pages and filters the digitization queue on the server instead of a 200-row fetch", () => {
+    expect(librarianAccessMigration).toContain("public.library_list_digitization_records");
+    expect(librarianAccessMigration).toContain("public.library_digitization_summary");
+    expect(libraryPage).toContain("library_list_digitization_records");
+    expect(libraryPage).toContain("library_digitization_summary");
+    expect(libraryPage).toContain("library_mark_duplicate_accessions");
+    expect(libraryPage).toContain("library_bulk_approve_digitization");
+    expect(libraryPage).toContain("library_existing_accessions");
+    expect(libraryPage).toContain("Approve all pending");
+    expect(libraryPage).toContain("fetchDigitization");
+    // Patron (faculty/student) discovery view.
+    expect(libraryPage).toContain("function PatronLibrary(");
+    expect(libraryPage).toContain("library_place_hold");
+    expect(libraryPage).toContain("isPatronOnly");
+  });
+
+  it("exposes an operable library access matrix for granular grant/revoke", () => {
+    // Server API: roster + upsert + revoke, guarded by manage_settings.
+    expect(librarianAccessMigration).toContain("public.library_access_matrix");
+    expect(librarianAccessMigration).toContain("public.library_set_access");
+    expect(librarianAccessMigration).toContain("public.library_remove_access");
+    expect(librarianAccessMigration).toContain("You do not have permission to manage library access");
+    expect(librarianAccessMigration).toContain("ON CONFLICT (branch_id, user_id) DO UPDATE");
+    // UI: editable capability matrix, promoted to its own tab.
+    expect(libraryPage).toContain("library_access_matrix");
+    expect(libraryPage).toContain("library_set_access");
+    expect(libraryPage).toContain("library_remove_access");
+    expect(libraryPage).toContain("handleUpdateAccess");
+    expect(libraryPage).toContain("handleMatrixGrant");
+    expect(libraryPage).toContain("handleRemoveAccess");
+    expect(libraryPage).toContain('<TabsContent value="access"');
+    expect(sidebar).toContain('title: "Access Matrix"');
+    // Fetches on the Access Matrix tab (not Settings) and searches server-side.
+    expect(libraryPage).toContain('effectiveTab !== "access"');
+    expect(libraryPage).toContain("_search: accessSearch.trim()");
+    expect(accessMatrixSearchMigration).toContain("library_access_matrix(uuid, text, int)");
+    expect(accessMatrixSearchMigration).toContain("public.get_user_role(p.user_id) = 'librarian'::public.app_role");
+    const accessMatrix = readFileSync("src/components/library/LibraryAccessMatrix.tsx", "utf8");
+    expect(accessMatrix).toContain("Library Access Matrix");
+    expect(accessMatrix).toContain("ACCESS_CAPABILITY_KEYS");
+    // Assignment-derived capabilities surface in the permission layer.
+    const permissionContext = readFileSync("src/contexts/PermissionContext.tsx", "utf8");
+    expect(permissionContext).toContain("library_staff_assignments");
+    expect(permissionContext).toContain('next.add("library:catalog")');
+  });
+
+  it("evaluates queue access once per branch, not per record, and locks RPCs to authenticated", () => {
+    expect(libraryQueuePerfMigration).toContain("public.library_accessible_branch_ids");
+    expect(libraryQueuePerfMigration).toContain("public.library_queue_branch_ids");
+    expect(libraryQueuePerfMigration).toContain("d.branch_id = ANY(v_branches)");
+    expect(libraryQueuePerfMigration).toContain("d.branch_id = ANY(a.ids)");
+    expect(libraryQueuePerfMigration).toContain("d.status::text = ANY(_statuses)");
+    // Postgres grants EXECUTE to PUBLIC by default; revoke it so anon can't reach them.
+    expect(libraryQueuePerfMigration).toContain("REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC");
+    expect(libraryQueuePerfMigration).toContain("REVOKE EXECUTE ON FUNCTION %s FROM anon");
+  });
+
+  it("clubs publisher variants through a seeded alias dictionary and a review surface", () => {
+    expect(publisherCanonicalMigration).toContain("CREATE TABLE IF NOT EXISTS public.library_publisher_aliases");
+    expect(publisherCanonicalMigration).toContain("public.library_canonical_publisher");
+    expect(publisherCanonicalMigration).toContain("public.library_apply_publisher_canonicalization");
+    expect(publisherCanonicalMigration).toContain("public.library_set_publisher_alias");
+    expect(publisherCanonicalMigration).toContain("ON CONFLICT (alias_norm) DO UPDATE");
+    // Seeded shorthand handled.
+    expect(publisherCanonicalMigration).toContain("Jaypee Brothers Medical Publishers");
+    expect(publisherCanonicalMigration).toContain("Eastern Book Company");
+    expect(publisherCanonicalMigration).toContain("All India Reporter");
+    // upsert now canonicalises before fuzzy matching.
+    expect(publisherCanonicalMigration).toContain("v_name := coalesce(public.library_canonical_publisher(_name), trim(_name))");
+
+    expect(libraryPage).toContain("PublisherNormalizer");
+    expect(publisherNormalizer).toContain("library_publisher_usage");
+    expect(publisherNormalizer).toContain("library_apply_publisher_canonicalization");
+    expect(publisherNormalizer).toContain("library_set_publisher_alias");
+
+    // Drill-down: which books/accession numbers carry a name, so a librarian can
+    // check the shelf before choosing the correct publisher.
+    expect(publisherRecordsMigration).toContain("public.library_publisher_records");
+    expect(publisherRecordsMigration).toContain("library_canonical_publisher(d.publisher)");
+    expect(publisherNormalizer).toContain("library_publisher_records");
+    expect(publisherNormalizer).toContain("View books");
+    expect(publisherNormalizer).toContain("Print accession list");
+  });
+
+  it("scans barcodes from the phone camera on web and mobile", () => {
+    // Web scanner with native BarcodeDetector + ZXing fallback.
+    expect(barcodeScanner).toContain("BarcodeDetector");
+    expect(barcodeScanner).toContain('import("@zxing/browser")');
+    expect(barcodeScanner).toContain("facingMode");
+    // Wired into circulation + digitization.
+    expect(libraryPage).toContain("BarcodeScanner");
+    expect(libraryPage).toContain("handleScanDetected");
+    expect(libraryPage).toContain('setScanner({ kind: "issue" })');
+    expect(libraryPage).toContain('setScanner({ kind: "return" })');
+    expect(libraryPage).toContain('setScanner({ kind: "digitize" })');
+    expect(libraryPage).toContain("isbnFromScan");
+    expect(libraryPage).toContain("Scan ISBN / barcode");
+    // QR labels encode NIMT + accession and print as QR, not Code 39.
+    expect(libraryPage).toContain("libraryQrPayload");
+    expect(libraryPage).toContain("NIMT:ACC:");
+    expect(libraryPage).toContain("qrSvgMarkup");
+    expect(libraryPage).toContain("QRCodeSVG");
+    // Label layout: NIMT logo on top, title clamped to two lines at QR width.
+    expect(libraryPage).toContain("NIMT_LOGO_URL");
+    expect(libraryPage).toContain("-webkit-line-clamp: 2");
+    // Scans decode the QR payload and fill the review record.
+    expect(libraryPage).toContain("parseLibraryScan");
+    expect(libraryPage).toContain('setScanner({ kind: "review", recordId: record.id })');
+    expect(libraryPage).toContain("Scan QR / barcode / ISBN");
+    // Mobile decodes the same payload.
+    expect(mobileLibrary).toContain("parseScanned");
+    expect(mobileLibrary).toContain("NIMT(?::ACC)");
+    // Server RPC that resolves operable branches without an explicit assignment.
+    expect(myBranchesMigration).toContain("public.library_my_branches");
+    expect(myBranchesMigration).toContain("library_accessible_branch_ids");
   });
 
   it("normalizes external ISBN metadata lookup through one edge function", () => {
