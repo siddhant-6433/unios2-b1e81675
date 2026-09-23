@@ -231,6 +231,18 @@ export default function LoginScreen() {
     }
   }, [resetWhatsAppSignIn]);
 
+  // On web the deep-link would open a new window (and navigating away would
+  // stop the poll), so fall back to the in-window OTP flow there instead.
+  const handleContinueWhatsApp = useCallback(() => {
+    if (Platform.OS === 'web') {
+      setError(null);
+      resetWhatsAppSignIn();
+      setStep('whatsapp');
+      return;
+    }
+    void startWhatsAppSignIn();
+  }, [resetWhatsAppSignIn, startWhatsAppSignIn]);
+
   useEffect(() => {
     if (waState !== 'waiting' || !waIntentId || !waClientSecret) return;
     let cancelled = false;
@@ -379,7 +391,7 @@ export default function LoginScreen() {
                   {/* The two primary options */}
                   <TouchableOpacity
                     style={[styles.primaryBtn, { backgroundColor: WHATSAPP }]}
-                    onPress={startWhatsAppSignIn}
+                    onPress={handleContinueWhatsApp}
                     disabled={waState === 'starting'}
                     activeOpacity={0.85}
                   >

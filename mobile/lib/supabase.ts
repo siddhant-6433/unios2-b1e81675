@@ -86,6 +86,9 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, 
     storage: SecureStoreAdapter,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false,
+    // On web the OAuth provider redirects the current window back with tokens
+    // in the URL hash; supabase-js must parse them or the app stays signed out.
+    // Native uses an in-app auth session and parses the result itself.
+    detectSessionInUrl: Platform.OS === 'web',
   },
 });
