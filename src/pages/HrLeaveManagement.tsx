@@ -2,7 +2,7 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { lazy, Suspense } from "react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
+import { usePermissions } from "@/contexts/PermissionContext";
 import { useToast } from "@/hooks/use-toast";
 import {
   Search, Loader2, Check, X, Clock, CalendarOff,
@@ -36,8 +36,9 @@ const statusStyles: Record<string, string> = {
 };
 
 const HrLeaveManagement = () => {
-  const { user } = useAuth();
+  const { can } = usePermissions();
   const { toast } = useToast();
+  const canApprove = can("hr", "leave_approve");
   const [tab, setTab] = useState<"pending" | "all" | "plans">("pending");
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,14 +77,21 @@ const HrLeaveManagement = () => {
 
   const handleAction = async (id: string, action: "approved" | "rejected") => {
     setProcessing(id);
-    const { error } = await supabase.from("employee_leave_requests").update({
-      status: action,
-      approved_by: user?.id,
-      approved_at: new Date().toISOString(),
-    }).eq("id", id);
+    let note: string | undefined;
+    if (action === "rejected") {
+      note = window.prompt("Reason for rejection (shared with the employee)") || undefined;
+    }
+    // Approved via the RPC so a leave_decision notification is emitted and the
+    // permission is enforced server-side (the RLS UPDATE policy alone cannot
+    // distinguish an approval from a silent status edit).
+    const { error } = await supabase.rpc("decide_leave_request", {
+      _request_id: id,
+      _approve: action === "approved",
+      _note: note,
+    } as never);
 
     if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
-    else toast({ title: action === "approved" ? "Approved" : "Rejected" });
+    else toast({ title: action === "approved" ? "Leave approved" : "Leave rejected" });
     setProcessing(null);
     fetchRequests();
   };
@@ -143,7 +151,7 @@ const HrLeaveManagement = () => {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Days</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Reason</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</th>
-                  {tab === "pending" && <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Action</th>}
+                  {tab === "pending" && canApprove && <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Action</th>}
                 </tr>
               </thead>
               <tbody>
@@ -169,7 +177,7 @@ const HrLeaveManagement = () => {
                     <td className="px-4 py-3">
                       <Badge className={`text-[10px] border-0 capitalize ${statusStyles[r.status] || "bg-muted"}`}>{r.status}</Badge>
                     </td>
-                    {tab === "pending" && (
+                    {tab === "pending" && canApprove && (
                       <td className="px-4 py-3">
                         <div className="flex gap-1.5">
                           <button

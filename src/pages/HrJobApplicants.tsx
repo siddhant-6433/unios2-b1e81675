@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { usePermissions } from "@/contexts/PermissionContext";
 
 type Status = "all" | "new" | "reviewing" | "shortlisted" | "interview" | "rejected" | "hired" | "withdrawn";
 
@@ -78,7 +79,11 @@ function formatDate(s: string | null): string {
 
 const HrJobApplicants = () => {
   const navigate = useNavigate();
+  const { can } = usePermissions();
   const { toast } = useToast();
+  const canRecruit = can("hr", "recruitment_edit");
+  const canInterview = can("hr", "interviews_edit") || canRecruit;
+  const canOffer = can("hr", "documents_generate") || canRecruit;
   const [tab, setTab] = useState<Status>("new");
   const [items, setItems] = useState<JobApplicantRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -466,21 +471,29 @@ const HrJobApplicants = () => {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 pt-2">
-                  <Button size="sm" variant="outline" onClick={() => updateStatus(active.id, "reviewing")} disabled={saving}>
-                    <Clock className="h-3.5 w-3.5 mr-1" /> Mark reviewing
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => updateStatus(active.id, "shortlisted")} disabled={saving}>
-                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Shortlist
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => updateStatus(active.id, "rejected")} disabled={saving}>
-                    <XCircle className="h-3.5 w-3.5 mr-1" /> Reject
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => setShowInterviewForm(v => !v)}>
-                    <CalendarClock className="h-3.5 w-3.5 mr-1" /> Schedule interview
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => setShowOfferForm(v => !v)}>
-                    <FileText className="h-3.5 w-3.5 mr-1" /> Generate offer letter
-                  </Button>
+                  {canRecruit && (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => updateStatus(active.id, "reviewing")} disabled={saving}>
+                        <Clock className="h-3.5 w-3.5 mr-1" /> Mark reviewing
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => updateStatus(active.id, "shortlisted")} disabled={saving}>
+                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Shortlist
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => updateStatus(active.id, "rejected")} disabled={saving}>
+                        <XCircle className="h-3.5 w-3.5 mr-1" /> Reject
+                      </Button>
+                    </>
+                  )}
+                  {canInterview && (
+                    <Button size="sm" variant="outline" onClick={() => setShowInterviewForm(v => !v)}>
+                      <CalendarClock className="h-3.5 w-3.5 mr-1" /> Schedule interview
+                    </Button>
+                  )}
+                  {canOffer && (
+                    <Button size="sm" variant="outline" onClick={() => setShowOfferForm(v => !v)}>
+                      <FileText className="h-3.5 w-3.5 mr-1" /> Generate offer letter
+                    </Button>
+                  )}
                   <Button size="sm" variant="outline" asChild>
                     <Link to={`/whatsapp-inbox?phone=${encodeURIComponent(active.phone || "")}`}>
                       <MessageSquare className="h-3.5 w-3.5 mr-1" /> Open chat
@@ -491,11 +504,13 @@ const HrJobApplicants = () => {
                       <ExternalLink className="h-3.5 w-3.5 mr-1" /> View lead record
                     </Link>
                   </Button>
-                  <div className="ml-auto">
-                    <Button size="sm" onClick={saveDetails} disabled={saving || (!activeNotes && activeRole === (active.desired_role || ""))}>
-                      Save
-                    </Button>
-                  </div>
+                  {canRecruit && (
+                    <div className="ml-auto">
+                      <Button size="sm" onClick={saveDetails} disabled={saving || (!activeNotes && activeRole === (active.desired_role || ""))}>
+                        Save
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
                 {interviews.length > 0 && (

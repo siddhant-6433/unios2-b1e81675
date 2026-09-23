@@ -103,6 +103,12 @@ const HrLeaveManagement    = lazy(() => import("./pages/HrLeaveManagement"));
 const HrEmployeeDirectory  = lazy(() => import("./pages/HrEmployeeDirectory"));
 const HrPayroll            = lazy(() => import("./pages/HrPayroll"));
 const HrJobApplicants      = lazy(() => import("./pages/HrJobApplicants"));
+const HrExpenses           = lazy(() => import("./pages/HrExpenses"));
+const HrPerformance        = lazy(() => import("./pages/HrPerformance"));
+const HrAnnouncements      = lazy(() => import("./pages/HrAnnouncements"));
+const HrHelpdesk           = lazy(() => import("./pages/HrHelpdesk"));
+const HrReports            = lazy(() => import("./pages/HrReports"));
+const HrSettings           = lazy(() => import("./pages/HrSettings"));
 const ConsultantCreditNotes = lazy(() => import("./pages/ConsultantCreditNotes"));
 const ParentPortal         = lazy(() => import("./pages/ParentPortal"));
 const StudentPortalPage    = lazy(() => import("./pages/StudentPortal"));
@@ -369,6 +375,12 @@ const App = () => (
                       <Route path="/hr-leave" element={<RequirePermission module="hr" action="view"><HrLeaveManagement /></RequirePermission>} />
                       <Route path="/hr-directory" element={<RequirePermission module="hr" action="view"><HrEmployeeDirectory /></RequirePermission>} />
                       <Route path="/hr-payroll" element={<RequirePermission module="hr" action="payroll_run"><HrPayroll /></RequirePermission>} />
+                      <Route path="/hr-expenses" element={<RequirePermission module="hr" action="expenses_approve"><HrExpenses /></RequirePermission>} />
+                      <Route path="/hr-performance" element={<RequirePermission module="hr" action="performance_manage"><HrPerformance /></RequirePermission>} />
+                      <Route path="/hr-announcements" element={<RequirePermission module="hr" action="engage_manage"><HrAnnouncements /></RequirePermission>} />
+                      <Route path="/hr-helpdesk" element={<RequirePermission module="hr" action="helpdesk_manage"><HrHelpdesk /></RequirePermission>} />
+                      <Route path="/hr-reports" element={<RequirePermission module="hr" action="view"><HrReports /></RequirePermission>} />
+                      <Route path="/hr-settings" element={<RequirePermission module="hr" action="employees_edit"><HrSettings /></RequirePermission>} />
 
                       {/* Admin — user_management:view */}
                       <Route path="/admin" element={<RequirePermission module="user_management" action="view"><AdminPanel /></RequirePermission>} />

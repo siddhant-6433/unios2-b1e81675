@@ -168,6 +168,12 @@ const hrSubMenu: MenuItem[] = [
   { title: "Leave Mgmt", url: "/hr-leave", icon: CalendarOff, permission: "hr:view" },
   { title: "Directory", url: "/hr-directory", icon: Users, permission: "hr:view" },
   { title: "Payroll", url: "/hr-payroll", icon: IndianRupee, permission: "hr:payroll_run" },
+  { title: "Expenses", url: "/hr-expenses", icon: Receipt, permission: "hr:expenses_approve" },
+  { title: "Performance", url: "/hr-performance", icon: Target, permission: "hr:performance_manage" },
+  { title: "Announcements", url: "/hr-announcements", icon: Megaphone, permission: "hr:engage_manage" },
+  { title: "Helpdesk", url: "/hr-helpdesk", icon: MessageSquare, permission: "hr:helpdesk_manage" },
+  { title: "Reports", url: "/hr-reports", icon: BarChart3, permission: "hr:view" },
+  { title: "Settings", url: "/hr-settings", icon: Settings, permission: "hr:employees_edit" },
 ];
 
 const managementMenu: MenuItem[] = [
