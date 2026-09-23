@@ -285,6 +285,10 @@ describe("library module", () => {
     expect(libraryPage).toContain("_search: accessSearch.trim()");
     // Settings/Access tabs are manager-gated, not merely permission-gated.
     expect(libraryPage).toContain("isLibraryManager");
+    // The CRM badge aggregate must not run for non-CRM roles (it timed out for
+    // the librarian under their RLS policies).
+    expect(sidebar).toContain("canSeeLeadBadges");
+    expect(sidebar).toContain("if (!canSeeLeadBadges) return;");
     expect(accessMatrixSearchMigration).toContain("library_access_matrix(uuid, text, int)");
     expect(accessMatrixSearchMigration).toContain("public.get_user_role(p.user_id) = 'librarian'::public.app_role");
     const accessMatrix = readFileSync("src/components/library/LibraryAccessMatrix.tsx", "utf8");

@@ -225,6 +225,17 @@ export function AppSidebar() {
     if (role === "counsellor" && DIALER_FOLDED_URLS.includes(item.url)) return false;
     return canSeePolicyItem(accessState, item);
   };
+  // action_badge_counts is an expensive, RLS-scoped CRM aggregate. Non-CRM roles
+  // (librarian, faculty, accountant, …) never render these badges, and running it
+  // under their policies times out (57014) on every page. Gate the call the same
+  // way the Admissions menu is gated.
+  const canSeeLeadBadges = canSeePolicyItem(accessState, {
+    title: "Admissions",
+    url: "/admissions",
+    icon: Users,
+    permission: "leads:view",
+    staffOnly: true,
+  });
   const canViewSettings = canSeePolicyItem(accessState, {
     title: "Settings",
     url: "/settings",
@@ -249,6 +260,7 @@ export function AppSidebar() {
 
   const fetchAdmissionBadges = useCallback(async () => {
     if (isPortalRole(role)) return;
+    if (!canSeeLeadBadges) return;
     if (role === "counsellor" && !profile?.id) return;
 
     const { data, error } = await fetchActionBadgeCounts({
@@ -266,7 +278,7 @@ export function AppSidebar() {
     setPendingFollowupCount(Number(data?.overdue || 0) + Number(data?.today || 0));
     setMissedCallbackCount(Number(data?.ai_needs_followup || 0));
     setPriorityInterestedCount(Number(data?.priority_interested_total || 0));
-  }, [role, profile?.id]);
+  }, [role, profile?.id, canSeeLeadBadges]);
 
   const fetchPendingApprovals = useCallback(async () => {
     // Only approvers need this count
