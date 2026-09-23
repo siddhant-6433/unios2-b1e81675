@@ -325,24 +325,6 @@ const Library = () => {
   // discovery experience, not the staff console.
   const isPatronOnly = !canCatalog && !canCirculate && !canInventory && !canDigitize
     && !canManageSettings && !canExport && !isSuperAdmin && !isOversightRole;
-  // Only surface the tabs a role can actually use. Principals keep read oversight
-  // of the queue; faculty/students get the patron view instead of the console.
-  const tabVisibility: Record<string, boolean> = {
-    dashboard: true,
-    catalog: true,
-    circulation: canCirculate,
-    inventory: canInventory,
-    digitization: canDigitize || isOversightRole || isSuperAdmin,
-    authors: canCatalog,
-    publishers: canCatalog,
-    members: canCirculate || canManageSettings || isSuperAdmin,
-    reports: canExport || isSuperAdmin,
-    access: canManageSettings || isSuperAdmin,
-    settings: canManageSettings || isSuperAdmin,
-  };
-  const visibleTabs = tabKeys.filter((key) => tabVisibility[key]);
-  const effectiveTab = visibleTabs.includes(activeTab) ? activeTab : (visibleTabs[0] || "dashboard");
-
   const [loading, setLoading] = useState(true);
   const initializedRef = useRef(false);
   const [books, setBooks] = useState<LibraryBook[]>([]);
@@ -370,6 +352,32 @@ const Library = () => {
   const [librarySettings, setLibrarySettings] = useState<LibrarySetting[]>([]);
   const [staffAssignments, setStaffAssignments] = useState<LibraryStaffAssignment[]>([]);
   const [staffProfiles, setStaffProfiles] = useState<StaffProfile[]>([]);
+
+  // Managing access/settings is a manager capability, not a role permission:
+  // a plain librarian has library:manage_settings in role_permissions but the
+  // server only grants it via an explicit manager/manage-settings assignment.
+  // Gate the tabs on that so the librarian isn't shown surfaces they can't use.
+  const isLibraryManager = isSuperAdmin || isOversightRole
+    || staffAssignments.some((assignment) => assignment.user_id === user?.id && assignment.active
+      && (assignment.assignment_role === "manager" || assignment.can_manage_settings));
+
+  // Only surface the tabs a role can actually use. Principals keep read oversight
+  // of the queue; faculty/students get the patron view instead of the console.
+  const tabVisibility: Record<string, boolean> = {
+    dashboard: true,
+    catalog: true,
+    circulation: canCirculate,
+    inventory: canInventory,
+    digitization: canDigitize || isOversightRole || isSuperAdmin,
+    authors: canCatalog,
+    publishers: canCatalog,
+    members: canCirculate || canManageSettings || isSuperAdmin,
+    reports: canExport || isSuperAdmin,
+    access: isLibraryManager,
+    settings: isLibraryManager,
+  };
+  const visibleTabs = tabKeys.filter((key) => tabVisibility[key]);
+  const effectiveTab = visibleTabs.includes(activeTab) ? activeTab : (visibleTabs[0] || "dashboard");
   const [libraryCampusId, setLibraryCampusId] = useState(globalCampusId);
   const [selectedInstitutionId, setSelectedInstitutionId] = useState("");
   const [selectedBranchId, setSelectedBranchId] = useState("");

@@ -283,6 +283,8 @@ describe("library module", () => {
     // Fetches on the Access Matrix tab (not Settings) and searches server-side.
     expect(libraryPage).toContain('effectiveTab !== "access"');
     expect(libraryPage).toContain("_search: accessSearch.trim()");
+    // Settings/Access tabs are manager-gated, not merely permission-gated.
+    expect(libraryPage).toContain("isLibraryManager");
     expect(accessMatrixSearchMigration).toContain("library_access_matrix(uuid, text, int)");
     expect(accessMatrixSearchMigration).toContain("public.get_user_role(p.user_id) = 'librarian'::public.app_role");
     const accessMatrix = readFileSync("src/components/library/LibraryAccessMatrix.tsx", "utf8");
