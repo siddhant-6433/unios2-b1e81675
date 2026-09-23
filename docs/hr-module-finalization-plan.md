@@ -385,3 +385,36 @@ Shipped on top of §13.
 ### Remaining deferred
 - Encashment/comp-off leave flows; custom employee fields; e-sign; asset depreciation ↔ payroll.
 - Mobile: consolidate the duplicated leave modal and wire the stubbed Finances/Documents tabs (needs a simulator/credentials to test).
+
+---
+
+## 15. Phase 4 — comp-off, leave encashment, custom fields, mobile wiring
+
+### Backend — 3 migrations
+| Migration (slug) | What it does |
+|---|---|
+| `hr_comp_off` | `comp_off_credits` with derived `remaining`; grant/decide; FIFO consumption on approval of a `COFF` leave; auto-credit on approved overtime; daily expiry (pg_cron); `my_comp_off()`. |
+| `hr_leave_encashment` | `leave_encashments` + request/decide/pay RPCs; paying reduces `entitled_days` (never `used_days`); `my_leave_balances()`; inbox view. |
+| `hr_custom_fields` | `employee_field_defs` + `employee_field_values`; `set_employee_field_value` / `my_employee_fields()`; inbox view. |
+
+### Web frontend
+- Comp-off: `CompOffPanel` (`/hr-comp-off`) and `MyCompOffPanel`.
+- Encashment: `EncashmentPanel` (`/hr-encashment`) and `MyEncashmentPanel`.
+- Custom fields: `CustomFieldsPanel` (`/hr-custom-fields`) and `MyCustomFieldsPanel`.
+- MyHr gains **Comp Off**, **Encashment** and **Other Details** tabs.
+
+### Mobile wiring (`mobile/`)
+- Extracted the duplicated leave modal into `mobile/components/hr/ApplyLeaveModal.tsx` and reused it in `work/hr.tsx` + `work/leave.tsx`.
+- Leave balances now come from `my_leave_balances` (with a legacy fallback).
+- New screens: `payslips`, `expenses`, `documents`, `comp-off`, `encashment`; registered in the work stack and linked from the HR tab (Finances, Documents, Leave).
+- **Not runtime-verified**: mobile dependencies are not installed in this worktree, so screens were written to existing patterns but not run on a device.
+
+### Verification (phase 4)
+- `npm run build` — passes.
+- New pure-logic tests: comp-off (13), encashment (11), custom fields (26) → 50.
+- `src/test/hr-phase4-guardrails.test.ts` (11 tests).
+- `npm test` — failure set still identical to the `origin/main` baseline (17 files / 19 tests, unrelated); **+62 passing tests** vs phase 3.
+- `npm run lint:access` — no new violations.
+
+### E-sign — still out of scope (explained)
+E-sign is electronic signature of letters (Aadhaar eSign / DocuSign-style) and needs an external provider + callback webhook; it is unrelated to encashment and is not in this change set.

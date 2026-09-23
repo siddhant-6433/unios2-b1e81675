@@ -16,6 +16,9 @@ import { MyAssetsPanel } from "@/components/hr/MyAssetsPanel";
 import { MyLeaveCalendarPanel } from "@/components/hr/MyLeaveCalendarPanel";
 import { MySettlementPanel } from "@/components/hr/MySettlementPanel";
 import { MyAdvancesPanel } from "@/components/hr/MyAdvancesPanel";
+import { MyCompOffPanel } from "@/components/hr/MyCompOffPanel";
+import { MyEncashmentPanel } from "@/components/hr/MyEncashmentPanel";
+import { MyCustomFieldsPanel } from "@/components/hr/MyCustomFieldsPanel";
 
 // HR self-service. This is the entire app for the non_teaching role, and the
 // "my own record" view for everyone else — hence permission hr:self, which is
@@ -188,9 +191,12 @@ const MyHr = () => {
             ["expenses", "My Expenses"],
             ["performance", "My Performance"],
             ["requests", "Requests"],
+            ["comp-off", "Comp Off"],
+            ["encashment", "Encashment"],
             ["assets", "My Assets"],
             ["advances", "Advances"],
             ["settlement", "Settlement"],
+            ["fields", "Other Details"],
             ["engagement", "Announcements"],
             ["directory", "Directory"],
             ["holidays", "Holidays"],
@@ -335,6 +341,14 @@ const MyHr = () => {
           <RegularisationRequestForm />
         </TabsContent>
 
+        <TabsContent value="comp-off" className="mt-6">
+          <MyCompOffPanel />
+        </TabsContent>
+
+        <TabsContent value="encashment" className="mt-6">
+          <MyEncashmentPanel />
+        </TabsContent>
+
         <TabsContent value="assets" className="mt-6">
           <MyAssetsPanel />
         </TabsContent>
@@ -345,6 +359,10 @@ const MyHr = () => {
 
         <TabsContent value="settlement" className="mt-6">
           <MySettlementPanel />
+        </TabsContent>
+
+        <TabsContent value="fields" className="mt-6">
+          <MyCustomFieldsPanel />
         </TabsContent>
 
         <TabsContent value="engagement" className="mt-6">

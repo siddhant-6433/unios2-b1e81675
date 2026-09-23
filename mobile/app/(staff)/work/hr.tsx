@@ -1,20 +1,34 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, SafeAreaView,
-  TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert, FlatList,
+  TouchableOpacity, ActivityIndicator, FlatList,
 } from 'react-native';
+import { router } from 'expo-router';
 import { useAuth } from '../../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
 import { colors, radius } from '../../../constants/Colors';
+import { ApplyLeaveModal } from '../../../components/hr/ApplyLeaveModal';
 import {
   Clock, CalendarOff, FileText, IndianRupee, Briefcase,
-  ClipboardCheck, History, Plus, Check, X, ChevronRight,
+  ClipboardCheck, History, Plus, Check, ChevronRight,
   Calendar, Download, AlertCircle,
 } from 'lucide-react-native';
 
-type HrTab = 'time' | 'finances' | 'documents';
+const labelColor = (label?: string) => {
+  const l = (label || '').toLowerCase();
+  if (l.includes('casual')) return '#7c3aed';
+  if (l.includes('sick')) return '#d97706';
+  if (l.includes('earned')) return '#059669';
+  if (l.includes('comp')) return '#0284c7';
+  return colors.primary;
+};
 
-const LEAVE_TYPES = ['casual', 'sick', 'earned'];
+const fmtDays = (n: any) => {
+  const v = Number(n || 0);
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+};
+
+type HrTab = 'time' | 'finances' | 'documents';
 
 export default function HrScreen() {
   const { user } = useAuth();
@@ -64,9 +78,7 @@ function TimeSection({ userId }: { userId: string }) {
     const endOfMonth = `${year}-${String(month + 1).padStart(2, '0')}-${new Date(year, month + 1, 0).getDate()}`;
 
     const [balRes, reqRes, attRes] = await Promise.all([
-      supabase.from('employee_leave_balances')
-        .select('leave_type, total_days, used_days')
-        .eq('user_id', userId).eq('year', year),
+      (supabase as any).rpc('my_leave_balances'),
       supabase.from('employee_leave_requests')
         .select('*').eq('user_id', userId)
         .order('created_at', { ascending: false }).limit(10),
@@ -77,15 +89,29 @@ function TimeSection({ userId }: { userId: string }) {
         .order('date', { ascending: false }),
     ]);
 
-    if (balRes.data) setBalances(balRes.data);
+    let balRows: any[] = balRes.data ?? [];
+    if (balRes.error || balRows.length === 0) {
+      // Tolerant fallback to the legacy table so the screen never blanks.
+      const fallback = await supabase.from('employee_leave_balances')
+        .select('leave_type, total_days, used_days')
+        .eq('user_id', userId).eq('year', year);
+      balRows = (fallback.data ?? []).map((b: any) => ({
+        leave_type: b.leave_type,
+        entitled: b.total_days || 0,
+        available: (b.total_days || 0) - (b.used_days || 0),
+      }));
+    } else {
+      // Prefer the current leave year; else show whatever the RPC returned.
+      const currentYear = balRows.filter((b: any) => b.leave_year === year);
+      if (currentYear.length > 0) balRows = currentYear;
+    }
+    setBalances(balRows);
     if (reqRes.data) setRequests(reqRes.data);
     if (attRes.data) setAttendance(attRes.data);
     setLoading(false);
   };
 
   if (loading) return <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />;
-
-  const leaveColors: Record<string, string> = { casual: '#7c3aed', sick: '#d97706', earned: '#059669' };
 
   return (
     <View style={styles.section}>
@@ -129,19 +155,31 @@ function TimeSection({ userId }: { userId: string }) {
 
       {/* Leave balances */}
       <View style={styles.balanceRow}>
-        {LEAVE_TYPES.map((type) => {
-          const bal = balances.find((b: any) => b.leave_type === type);
-          const remaining = (bal?.total_days || 0) - (bal?.used_days || 0);
-          return (
-            <View key={type} style={styles.balanceCard}>
-              <Text style={[styles.balanceValue, { color: leaveColors[type] || colors.primary }]}>
-                {remaining}
-              </Text>
-              <Text style={styles.balanceLabel}>{type.charAt(0).toUpperCase() + type.slice(1)}</Text>
-              <Text style={styles.balanceSub}>of {bal?.total_days || 0}</Text>
-            </View>
-          );
-        })}
+        {balances.length === 0 ? (
+          <Text style={styles.balanceEmpty}>No leave balances yet</Text>
+        ) : balances.map((bal: any) => (
+          <View key={bal.leave_type_id ?? bal.leave_type} style={styles.balanceCard}>
+            <Text style={[styles.balanceValue, { color: labelColor(bal.leave_type) }]}>
+              {fmtDays(bal.available)}
+            </Text>
+            <Text style={styles.balanceLabel}>{bal.leave_type}</Text>
+            <Text style={styles.balanceSub}>of {fmtDays(bal.entitled)}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Leave tools */}
+      <View style={styles.cardGrid}>
+        <MenuCard
+          icon={Clock} title="Comp-Off" sub="Overtime credit"
+          color="#0284c7" bg="#f0f9ff"
+          onPress={() => router.push('/(staff)/work/comp-off' as any)}
+        />
+        <MenuCard
+          icon={IndianRupee} title="Encash Leave" sub="Cash out unused leave"
+          color="#059669" bg="#ecfdf5"
+          onPress={() => router.push('/(staff)/work/encashment' as any)}
+        />
       </View>
 
       {/* Recent leave requests */}
@@ -186,14 +224,30 @@ function FinancesSection() {
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Salary</Text>
       <View style={styles.cardGrid}>
-        <MenuCard icon={IndianRupee} title="My Pay" sub="View salary details" color="#059669" bg="#ecfdf5" />
-        <MenuCard icon={FileText} title="Pay Slips" sub="Download payslips" color="#0284c7" bg="#f0f9ff" />
+        <MenuCard
+          icon={IndianRupee} title="My Pay" sub="View salary details"
+          color="#059669" bg="#ecfdf5"
+          onPress={() => router.push('/(staff)/work/payslips' as any)}
+        />
+        <MenuCard
+          icon={FileText} title="Pay Slips" sub="Download payslips"
+          color="#0284c7" bg="#f0f9ff"
+          onPress={() => router.push('/(staff)/work/payslips' as any)}
+        />
       </View>
 
       <Text style={styles.sectionTitle}>Expenses</Text>
       <View style={styles.cardGrid}>
-        <MenuCard icon={Briefcase} title="Add Expense" sub="Create and claim" color="#d97706" bg="#fffbeb" />
-        <MenuCard icon={History} title="Expense History" sub="Track your claims" color="#7c3aed" bg="#f5f3ff" />
+        <MenuCard
+          icon={Briefcase} title="Add Expense" sub="Create and claim"
+          color="#d97706" bg="#fffbeb"
+          onPress={() => router.push('/(staff)/work/expenses' as any)}
+        />
+        <MenuCard
+          icon={History} title="Expense History" sub="Track your claims"
+          color="#7c3aed" bg="#f5f3ff"
+          onPress={() => router.push('/(staff)/work/expenses' as any)}
+        />
       </View>
     </View>
   );
@@ -206,92 +260,26 @@ function DocumentsSection() {
       <Text style={styles.sectionTitle}>Documents</Text>
       <View style={styles.cardGrid}>
         <MenuCard icon={FileText} title="Org Documents" sub="Policies and forms" color="#d97706" bg="#fffbeb" />
-        <MenuCard icon={Download} title="My Documents" sub="Your uploaded files" color="#7c3aed" bg="#f5f3ff" />
+        <MenuCard
+          icon={Download} title="My Documents" sub="Your uploaded files"
+          color="#7c3aed" bg="#f5f3ff"
+          onPress={() => router.push('/(staff)/work/documents' as any)}
+        />
       </View>
     </View>
   );
 }
 
 // ── Menu Card ──
-function MenuCard({ icon: Icon, title, sub, color, bg }: { icon: any; title: string; sub: string; color: string; bg: string }) {
+function MenuCard({ icon: Icon, title, sub, color, bg, onPress }: {
+  icon: any; title: string; sub: string; color: string; bg: string; onPress?: () => void;
+}) {
   return (
-    <TouchableOpacity style={[styles.menuCard, { backgroundColor: bg }]} activeOpacity={0.7}>
+    <TouchableOpacity style={[styles.menuCard, { backgroundColor: bg }]} activeOpacity={0.7} onPress={onPress}>
       <Icon size={24} color={color} />
       <Text style={styles.menuTitle}>{title}</Text>
       <Text style={styles.menuSub}>{sub}</Text>
     </TouchableOpacity>
-  );
-}
-
-// ── Apply Leave Modal ──
-function ApplyLeaveModal({ visible, onClose, onSuccess, userId }: {
-  visible: boolean; onClose: () => void; onSuccess: () => void; userId: string;
-}) {
-  const [leaveType, setLeaveType] = useState('casual');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [reason, setReason] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  const submit = async () => {
-    if (!startDate) { Alert.alert('Error', 'Enter start date (YYYY-MM-DD)'); return; }
-    const start = new Date(startDate);
-    const end = endDate ? new Date(endDate) : start;
-    const days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
-
-    setSubmitting(true);
-    const { error } = await supabase.from('employee_leave_requests').insert({
-      user_id: userId, leave_type: leaveType,
-      start_date: startDate, end_date: endDate || startDate,
-      days, reason: reason || null,
-    });
-    if (error) Alert.alert('Error', error.message);
-    else { Alert.alert('Success', 'Leave request submitted'); onSuccess(); }
-    setSubmitting(false);
-  };
-
-  return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={modalStyles.overlay}>
-        <View style={modalStyles.sheet}>
-          <View style={modalStyles.header}>
-            <Text style={modalStyles.title}>Apply for Leave</Text>
-            <TouchableOpacity onPress={onClose}><X size={24} color={colors.textSecondary} /></TouchableOpacity>
-          </View>
-          <ScrollView contentContainerStyle={{ gap: 16, paddingBottom: 24 }}>
-            <View>
-              <Text style={modalStyles.label}>Leave Type</Text>
-              <View style={modalStyles.typeRow}>
-                {LEAVE_TYPES.map((t) => (
-                  <TouchableOpacity key={t}
-                    style={[modalStyles.typeChip, leaveType === t && modalStyles.typeChipActive]}
-                    onPress={() => setLeaveType(t)}>
-                    <Text style={[modalStyles.typeText, leaveType === t && { color: '#fff' }]}>
-                      {t.charAt(0).toUpperCase() + t.slice(1)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-            <View>
-              <Text style={modalStyles.label}>Start Date</Text>
-              <TextInput style={modalStyles.input} placeholder="YYYY-MM-DD" placeholderTextColor={colors.textMuted} value={startDate} onChangeText={setStartDate} />
-            </View>
-            <View>
-              <Text style={modalStyles.label}>End Date (optional)</Text>
-              <TextInput style={modalStyles.input} placeholder="YYYY-MM-DD" placeholderTextColor={colors.textMuted} value={endDate} onChangeText={setEndDate} />
-            </View>
-            <View>
-              <Text style={modalStyles.label}>Reason</Text>
-              <TextInput style={[modalStyles.input, { height: 80, textAlignVertical: 'top' }]} placeholder="Optional" placeholderTextColor={colors.textMuted} value={reason} onChangeText={setReason} multiline />
-            </View>
-            <TouchableOpacity style={[modalStyles.submitBtn, submitting && { opacity: 0.5 }]} onPress={submit} disabled={submitting}>
-              {submitting ? <ActivityIndicator color="#fff" /> : <Text style={modalStyles.submitText}>Submit Request</Text>}
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
   );
 }
 
@@ -325,14 +313,16 @@ const styles = StyleSheet.create({
   menuSub: { fontSize: 11, color: colors.textSecondary },
 
   // Balance
-  balanceRow: { flexDirection: 'row', gap: 10 },
+  balanceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   balanceCard: {
-    flex: 1, backgroundColor: colors.card, borderRadius: 14, padding: 14,
+    flexGrow: 1, flexBasis: '30%', minWidth: 96,
+    backgroundColor: colors.card, borderRadius: 14, padding: 14,
     alignItems: 'center', borderWidth: 1, borderColor: colors.cardBorder,
   },
   balanceValue: { fontSize: 26, fontWeight: '700' },
   balanceLabel: { fontSize: 11, fontWeight: '500', color: colors.textSecondary, marginTop: 2 },
   balanceSub: { fontSize: 10, color: colors.textMuted },
+  balanceEmpty: { fontSize: 13, color: colors.textMuted },
 
   // List card
   listCard: {
@@ -349,22 +339,4 @@ const styles = StyleSheet.create({
   logDash: { fontSize: 12, color: colors.textMuted },
   statusBadge: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
   statusText: { fontSize: 11, fontWeight: '600', textTransform: 'capitalize' as any },
-});
-
-const modalStyles = StyleSheet.create({
-  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheet: { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 24, paddingTop: 20, maxHeight: '85%' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  title: { fontSize: 18, fontWeight: '700', color: colors.text },
-  label: { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 8 },
-  input: {
-    backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
-    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, color: colors.text,
-  },
-  typeRow: { flexDirection: 'row', gap: 8 },
-  typeChip: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
-  typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  typeText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
-  submitBtn: { backgroundColor: colors.primary, borderRadius: 12, height: 52, alignItems: 'center', justifyContent: 'center' },
-  submitText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });

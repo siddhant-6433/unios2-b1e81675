@@ -1,21 +1,35 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, SafeAreaView,
-  TouchableOpacity, TextInput, ActivityIndicator, Alert,
-  Modal, Platform,
+  TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { useAuth } from '../../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
 import { colors, spacing, radius, typography } from '../../../constants/Colors';
+import { ApplyLeaveModal } from '../../../components/hr/ApplyLeaveModal';
 import {
-  Plus, Clock, CheckCircle, XCircle, CalendarOff, X, ChevronDown,
+  Plus, Clock, CheckCircle, XCircle, CalendarOff, ChevronDown,
 } from 'lucide-react-native';
 
 interface LeaveBalance {
   leave_type: string;
-  total_days: number;
-  used_days: number;
+  entitled: number;
+  available: number;
 }
+
+const labelColor = (label?: string) => {
+  const l = (label || '').toLowerCase();
+  if (l.includes('casual')) return colors.primary;
+  if (l.includes('sick')) return colors.warning;
+  if (l.includes('earned')) return colors.success;
+  if (l.includes('comp')) return '#0284c7';
+  return colors.primary;
+};
+
+const fmtDays = (n: any) => {
+  const v = Number(n || 0);
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+};
 
 interface LeaveRequest {
   id: string;
@@ -27,13 +41,6 @@ interface LeaveRequest {
   status: string;
   created_at: string;
 }
-
-const LEAVE_TYPES = ['casual', 'sick', 'earned'];
-const LEAVE_COLORS: Record<string, string> = {
-  casual: colors.primary,
-  sick: colors.warning,
-  earned: colors.success,
-};
 
 export default function LeaveScreen() {
   const { user } = useAuth();
@@ -50,10 +57,7 @@ export default function LeaveScreen() {
     const year = new Date().getFullYear();
 
     const [balRes, reqRes] = await Promise.all([
-      supabase.from('employee_leave_balances')
-        .select('leave_type, total_days, used_days')
-        .eq('user_id', user.id)
-        .eq('year', year),
+      (supabase as any).rpc('my_leave_balances'),
       supabase.from('employee_leave_requests')
         .select('*')
         .eq('user_id', user.id)
@@ -61,7 +65,24 @@ export default function LeaveScreen() {
         .limit(20),
     ]);
 
-    if (balRes.data) setBalances(balRes.data);
+    let balRows: any[] = balRes.data ?? [];
+    if (balRes.error || balRows.length === 0) {
+      // Tolerant fallback to the legacy table so the screen never blanks.
+      const fallback = await supabase.from('employee_leave_balances')
+        .select('leave_type, total_days, used_days')
+        .eq('user_id', user.id)
+        .eq('year', year);
+      balRows = (fallback.data ?? []).map((b: any) => ({
+        leave_type: b.leave_type,
+        entitled: b.total_days || 0,
+        available: (b.total_days || 0) - (b.used_days || 0),
+      }));
+    } else {
+      // Prefer the current leave year; else show whatever the RPC returned.
+      const currentYear = balRows.filter((b: any) => b.leave_year === year);
+      if (currentYear.length > 0) balRows = currentYear;
+    }
+    setBalances(balRows as LeaveBalance[]);
     if (reqRes.data) setRequests(reqRes.data as LeaveRequest[]);
     setLoading(false);
   };
@@ -98,19 +119,17 @@ export default function LeaveScreen() {
 
         {/* Balance cards */}
         <View style={styles.balanceRow}>
-          {LEAVE_TYPES.map((type) => {
-            const bal = balances.find(b => b.leave_type === type);
-            const remaining = (bal?.total_days || 0) - (bal?.used_days || 0);
-            return (
-              <View key={type} style={styles.balanceCard}>
-                <Text style={styles.balanceLabel}>{type.charAt(0).toUpperCase() + type.slice(1)}</Text>
-                <Text style={[styles.balanceValue, { color: LEAVE_COLORS[type] || colors.primary }]}>
-                  {remaining}
-                </Text>
-                <Text style={styles.balanceSub}>of {bal?.total_days || 0}</Text>
-              </View>
-            );
-          })}
+          {balances.length === 0 ? (
+            <Text style={styles.emptyText}>No leave balances yet</Text>
+          ) : balances.map((bal, idx) => (
+            <View key={(bal as any).leave_type_id ?? bal.leave_type ?? idx} style={styles.balanceCard}>
+              <Text style={styles.balanceLabel}>{bal.leave_type}</Text>
+              <Text style={[styles.balanceValue, { color: labelColor(bal.leave_type) }]}>
+                {fmtDays(bal.available)}
+              </Text>
+              <Text style={styles.balanceSub}>of {fmtDays(bal.entitled)}</Text>
+            </View>
+          ))}
         </View>
 
         {/* Requests */}
@@ -156,115 +175,6 @@ export default function LeaveScreen() {
   );
 }
 
-function ApplyLeaveModal({ visible, onClose, onSuccess, userId }: {
-  visible: boolean; onClose: () => void; onSuccess: () => void; userId: string;
-}) {
-  const [leaveType, setLeaveType] = useState('casual');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [reason, setReason] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  const submit = async () => {
-    if (!startDate) { Alert.alert('Error', 'Enter start date (YYYY-MM-DD)'); return; }
-    const start = new Date(startDate);
-    const end = endDate ? new Date(endDate) : start;
-    const days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
-
-    setSubmitting(true);
-    const { error } = await supabase.from('employee_leave_requests').insert({
-      user_id: userId,
-      leave_type: leaveType,
-      start_date: startDate,
-      end_date: endDate || startDate,
-      days,
-      reason: reason || null,
-    });
-
-    if (error) {
-      Alert.alert('Error', error.message);
-    } else {
-      Alert.alert('Success', 'Leave request submitted');
-      onSuccess();
-    }
-    setSubmitting(false);
-  };
-
-  return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={modalStyles.overlay}>
-        <View style={modalStyles.sheet}>
-          <View style={modalStyles.header}>
-            <Text style={modalStyles.title}>Apply for Leave</Text>
-            <TouchableOpacity onPress={onClose}><X size={24} color={colors.textSecondary} /></TouchableOpacity>
-          </View>
-
-          <ScrollView style={{ gap: 16 }} contentContainerStyle={{ gap: 16, paddingBottom: 24 }}>
-            <View>
-              <Text style={modalStyles.label}>Leave Type</Text>
-              <View style={modalStyles.typeRow}>
-                {LEAVE_TYPES.map((t) => (
-                  <TouchableOpacity
-                    key={t}
-                    style={[modalStyles.typeChip, leaveType === t && modalStyles.typeChipActive]}
-                    onPress={() => setLeaveType(t)}
-                  >
-                    <Text style={[modalStyles.typeChipText, leaveType === t && { color: '#fff' }]}>
-                      {t.charAt(0).toUpperCase() + t.slice(1)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View>
-              <Text style={modalStyles.label}>Start Date</Text>
-              <TextInput
-                style={modalStyles.input}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={colors.textMuted}
-                value={startDate}
-                onChangeText={setStartDate}
-              />
-            </View>
-
-            <View>
-              <Text style={modalStyles.label}>End Date (optional for single day)</Text>
-              <TextInput
-                style={modalStyles.input}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={colors.textMuted}
-                value={endDate}
-                onChangeText={setEndDate}
-              />
-            </View>
-
-            <View>
-              <Text style={modalStyles.label}>Reason</Text>
-              <TextInput
-                style={[modalStyles.input, { height: 80, textAlignVertical: 'top' }]}
-                placeholder="Optional"
-                placeholderTextColor={colors.textMuted}
-                value={reason}
-                onChangeText={setReason}
-                multiline
-              />
-            </View>
-
-            <TouchableOpacity
-              style={[modalStyles.submitBtn, submitting && { opacity: 0.5 }]}
-              onPress={submit}
-              disabled={submitting}
-            >
-              {submitting ? <ActivityIndicator color="#fff" size="small" /> : <Text style={modalStyles.submitText}>Submit Request</Text>}
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: 16, paddingBottom: 100 },
@@ -276,9 +186,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 10,
   },
   applyBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  balanceRow: { flexDirection: 'row', gap: 10, marginBottom: 24 },
+  balanceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
   balanceCard: {
-    flex: 1, backgroundColor: colors.card, borderRadius: 16,
+    flexGrow: 1, flexBasis: '30%', minWidth: 96,
+    backgroundColor: colors.card, borderRadius: 16,
     padding: 16, alignItems: 'center',
     borderWidth: 1, borderColor: colors.cardBorder,
   },
@@ -305,32 +216,4 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 11, fontWeight: '600', textTransform: 'capitalize' },
   requestDates: { fontSize: 13, color: colors.textSecondary },
   requestReason: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-});
-
-const modalStyles = StyleSheet.create({
-  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheet: {
-    backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingHorizontal: 24, paddingTop: 20, maxHeight: '85%',
-  },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  title: { fontSize: 18, fontWeight: '700', color: colors.text },
-  label: { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 8 },
-  input: {
-    backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
-    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12,
-    fontSize: 15, color: colors.text,
-  },
-  typeRow: { flexDirection: 'row', gap: 8 },
-  typeChip: {
-    flex: 1, paddingVertical: 10, borderRadius: 10,
-    borderWidth: 1, borderColor: colors.border, alignItems: 'center',
-  },
-  typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  typeChipText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
-  submitBtn: {
-    backgroundColor: colors.primary, borderRadius: 12,
-    height: 52, alignItems: 'center', justifyContent: 'center',
-  },
-  submitText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });
