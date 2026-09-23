@@ -84,11 +84,11 @@ export function employerContribOf(components: PayslipComponent[] | null | undefi
   return sumKind(components, "employer_contribution");
 }
 
-const monthName = (iso: string | null | undefined, width: "long" | "short" = "long"): string => {
+const monthName = (iso: string | null | undefined): string => {
   if (!iso) return "";
   const d = new Date(`${iso.slice(0, 10)}T00:00:00`);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-IN", { month: width, year: "numeric" });
+  return d.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 };
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
