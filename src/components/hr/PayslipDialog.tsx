@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Download, IndianRupee } from "lucide-react";
+import { Download } from "lucide-react";
 import {
   buildPayslipPdf,
   deductionsOf,
@@ -205,10 +205,7 @@ export function PayslipDialog({ line, open, onOpenChange }: PayslipDialogProps) 
 
             <div className="flex items-center justify-between gap-3 rounded-xl bg-primary/10 px-4 py-3">
               <span className="text-sm font-semibold text-foreground">Net pay</span>
-              <span className="flex items-center text-lg font-bold text-foreground">
-                <IndianRupee className="h-4 w-4" />
-                {netPayLabel(net).replace("₹", "")}
-              </span>
+              <span className="text-lg font-bold text-foreground tabular-nums">{netPayLabel(net)}</span>
             </div>
 
             <div className="flex justify-end">

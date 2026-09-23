@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 
 const LeavePlansPanel = lazy(() =>
   import("@/components/hr/LeavePlansPanel").then((m) => ({ default: m.LeavePlansPanel })));
+const LeaveCalendarPanel = lazy(() =>
+  import("@/components/hr/LeaveCalendarPanel").then((m) => ({ default: m.LeaveCalendarPanel })));
 
 interface LeaveRequest {
   id: string;
@@ -39,7 +41,7 @@ const HrLeaveManagement = () => {
   const { can } = usePermissions();
   const { toast } = useToast();
   const canApprove = can("hr", "leave_approve");
-  const [tab, setTab] = useState<"pending" | "all" | "plans">("pending");
+  const [tab, setTab] = useState<"pending" | "all" | "calendar" | "plans">("pending");
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -120,6 +122,10 @@ const HrLeaveManagement = () => {
             className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${tab === "all" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
             <CalendarOff className="h-4 w-4" /> All Requests
           </button>
+          <button onClick={() => setTab("calendar")}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${tab === "calendar" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+            <Clock className="h-4 w-4" /> Calendar
+          </button>
           <button onClick={() => setTab("plans")}
             className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${tab === "plans" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
             <Users className="h-4 w-4" /> Leave Plans
@@ -136,6 +142,10 @@ const HrLeaveManagement = () => {
       {tab === "plans" ? (
         <Suspense fallback={<PageLoader />}>
           <LeavePlansPanel />
+        </Suspense>
+      ) : tab === "calendar" ? (
+        <Suspense fallback={<PageLoader />}>
+          <LeaveCalendarPanel />
         </Suspense>
       ) : loading ? (
         <PageLoader />
