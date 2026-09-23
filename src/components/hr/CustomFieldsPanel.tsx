@@ -180,8 +180,8 @@ export function CustomFieldsPanel() {
       toast({ title: "Key and label are required", variant: "destructive" });
       return;
     }
-    const options = form.field_type === "select" ? parseOptionsInput(form.options) : null;
-    if (form.field_type === "select" && (options?.length ?? 0) === 0) {
+    const options = form.field_type === "select" ? parseOptionsInput(form.options) : [];
+    if (form.field_type === "select" && options.length === 0) {
       toast({ title: "Add at least one option for a select field", variant: "destructive" });
       return;
     }
