@@ -20,6 +20,10 @@ import {
   renderCourseFactsBlock,
 } from "../_shared/nimt-admissions-context.ts";
 import { resolveApplyPortal } from "../generate-apply-link/portal.ts";
+import {
+  pickLeadForSchoolBrand,
+  WHATSAPP_SCHOOL_CHANNEL_BRAND,
+} from "../_shared/schoolLeadBrand.ts";
 
 // Course → owning institution is the only reliable Mirai signal (the Avantika
 // campus is shared with B.Ed), same as generate-apply-link. Beacon = NIMT School.
@@ -54,6 +58,9 @@ const SCHOOL_CHANNELS: Record<string, { schoolName: string; systemPrompt: string
 // Seralis WhatsApp numbers (Lab + Diagnostics): human-handled, Navya must NOT
 // auto-reply. Keyed by Meta phone_number_id (business_phone_number_id).
 const SERALIS_PNIDS = new Set(["762544046936970", "836776566178513"]);
+// Mirai school WhatsApp number is human-handled for now; keep Navya silent even
+// if a caller bypasses whatsapp_channels.allow_ai.
+const MIRAI_PNIDS = new Set(["1110238142172240"]);
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -711,7 +718,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Seralis numbers are human-handled — never let Navya auto-reply.
+    // Mirai and Seralis numbers are human-handled — never let Navya auto-reply.
+    if (typeof business_phone_number_id === "string" && MIRAI_PNIDS.has(business_phone_number_id)) {
+      return new Response(JSON.stringify({ skipped: true, reason: "mirai_channel_ai_disabled" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (typeof business_phone_number_id === "string" && SERALIS_PNIDS.has(business_phone_number_id)) {
       return new Response(JSON.stringify({ skipped: true, reason: "seralis_channel_ai_disabled" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -797,14 +810,17 @@ Deno.serve(async (req) => {
     }
 
     // ── Find or create lead ──────────────────────────────────────────────────
+    const channelBrand = typeof business_phone_number_id === "string"
+      ? (WHATSAPP_SCHOOL_CHANNEL_BRAND[business_phone_number_id] || "nimt")
+      : "nimt";
     const { data: existingLeads } = await admin
       .from("leads")
-      .select("id, name, course_id, person_role, counsellor_id, portal_brand, lead_institution_type, source, origin_domain, landing_page, campus_id")
+      .select("id, name, course_id, person_role, counsellor_id, portal_brand, lead_institution_type, source, origin_domain, landing_page, campus_id, is_mirror")
       .or(`phone.eq.${normalizedPhone},phone.eq.${normalizedPhone.replace(/^91/, "+91")},phone.eq.+${normalizedPhone}`)
       .eq("is_mirror", false)
-      .limit(1);
+      .limit(5);
 
-    const existingLead = existingLeads?.[0] || null;
+    const existingLead = pickLeadForSchoolBrand(existingLeads, channelBrand);
     let leadId = existingLead?.id || null;
     let existingCourseId = existingLead?.course_id || null;
     let existingCourseName = await loadCourseName(admin, existingCourseId);
@@ -880,6 +896,7 @@ Deno.serve(async (req) => {
           _source: "whatsapp",
           _reason: "whatsapp_reply",
           _name: lead_name || null,
+          _portal_brand: channelBrand === "mirai" ? "mirai" : null,
         },
       );
       if (leadInsertErr) {

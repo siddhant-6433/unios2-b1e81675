@@ -19,6 +19,7 @@ import { OfferWaiverApprovalPanel } from "@/components/finance/OfferWaiverApprov
 import { LateFeeConfigPanel } from "@/components/finance/LateFeeConfigPanel";
 import { PaymentAuditLog } from "@/components/finance/PaymentAuditLog";
 import { FeeDueDefaultReport } from "@/components/finance/FeeDueDefaultReport";
+import { FeeCollectionVsDueReport } from "@/components/finance/FeeCollectionVsDueReport";
 import { DayCloserDialog } from "@/components/finance/DayCloserDialog";
 import { AfterHoursCashDialog } from "@/components/finance/AfterHoursCashDialog";
 import FeeCollections from "./FeeCollections";
@@ -64,7 +65,7 @@ const Finance = () => {
   const [pendingConcessionCount, setPendingConcessionCount] = useState(0);
   const [receiptsView, setReceiptsView] = useState<"receipts" | "online">("receipts");
   const [setupView, setSetupView] = useState<"structures" | "late-fees" | "heads">("structures");
-  const [reportsView, setReportsView] = useState<"overview" | "dues" | "audit">("overview");
+  const [reportsView, setReportsView] = useState<"overview" | "dues" | "collection" | "audit">("collection");
   const { selectedCampusId } = useCampus();
   const { can } = usePermissions();
   const { role, hasPermission } = useAuth();
@@ -432,10 +433,11 @@ const Finance = () => {
         <>
           <SubTabs
             value={reportsView}
-            onChange={(v) => setReportsView(v as "overview" | "dues" | "audit")}
+            onChange={(v) => setReportsView(v as "overview" | "dues" | "collection" | "audit")}
             options={[
               { value: "overview", label: "Overview" },
               { value: "dues", label: "Fee Dues" },
+              { value: "collection", label: "Collection vs Due" },
               ...(isSuperAdmin ? [{ value: "audit", label: "Audit Log" }] : []),
             ]}
           />
@@ -443,6 +445,8 @@ const Finance = () => {
             <PaymentAuditLog />
           ) : reportsView === "dues" ? (
             <FeeDueDefaultReport />
+          ) : reportsView === "collection" ? (
+            <FeeCollectionVsDueReport />
           ) : (
             <FinanceOverview />
           )}

@@ -35,6 +35,7 @@ describe("fee proposal to offer mapping", () => {
     expect(drafts[0]).toMatchObject({
       source_type: "fee_proposal",
       source_fee_proposal_id: "proposal-1",
+      fee_category: "tuition",
       metadata: {
         fee_head_label: "Tuition Fee",
         proposal_revision_number: 3,
@@ -44,6 +45,7 @@ describe("fee proposal to offer mapping", () => {
         item_count: 2,
       },
     });
+    expect(drafts[1].fee_category).toBe("hostel");
   });
 
   it("detects fee structure snapshot mismatches without blocking issue flow", () => {

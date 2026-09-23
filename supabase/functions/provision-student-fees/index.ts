@@ -21,11 +21,12 @@ const HOSTEL_TYPE_CODE: Record<string, string> = {
   ac_individual: "NB-IBA",
 };
 
-/** Day boarding fee code */
+/** Day boarding fee code (a separate profile from boarders) */
 const DAY_BOARDING_CODE = "NB-DBA";
 
-/** Security deposit code (boarders only) */
-const SECURITY_DEPOSIT_CODE = "NB-SEC";
+/** Boarder-only security deposit codes: Beacon and Mirai. These are tagged
+ *  category 'enrollment', so they must be matched by code, not category. */
+const SECURITY_DEPOSIT_CODES = ["NB-SEC", "MR-SEC"];
 
 /** Quarter due dates: q1→Apr 10, q2→Jul 10, q3→Oct 10, q4→Jan 10 */
 function quarterDueDate(term: string, year: number): string | null {
@@ -196,14 +197,31 @@ async function provisionStudent(
   if (!items || items.length === 0) throw new Error("Fee structure has no items");
 
   // 4. Filter items by student profile
-  const studentType = (student.student_type || "day_scholar").toLowerCase();
+  // student_type is free text in practice: "day_scholar" and "Day Scholar" are
+  // the same; "hostel", "boarder", and "HOSTELER" all mean a boarder. "Day
+  // Boarder" is its own profile.
+  const studentTypeRaw = String(student.student_type || "day_scholar")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, " ");
+  const isDayScholar = studentTypeRaw === "day scholar";
+  const isDayBoarder = studentTypeRaw === "day boarder";
+  const isBoarder = ["boarder", "hostel", "hosteler"].includes(studentTypeRaw);
   const transportRequired = student.transport_required === true;
   const transportZone = student.transport_zone || null;
   const hostelType = student.hostel_type || null;
 
+  const isSecurityDeposit = (code: string) =>
+    SECURITY_DEPOSIT_CODES.includes(code.toUpperCase());
+
   const filtered = items.filter((item: any) => {
     const code: string = item.fee_codes?.code || "";
     const category: string = item.fee_codes?.category || "";
+
+    // Security deposit → boarders only. Checked before the category branches
+    // because the code is tagged 'enrollment' (not 'hostel'), which is what
+    // put "Beacon Security Deposit (Boarders Only)" on day scholars.
+    if (isSecurityDeposit(code)) return isBoarder;
 
     // Tuition → always include
     if (category === "tuition") return true;
@@ -224,16 +242,15 @@ async function provisionStudent(
 
     // Hostel / boarding
     if (category === "hostel") {
-      if (studentType === "day_scholar") return false;
+      if (isDayScholar) return false;
 
       // Day boarder → only NB-DBA
-      if (studentType === "day_boarder" || studentType === "day boarder") {
+      if (isDayBoarder) {
         return code === DAY_BOARDING_CODE;
       }
 
-      // Boarder → matching hostel code OR security deposit
-      if (studentType === "boarder") {
-        if (code === SECURITY_DEPOSIT_CODE) return true;
+      // Boarder (hostel / boarder / hosteler) → matching hostel code
+      if (isBoarder) {
         if (!hostelType) return false;
         const expectedCode = HOSTEL_TYPE_CODE[hostelType];
         return code === expectedCode;
@@ -318,7 +335,11 @@ async function provisionStudent(
     };
   });
 
-  if (rows.length === 0) return 0;
+  if (rows.length === 0) {
+    // Ledger rows may already exist from an earlier run; still apply offer waivers.
+    await syncLedgerConcessions(db, studentId);
+    return 0;
+  }
 
   // 7a. Apply approved offer waivers (year-wise) to matching ledger rows.
   // Each waiver is keyed by term ('year_1', 'year_2', ...). If the fee
@@ -428,37 +449,11 @@ async function provisionStudent(
   };
 
   if (student.lead_id && newRows.length > 0) {
-    const { data: appPayments } = await db
-      .from("lead_payments")
-      .select("id, amount")
-      .eq("lead_id", student.lead_id)
-      .eq("type", "application_fee")
-      .eq("status", "confirmed")
-      .order("created_at");
-
-    const appQueue = (appPayments || []).map((p: any) => ({ id: p.id, remaining: Number(p.amount || 0) }));
-    let remainingApplicationCredit = appQueue.reduce((s, p) => s + p.remaining, 0);
-
-    if (remainingApplicationCredit > 0) {
-      const newSeatRows = newRows
-        .filter((r: any) => r.term === "year_1" && /SEAT|BLOCK/i.test(`${r.fee_code_code || ""} ${r.fee_code_name || ""}`))
-        .sort((a: any, b: any) => String(a.fee_code_code || "").localeCompare(String(b.fee_code_code || "")));
-
-      for (const row of newSeatRows) {
-        if (remainingApplicationCredit <= 0) break;
-        const netDue = Math.max(
-          0,
-          Number(row.total_amount) - Number(row.concession || 0) - Number(row.paid_amount || 0),
-        );
-        if (netDue <= 0) continue;
-        const credit = Math.min(remainingApplicationCredit, netDue);
-        row.paid_amount = Number(row.paid_amount || 0) + credit;
-        if (row.paid_amount >= Number(row.total_amount) - Number(row.concession || 0)) row.status = "paid";
-        remainingApplicationCredit -= credit;
-        drawFrom(appQueue, row, credit);
-      }
-    }
-
+    // Application-fee receipts are NOT credited to the year-1 seat-block (or
+    // any other course head) here. They belong on the student's Application
+    // Fee head and are booked by reconcile_application_fee after this
+    // provisioner finishes. Crediting them to seat-block made the seat balance
+    // and the unallocated credit each read ₹1,000 low (DAOTT 2026-28, N652).
     const { data: toks } = await db
       .from("lead_payments")
       .select("id, amount")
@@ -511,7 +506,13 @@ async function provisionStudent(
     }
   }
 
-  if (newRows.length === 0) return 0;
+  if (newRows.length === 0) {
+    // School PAN/AN often provisions once, then the offer is approved later.
+    // Re-running must still sync concessions.
+    await syncLedgerConcessions(db, studentId);
+    await reconcileApplicationFee(db, student.lead_id);
+    return 0;
+  }
 
   // Try insert with fee_structure_item_id; if column doesn't exist yet, retry without it
   const insertRows = newRows.map(({ fee_code_code, fee_code_name, ...row }: any) => row);
@@ -561,10 +562,30 @@ async function provisionStudent(
   // call then re-derives the exact concessions from the approved waivers so
   // provisioning and later waiver edits (via the offer_waivers trigger) always
   // agree — no need to re-provision to pick up a waiver.
-  const { error: syncErr } = await db.rpc("sync_fee_ledger_concessions", { p_student_id: studentId });
-  if (syncErr) console.warn(`[provision-student-fees] concession sync failed for ${studentId}: ${syncErr.message}`);
+  await syncLedgerConcessions(db, studentId);
+  await reconcileApplicationFee(db, student.lead_id);
 
   return newRows.length;
+}
+
+// Books confirmed application-fee receipts onto the student's Application Fee
+// head (FORM-FEE / NB-REG / MR-REG) via the canonical SQL reconciler. Never a
+// course head. No-op for students with no portal application fee.
+async function reconcileApplicationFee(
+  db: ReturnType<typeof createClient>,
+  leadId: string | null,
+): Promise<void> {
+  if (!leadId) return;
+  const { error } = await db.rpc("reconcile_application_fee", { _lead_id: leadId });
+  if (error) console.warn(`[provision-student-fees] application-fee reconcile failed: ${error.message}`);
+}
+
+async function syncLedgerConcessions(
+  db: ReturnType<typeof createClient>,
+  studentId: string,
+): Promise<void> {
+  const { error: syncErr } = await db.rpc("sync_fee_ledger_concessions", { p_student_id: studentId });
+  if (syncErr) console.warn(`[provision-student-fees] concession sync failed for ${studentId}: ${syncErr.message}`);
 }
 
 function json(data: any, status = 200) {

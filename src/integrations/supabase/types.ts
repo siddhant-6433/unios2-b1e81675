@@ -36276,6 +36276,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      fee_collection_vs_due_report: {
+        Args: { _as_of?: string; _campus_ids?: string[]; _scope?: string }
+        Returns: Json
+      }
       fee_due_report: { Args: { _campus_ids?: string[] }; Returns: Json }
       fee_reconciliation_report: { Args: never; Returns: Json }
       finance_summary: { Args: { _campus_ids?: string[]; _from?: string; _to?: string }; Returns: Json }

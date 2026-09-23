@@ -10,6 +10,7 @@ import { Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle, Exte
 import { cn } from "@/lib/utils";
 import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
 import { feeTermLabel } from "@/lib/feeTermLabels";
+import { summarizeConcessionLedger } from "@/lib/feeConcession";
 import { exportRowsCsv } from "@/lib/xlsxExport";
 import { pendingAnDocSummary, type PendingAnDocStatus } from "@/lib/pendingAnGeneration";
 import {
@@ -19,6 +20,7 @@ import {
   nestedOfferLeadId,
   nestedStudent,
 } from "@/lib/staffQueueVisibility";
+import { VideoReviewPanel, type VideoRow } from "@/components/video/VideoReviewPanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -31,7 +33,7 @@ interface InboxCategory {
   color: string;
 }
 
-type CategoryId = "offer_waivers" | "fee_concessions" | "abvmu_deposits" | "offer_approvals" | "offer_edits" | "certificate_approvals" | "hr_document_approvals" | "pending_an_generation" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+type CategoryId = "offer_waivers" | "fee_concessions" | "abvmu_deposits" | "offer_approvals" | "offer_edits" | "certificate_approvals" | "hr_document_approvals" | "pending_an_generation" | "contact_changes" | "whatsapp" | "video_approvals" | "voice_messages";
 
 // Manual fee concessions raised at the cashier desk. Approving one runs
 // sync_fee_ledger_concessions server-side, so an offer waiver already mapped
@@ -42,8 +44,14 @@ interface FeeConcessionItem {
   student_name: string;
   admission_no: string | null;
   fee_code: string | null;
+  fee_name: string | null;
   term: string | null;
   fee_total: number | null;
+  /** Concession already approved on this ledger row (offer waivers + prior concessions). */
+  fee_concession: number;
+  fee_paid: number;
+  fee_balance: number | null;
+  fee_due_date: string | null;
   type: string;
   value: number;
   reason: string | null;
@@ -171,27 +179,6 @@ interface ContactChangeItem {
   created_at: string;
 }
 
-interface ApplicationItem {
-  id: string;
-  application_id: string;
-  lead_name: string;
-  course_name: string | null;
-  created_at: string;
-  stage: string;
-  phone: string | null;
-  app_status: string | null;
-}
-
-interface FollowupItem {
-  id: string;
-  lead_id: string;
-  lead_name: string;
-  phone: string | null;
-  scheduled_at: string;
-  notes: string | null;
-  counsellor_name: string | null;
-}
-
 interface WhatsAppItem {
   phone: string;
   lead_id: string | null;
@@ -209,6 +196,8 @@ interface VideoApprovalInboxItem {
   content_type: string;
   editor_name: string;
   created_at: string;
+  /** Full video row for the shared review panel (embed, history, corrections). */
+  video: VideoRow;
 }
 
 interface VoiceMessageItem {
@@ -223,10 +212,7 @@ interface VoiceMessageItem {
   sender_name: string;
 }
 
-type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | OfferEditItem | CertificateApprovalItem | HrDocumentApprovalItem | PendingAnItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
-
-// Label a source link by host so the inbox doesn't say "Drive" for a YouTube URL.
-const videoSourceLabel = (url: string) => /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
+type InboxItem = WaiverItem | FeeConcessionItem | AbvmuDepositItem | OfferApprovalItem | OfferEditItem | CertificateApprovalItem | HrDocumentApprovalItem | PendingAnItem | ContactChangeItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -282,6 +268,7 @@ export default function Inbox() {
   const [items, setItems] = useState<InboxItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<InboxItem | null>(null);
   const [loading, setLoading] = useState(false);
+  const [countsLoaded, setCountsLoaded] = useState(false);
   const [processing, setProcessing] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<CategoryId, number>>({
     offer_waivers: 0,
@@ -293,8 +280,6 @@ export default function Inbox() {
     hr_document_approvals: 0,
     pending_an_generation: 0,
     contact_changes: 0,
-    applications: 0,
-    followups: 0,
     whatsapp: 0,
     video_approvals: 0,
     voice_messages: 0,
@@ -372,7 +357,7 @@ export default function Inbox() {
       label: "Pending AN Generation",
       icon: AlertTriangle,
       count: counts.pending_an_generation,
-      roles: ["super_admin", "principal"],
+      roles: ["super_admin"],
       color: "text-amber-600",
     },
     {
@@ -382,22 +367,6 @@ export default function Inbox() {
       count: counts.contact_changes,
       roles: ["super_admin", "principal"],
       color: "text-cyan-600",
-    },
-    {
-      id: "applications",
-      label: "New Applications",
-      icon: FileText,
-      count: counts.applications,
-      roles: ADMISSIONS_ROLES,
-      color: "text-primary",
-    },
-    {
-      id: "followups",
-      label: "Pending Follow-ups",
-      icon: AlertTriangle,
-      count: counts.followups,
-      roles: ADMISSIONS_ROLES,
-      color: "text-warning-foreground",
     },
     {
       id: "whatsapp",
@@ -425,12 +394,26 @@ export default function Inbox() {
     },
   ];
 
-  const visibleCategories = allCategories.filter((c) =>
+  const roleAllowedCategories = allCategories.filter((c) =>
     c.roles.includes(role || "")
   );
-  const selectedCategory = visibleCategories.find((c) => c.id === selected);
   const categoryDisplayCount = (cat: InboxCategory) =>
     cat.id === selected && !loading ? items.length : cat.count;
+  // Keep the currently selected queue visible even while its items are still
+  // loading. On click we clear `items`, so categoryDisplayCount briefly reads 0
+  // for the just-selected queue; without pinning it, the auto-select effect
+  // below treats the selection as gone and snaps back to the first visible
+  // queue (Offer Waivers) — so every click landed on Offer Waivers.
+  const visibleCategories = countsLoaded
+    ? roleAllowedCategories.filter((c) => categoryDisplayCount(c) > 0 || c.id === selected)
+    : [];
+  // The whole sidebar/list is gated on one aggregate counts fetch. Until it
+  // lands the page is genuinely still loading — not empty — so the cards and
+  // list must show a loader rather than 0 / "All clear".
+  const countsLoading = !countsLoaded;
+  const visibleCategoryIds = visibleCategories.map((c) => c.id).join("|");
+  const requestedCategory = searchParams.get("category") as CategoryId | null;
+  const selectedCategory = roleAllowedCategories.find((c) => c.id === selected);
   const selectedDisplayCount = selectedCategory ? categoryDisplayCount(selectedCategory) : 0;
   const totalVisibleCount = visibleCategories.reduce((sum, c) => sum + categoryDisplayCount(c), 0);
 
@@ -444,7 +427,6 @@ export default function Inbox() {
   // ── Counts ────────────────────────────────────────────────────────────────
 
   const fetchCounts = useCallback(async () => {
-    const today = new Date().toISOString().slice(0, 10);
     const results = await Promise.allSettled([
       // offer_waivers — super_admin only
       isSuperAdmin
@@ -476,26 +458,6 @@ export default function Inbox() {
             .from("student_contact_change_requests" as any)
             .select("id, student_id")
             .eq("status", "pending")
-        : Promise.resolve({ count: 0 }),
-
-      // applications — admissions (submitted apps awaiting review)
-      isAdmissions
-        ? supabase
-            .from("applications" as any)
-            .select("id, lead_id")
-            .eq("status", "submitted")
-        : Promise.resolve({ count: 0 }),
-
-      // followups — admissions
-      isAdmissions
-        ? (() => {
-            const q = supabase
-              .from("lead_followups")
-              .select("id")
-              .eq("status", "pending")
-              .lte("scheduled_at", `${today}T23:59:59`);
-            return q;
-          })()
         : Promise.resolve({ count: 0 }),
 
       // whatsapp unreplied
@@ -538,8 +500,8 @@ export default function Inbox() {
             .in("status", ["pending_principal", "pending_super_admin"])
         : Promise.resolve({ count: 0 }),
 
-      // Pending AN generation — super_admin + principal
-      (isSuperAdmin || isPrincipal)
+      // Pending AN generation — super_admin only; it exposes document-gated AN rows.
+      isSuperAdmin
         ? supabase.rpc("list_pending_an_generation")
         : Promise.resolve({ count: 0 }),
 
@@ -575,20 +537,20 @@ export default function Inbox() {
     const abvmuRows = rowsOf(1);
     const offerApprovalRows = rowsOf(2);
     const contactRows = rowsOf(3);
-    const applicationRows = rowsOf(4);
-    const concessionRows = rowsOf(10);
-    const offerEditRows = rowsOf(12);
+    const concessionRows = rowsOf(8);
+    const offerEditRows = rowsOf(10);
 
-    const hiddenLeads = await fetchHiddenLeadIds([
-      ...waiverRows.map(nestedOfferLeadId),
-      ...abvmuRows.map((r) => r.lead_id),
-      ...offerApprovalRows.map((r) => r.lead_id),
-      ...applicationRows.map((r) => r.lead_id),
-      ...offerEditRows.map(nestedOfferLeadId),
-    ]);
-    const hiddenStudents = await fetchHiddenStudentIds([
-      ...contactRows.map((r) => r.student_id),
-      ...concessionRows.map((r) => r.student_id),
+    const [hiddenLeads, hiddenStudents] = await Promise.all([
+      fetchHiddenLeadIds([
+        ...waiverRows.map(nestedOfferLeadId),
+        ...abvmuRows.map((r) => r.lead_id),
+        ...offerApprovalRows.map((r) => r.lead_id),
+        ...offerEditRows.map(nestedOfferLeadId),
+      ]),
+      fetchHiddenStudentIds([
+        ...contactRows.map((r) => r.student_id),
+        ...concessionRows.map((r) => r.student_id),
+      ]),
     ]);
 
     setCounts({
@@ -599,21 +561,20 @@ export default function Inbox() {
       abvmu_deposits: abvmuRows.filter((r) => r.lead_id && !hiddenLeads.has(r.lead_id)).length,
       offer_approvals: offerApprovalRows.filter((r) => r.lead_id && !hiddenLeads.has(r.lead_id)).length,
       contact_changes: contactRows.filter((r) => r.student_id && !hiddenStudents.has(r.student_id)).length,
-      applications: applicationRows.filter((r) => !r.lead_id || !hiddenLeads.has(r.lead_id)).length,
-      followups: get(5),
-      whatsapp: get(6),
-      video_approvals: get(7),
-      voice_messages: get(8),
-      certificate_approvals: get(9),
+      whatsapp: get(4),
+      video_approvals: get(5),
+      voice_messages: get(6),
+      certificate_approvals: get(7),
       fee_concessions: concessionRows.filter((r) => r.student_id && !hiddenStudents.has(r.student_id)).length,
-      pending_an_generation: get(11),
+      pending_an_generation: get(9),
       offer_edits: offerEditRows.filter((r) => {
         const leadId = nestedOfferLeadId(r);
         return leadId && !hiddenLeads.has(leadId);
       }).length,
-      hr_document_approvals: get(13),
+      hr_document_approvals: get(11),
     });
-  }, [role, isSuperAdmin, isPrincipal, isApprover, isAdmissions, profile?.id]);
+    setCountsLoaded(true);
+  }, [isSuperAdmin, isPrincipal, isApprover, isAdmissions]);
 
   useEffect(() => {
     fetchCounts();
@@ -621,14 +582,26 @@ export default function Inbox() {
   }, [fetchCounts]);
 
   useEffect(() => {
-    if (visibleCategories.length === 0 || selected) return;
+    if (!countsLoaded) return;
+
     // Deep-link: /inbox?category=<id> (e.g. from a notification) wins over first-visible.
-    const wanted = searchParams.get("category") as CategoryId | null;
-    const target = wanted && visibleCategories.some((c) => c.id === wanted)
-      ? wanted
-      : visibleCategories[0].id;
-    setSelected(target);
-  }, [visibleCategories.length, searchParams]);
+    const visibleCategoryIdList = visibleCategoryIds ? visibleCategoryIds.split("|") as CategoryId[] : [];
+    const selectedStillVisible = selected && visibleCategoryIdList.includes(selected);
+    if (selectedStillVisible) return;
+
+    const target = requestedCategory && visibleCategoryIdList.includes(requestedCategory)
+      ? requestedCategory
+      : visibleCategoryIdList[0] ?? null;
+
+    if (target) {
+      setSelected(target);
+      return;
+    }
+
+    setSelected(null);
+    setItems([]);
+    setSelectedItem(null);
+  }, [countsLoaded, visibleCategoryIds, selected, requestedCategory]);
 
   // ── Item loading ──────────────────────────────────────────────────────────
 
@@ -903,7 +876,7 @@ export default function Inbox() {
           .select(`
             id, student_id, type, value, reason, created_at,
             students:student_id(name, admission_no, pre_admission_no, login_disabled, archived_at, deleted_at),
-            fee_ledger:fee_ledger_id(term, total_amount, fee_codes:fee_code_id(code, name)),
+            fee_ledger:fee_ledger_id(term, total_amount, concession, paid_amount, balance, due_date, fee_codes:fee_code_id(code, name)),
             requester:requested_by(display_name)
           `)
           .in("status", ["pending_principal", "pending_super_admin"])
@@ -917,8 +890,13 @@ export default function Inbox() {
             student_name: c.students?.name || "—",
             admission_no: c.students?.admission_no || c.students?.pre_admission_no || null,
             fee_code: c.fee_ledger?.fee_codes?.code || null,
+            fee_name: c.fee_ledger?.fee_codes?.name || null,
             term: c.fee_ledger?.term || null,
             fee_total: c.fee_ledger?.total_amount ?? null,
+            fee_concession: Number(c.fee_ledger?.concession || 0),
+            fee_paid: Number(c.fee_ledger?.paid_amount || 0),
+            fee_balance: c.fee_ledger?.balance ?? null,
+            fee_due_date: c.fee_ledger?.due_date ?? null,
             type: c.type,
             value: Number(c.value),
             reason: c.reason,
@@ -1044,51 +1022,6 @@ export default function Inbox() {
             created_at: r.created_at,
           } as ContactChangeItem));
         commitItems(cat, nextItems);
-      } else if (cat === "applications") {
-        const { data, error } = await (supabase as any)
-          .from("applications")
-          .select("id, lead_id, application_id, status, created_at, submitted_at, course_selections, full_name, phone, leads!lead_id ( name, phone )")
-          .eq("status", "submitted")
-          .order("submitted_at", { ascending: false })
-          .limit(100);
-
-        if (error) throw error;
-        const hiddenLeads = await fetchHiddenLeadIds((data || []).map((a: any) => a.lead_id));
-        const nextItems = (data || [])
-          .filter((a: any) => !a.lead_id || !hiddenLeads.has(a.lead_id))
-          .map((a: any) => ({
-            id: a.id,
-            application_id: a.application_id,
-            lead_name: a.leads?.name || a.full_name || "—",
-            course_name: a.course_selections?.[0]?.course_name || null,
-            created_at: a.submitted_at || a.created_at,
-            stage: a.status,
-            phone: a.leads?.phone || a.phone || null,
-            app_status: a.status || null,
-          } as ApplicationItem));
-        commitItems(cat, nextItems);
-      } else if (cat === "followups") {
-        const today = new Date().toISOString().slice(0, 10);
-        // user_id is FK to auth.users (not profiles); just fetch lead data
-        const { data, error } = await supabase
-          .from("lead_followups")
-          .select("id, lead_id, scheduled_at, notes, leads!lead_id ( name, phone )")
-          .eq("status", "pending")
-          .lte("scheduled_at", `${today}T23:59:59`)
-          .order("scheduled_at", { ascending: true })
-          .limit(100);
-
-        if (error) throw error;
-        const nextItems = (data || []).map((f: any) => ({
-            id: f.id,
-            lead_id: f.lead_id,
-            lead_name: f.leads?.name || "—",
-            phone: f.leads?.phone || null,
-            scheduled_at: f.scheduled_at,
-            notes: f.notes,
-            counsellor_name: null,
-          } as FollowupItem));
-        commitItems(cat, nextItems);
       } else if (cat === "whatsapp") {
         // Use whatsapp_conversations view if available, else aggregate
         const { data, error } = await supabase
@@ -1111,7 +1044,7 @@ export default function Inbox() {
       } else if (cat === "video_approvals") {
         const { data, error } = await supabase
           .from("videos" as any)
-          .select("id, title, drive_url, brand, content_type, editor_id, created_at")
+          .select("*")
           .eq("status", "pending_approval")
           .order("created_at", { ascending: false })
           .limit(100);
@@ -1134,6 +1067,7 @@ export default function Inbox() {
             content_type: v.content_type,
             editor_name: nameById[v.editor_id] || "—",
             created_at: v.created_at,
+            video: v as VideoRow,
           } as VideoApprovalInboxItem));
         commitItems(cat, nextItems);
       } else if (cat === "voice_messages") {
@@ -1492,40 +1426,6 @@ export default function Inbox() {
     }
   };
 
-  const decideVideo = async (video: VideoApprovalInboxItem, decision: "approved" | "rejected") => {
-    if (!isSuperAdmin) return;
-    let rejection_reason: string | null = null;
-    if (decision === "rejected") {
-      const r = window.prompt("Reason for rejection:");
-      if (r === null) return;
-      if (!r.trim()) { toast({ title: "A reason is required to reject", variant: "destructive" }); return; }
-      rejection_reason = r.trim();
-    }
-    setProcessing(video.id);
-    try {
-      const { error } = await supabase.from("videos" as any).update({
-        status: decision,
-        approved_by: user?.id ?? null,
-        approved_at: new Date().toISOString(),
-        rejection_reason,
-      }).eq("id", video.id);
-      if (error) throw error;
-      // On approval, ping the editor on WhatsApp to post & submit the links.
-      if (decision === "approved") {
-        supabase.functions.invoke("video-notify", {
-          body: { event: "approved", video_id: video.id },
-        }).catch(() => { /* non-fatal */ });
-      }
-      toast({ title: decision === "approved" ? "Video approved" : "Video rejected" });
-      setSelectedItem(null);
-      loadItems("video_approvals");
-      fetchCounts();
-    } catch (e: any) {
-      toast({ title: "Action failed", description: e.message, variant: "destructive" });
-    } finally {
-      setProcessing(null);
-    }
-  };
 
   const toggleVoicePlay = async (msg: VoiceMessageItem) => {
     if (playingId === msg.id) {
@@ -1672,13 +1572,23 @@ export default function Inbox() {
 
     if (selected === "fee_concessions") {
       const c = item as FeeConcessionItem;
+      const s = summarizeConcessionLedger({
+        total: c.fee_total,
+        existing: c.fee_concession,
+        type: c.type,
+        value: c.value,
+        paid: c.fee_paid,
+      });
       return (
         <button key={c.id} className={baseClass} onClick={() => setSelectedItem(c)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{c.student_name}</p>
               <p className="text-xs text-muted-foreground truncate">
-                {c.fee_code || "Fee"} · {c.type === "flat" ? fmtINR(c.value) : `${c.value}%`}
+                {c.fee_code || "Fee"} · {c.type === "percentage" ? `${c.value}% → ` : ""}−{fmtINR(s.requested)}
+              </p>
+              <p className="text-[11px] text-muted-foreground/80 truncate">
+                net after waiver {fmtINR(s.netAfterWaiver)}
               </p>
             </div>
             <span className="text-[10px] text-warning-foreground font-medium shrink-0">Pending</span>
@@ -1755,44 +1665,6 @@ export default function Inbox() {
             <span className="text-[10px] text-warning-foreground font-medium shrink-0">Pending</span>
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(c.created_at)}</p>
-        </button>
-      );
-    }
-
-    if (selected === "applications") {
-      const a = item as ApplicationItem;
-      return (
-        <button key={a.id} className={baseClass} onClick={() => setSelectedItem(a)}>
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">{a.lead_name}</p>
-              <p className="text-xs text-muted-foreground truncate">{a.course_name || "—"}</p>
-            </div>
-            <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0 mt-0.5" />
-          </div>
-          <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(a.created_at)}</p>
-        </button>
-      );
-    }
-
-    if (selected === "followups") {
-      const f = item as FollowupItem;
-      const isOverdue = new Date(f.scheduled_at) < new Date();
-      return (
-        <button key={f.id} className={baseClass} onClick={() => setSelectedItem(f)}>
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">{f.lead_name}</p>
-              {f.notes && <p className="text-xs text-muted-foreground truncate">{f.notes}</p>}
-            </div>
-            <span className={cn("text-[10px] font-medium shrink-0", isOverdue ? "text-destructive" : "text-muted-foreground")}>
-              {isOverdue ? "Overdue" : "Today"}
-            </span>
-          </div>
-          <p className="text-[10px] text-muted-foreground/60 mt-1">
-            {new Date(f.scheduled_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-            {f.counsellor_name && ` · ${f.counsellor_name}`}
-          </p>
         </button>
       );
     }
@@ -2169,9 +2041,13 @@ export default function Inbox() {
 
     if (selected === "fee_concessions") {
       const c = selectedItem as FeeConcessionItem;
-      const effective = c.type === "flat"
-        ? c.value
-        : Math.round(((c.fee_total || 0) * c.value) / 100);
+      const s = summarizeConcessionLedger({
+        total: c.fee_total,
+        existing: c.fee_concession,
+        type: c.type,
+        value: c.value,
+        paid: c.fee_paid,
+      });
       return (
         <div className="p-5 space-y-5">
           <div>
@@ -2179,21 +2055,46 @@ export default function Inbox() {
             {c.admission_no && <p className="text-sm text-muted-foreground font-mono">{c.admission_no}</p>}
           </div>
 
-          <div className="rounded-xl border border-border bg-card divide-y divide-border">
-            <Row label="Fee Head" value={`${c.fee_code || "—"}${c.term ? ` · ${c.term}` : ""}`} />
-            <Row label="Fee Amount" value={fmtINR(c.fee_total)} />
-            <Row label="Concession" value={c.type === "flat" ? fmtINR(c.value) : `${c.value}%`} />
-            <Row label="Reduces Balance By" value={fmtINR(effective)} highlight />
-            <Row label="Requested By" value={c.requested_by_name || "—"} />
-            <Row label="Requested On" value={fmtDate(c.created_at)} />
+          {/* The exact ledger item the waiver lands on, with the waiver applied
+              line by line: fee, what is already waived, this request, and the
+              net payable after it. */}
+          <div>
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Fee ledger item</p>
+            <div className="overflow-hidden rounded-xl border border-border bg-card">
+              <div className="border-b border-border bg-muted/40 px-4 py-2.5">
+                <p className="text-sm font-medium text-foreground">
+                  {c.fee_code || "Fee Head"}{c.fee_name ? ` · ${c.fee_name}` : ""}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {c.term ? feeTermLabel(c.term) : "—"}{c.fee_due_date ? ` · due ${fmtDate(c.fee_due_date)}` : ""}
+                </p>
+              </div>
+              <div className="divide-y divide-border">
+                <Row label="Fee amount" value={fmtINR(s.total)} />
+                {s.existing > 0 && <Row label="Already waived" value={`−${fmtINR(s.existing)}`} />}
+                <Row label="This request" value={`−${fmtINR(s.requested)}`} />
+                <Row label="Net payable after waiver" value={fmtINR(s.netAfterWaiver)} highlight />
+                {s.paid > 0 && <Row label="Already paid" value={fmtINR(s.paid)} />}
+                {c.fee_balance != null && <Row label="Balance now" value={fmtINR(c.fee_balance)} />}
+                <Row label="Balance after waiver" value={fmtINR(s.projectedBalance)} />
+              </div>
+            </div>
           </div>
 
-          {c.reason && (
-            <div className="rounded-xl border border-border bg-muted/30 p-3">
-              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Reason</p>
-              <p className="mt-1 text-sm text-foreground">{c.reason}</p>
-            </div>
-          )}
+          <div className="rounded-xl border border-border bg-muted/30 p-3">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Concession requested</p>
+            <p className="mt-1 text-sm text-foreground">
+              {c.type === "flat"
+                ? fmtINR(s.requested)
+                : `${c.value}% of ${fmtINR(s.total)} = ${fmtINR(s.requested)}`}
+              <span className="text-muted-foreground"> off this head</span>
+            </p>
+            <p className="mt-2.5 text-[10px] uppercase tracking-wide text-muted-foreground">Reason</p>
+            <p className="mt-1 text-sm text-foreground">{c.reason || "—"}</p>
+            <p className="mt-2.5 text-[11px] text-muted-foreground">
+              Requested by {c.requested_by_name || "—"} · {fmtDate(c.created_at)}
+            </p>
+          </div>
 
           <div className="flex gap-2">
             <Button
@@ -2454,75 +2355,6 @@ export default function Inbox() {
       );
     }
 
-    if (selected === "applications") {
-      const a = selectedItem as ApplicationItem;
-      const stageLabel: Record<string, string> = {
-        draft: "Draft",
-        submitted: "Submitted",
-        under_review: "Under Review",
-        approved: "Approved",
-        rejected: "Rejected",
-      };
-      return (
-        <div className="p-5 space-y-5">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">{a.lead_name}</h3>
-            {a.course_name && <p className="text-sm text-muted-foreground">{a.course_name}</p>}
-          </div>
-
-          <div className="rounded-xl border border-border bg-card divide-y divide-border">
-            <Row label="Application ID" value={a.application_id} />
-            <Row label="Stage" value={stageLabel[a.stage] || a.stage} />
-            {a.phone && <Row label="Phone" value={a.phone} />}
-            <Row label="Started On" value={fmtDate(a.created_at)} />
-          </div>
-
-          <Button
-            size="sm"
-            className="w-full"
-            onClick={() => navigate(`/applications/${a.application_id}`)}
-          >
-            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-            Open Application
-          </Button>
-        </div>
-      );
-    }
-
-    if (selected === "followups") {
-      const f = selectedItem as FollowupItem;
-      const isOverdue = new Date(f.scheduled_at) < new Date();
-      return (
-        <div className="p-5 space-y-5">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">{f.lead_name}</h3>
-            {f.phone && <p className="text-sm text-muted-foreground">{f.phone}</p>}
-          </div>
-
-          <div className="rounded-xl border border-border bg-card divide-y divide-border">
-            <Row
-              label="Scheduled"
-              value={new Date(f.scheduled_at).toLocaleString("en-IN", {
-                day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
-              })}
-            />
-            <Row label="Status" value={isOverdue ? "Overdue" : "Due Today"} />
-            {f.counsellor_name && <Row label="Counsellor" value={f.counsellor_name} />}
-            {f.notes && <Row label="Notes" value={f.notes} />}
-          </div>
-
-          <Button
-            size="sm"
-            className="w-full"
-            onClick={() => navigate(`/admissions/${f.lead_id}`)}
-          >
-            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-            Open Lead
-          </Button>
-        </div>
-      );
-    }
-
     if (selected === "whatsapp") {
       const w = selectedItem as WhatsAppItem;
       return (
@@ -2620,55 +2452,12 @@ export default function Inbox() {
     if (selected === "video_approvals") {
       const v = selectedItem as VideoApprovalInboxItem;
       return (
-        <div className="p-5 space-y-5">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">{v.title}</h3>
-            <p className="text-sm text-muted-foreground">{v.editor_name}</p>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card divide-y divide-border">
-            <Row label="Brand" value={VIDEO_BRAND_LABEL[v.brand as VideoBrand] || v.brand} />
-            <Row label="Submitted" value={fmtDate(v.created_at)} />
-          </div>
-
-          <a href={v.drive_url} target="_blank" rel="noreferrer"
-             className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10">
-            <ExternalLink className="h-4 w-4" /> Open {videoSourceLabel(v.drive_url)} Link
-          </a>
-
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              className="flex-1 bg-success/90 hover:bg-success text-white"
-              disabled={!isSuperAdmin || processing === v.id}
-              onClick={() => decideVideo(v, "approved")}
-            >
-              {processing === v.id ? (
-                <ButtonOrb state="working" onFilled />
-              ) : (
-                <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
-              )}
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              className="flex-1"
-              disabled={!isSuperAdmin || processing === v.id}
-              onClick={() => decideVideo(v, "rejected")}
-            >
-              <XCircle className="h-4 w-4 mr-1.5" />Reject
-            </Button>
-          </div>
-
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            onClick={() => navigate("/video-approvals")}
-          >
-            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-            Open Video Approvals
-          </Button>
+        <div className="p-5">
+          <VideoReviewPanel
+            video={v.video}
+            editorName={v.editor_name}
+            onDone={() => { loadItems("video_approvals"); fetchCounts(); }}
+          />
         </div>
       );
     }
@@ -2699,17 +2488,26 @@ export default function Inbox() {
           <div className="mt-4 grid grid-cols-2 gap-2">
             <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
               <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Open</p>
-              <p className="mt-0.5 text-lg font-semibold text-foreground">{totalVisibleCount}</p>
+              <p className="mt-0.5 text-lg font-semibold text-foreground">
+                {countsLoading ? <OrbLoader state="searching" size={20} /> : totalVisibleCount}
+              </p>
             </div>
             <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
               <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Selected</p>
-              <p className="mt-0.5 text-lg font-semibold text-foreground">{selectedDisplayCount}</p>
+              <p className="mt-0.5 text-lg font-semibold text-foreground">
+                {countsLoading ? <OrbLoader state="searching" size={20} /> : selectedDisplayCount}
+              </p>
             </div>
           </div>
         </div>
         <nav className="flex-1 overflow-y-auto p-3 space-y-1.5">
-          {visibleCategories.length === 0 && (
-            <p className="px-3 py-3 text-xs text-muted-foreground">No categories available</p>
+          {countsLoading && (
+            <div className="flex h-24 items-center justify-center">
+              <OrbLoader state="searching" />
+            </div>
+          )}
+          {countsLoaded && visibleCategories.length === 0 && (
+            <p className="px-3 py-3 text-xs text-muted-foreground">No open inbox items</p>
           )}
           {visibleCategories.map((cat) => {
             const active = selected === cat.id;
@@ -2741,14 +2539,13 @@ export default function Inbox() {
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{cat.label}</span>
                 <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
-                  {displayCount === 0 ? "All clear" : `${displayCount} open item${displayCount === 1 ? "" : "s"}`}
+                  {displayCount} open item{displayCount === 1 ? "" : "s"}
                 </span>
               </span>
               {displayCount > 0 && (
                 <span className={cn(
                   "flex h-6 min-w-6 items-center justify-center rounded-full text-[10px] font-bold text-white px-1.5",
                   cat.id === "whatsapp" ? "bg-success/50"
-                  : cat.id === "followups" ? "bg-warning"
                   : "bg-primary"
                 )}>
                   {formatBadgeCount(displayCount)}
@@ -2799,7 +2596,7 @@ export default function Inbox() {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto bg-background/60">
-          {loading && items.length === 0 ? (
+          {countsLoading || (loading && items.length === 0) ? (
             <div className="flex h-40 items-center justify-center">
               <OrbLoader state="searching" />
             </div>

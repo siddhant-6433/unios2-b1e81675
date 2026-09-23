@@ -3,9 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ACTION_BADGE_POLL_MS, fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
 import { useAuth } from "@/contexts/AuthContext";
-import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
-import { isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { AlertTriangle, Clock, MapPin, Phone, CalendarCheck, Sparkles, Inbox, PhoneMissed, Flame, MessageCircle, Timer } from "lucide-react";
 
 interface ActionItem {
@@ -20,16 +18,16 @@ interface ActionItem {
 export function GlobalActionBar() {
   const { role, user, profile } = useAuth();
   const navigate = useNavigate();
-  const isTeamLeader = useIsTeamLeader();
   const [items, setItems] = useState<ActionItem[]>([]);
   const profileId = profile?.id || null;
   const { counsellorFilter, setCounsellorFilter } = useCounsellorFilter();
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
   const isCounsellor = role === "counsellor";
-  const canFilterCounsellor = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
+  const canUseLeadPendency = role === "super_admin" || role === "admission_head" || role === "counsellor";
+  const canFilterCounsellor = role === "super_admin" || role === "admission_head";
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || !canUseLeadPendency) return;
     if (!canFilterCounsellor) return;
     (async () => {
       const { data: roleRows } = await supabase.from("user_roles").select("user_id").eq("role", "counsellor");
@@ -37,11 +35,10 @@ export function GlobalActionBar() {
       const { data: profs } = await supabase.from("profiles").select("id, display_name").in("user_id", roleRows.map(r => r.user_id)).eq("login_disabled", false);
       if (profs) setCounsellorOptions(profs.map(p => ({ id: p.id, name: p.display_name || "Unnamed" })).sort((a, b) => a.name.localeCompare(b.name)));
     })();
-  }, [user?.id, canFilterCounsellor]);
+  }, [user?.id, canFilterCounsellor, canUseLeadPendency]);
 
   useEffect(() => {
-    if (!role || ["student", "parent"].includes(role)) return;
-    if (isAcademicPartnerPortalRole(role)) {
+    if (!role || !canUseLeadPendency) {
       setItems([]);
       return;
     }
@@ -148,8 +145,9 @@ export function GlobalActionBar() {
       if (retryTimer) clearTimeout(retryTimer);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [profileId, isCounsellor, role, counsellorFilter]);
+  }, [profileId, isCounsellor, role, counsellorFilter, canUseLeadPendency]);
 
+  if (!canUseLeadPendency) return null;
   if (items.length === 0 && !canFilterCounsellor) return null;
 
   return (

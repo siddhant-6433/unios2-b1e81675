@@ -49,14 +49,16 @@ describe("DAOTT seat-block fee", () => {
     expect(offlineDialog).not.toContain("const tokenFloor = 5000;");
   });
 
-  it("credits application fee against the Sem 1 seat-block fee", () => {
+  it("keeps the application fee on its own head, not the seat-block", () => {
+    // The PAN unlock still counts the app fee toward the threshold (computed
+    // from lead_payments), but the ledger must not credit it to seat-block.
     expect(migration).toContain("'seat_block_application_credit'");
     expect(migration).toContain("v_paid_toward_course := v_paid_toward_course + v_seat_block_application_credit;");
     expect(applicantPanel).toContain("Application fee counted toward PAN amount");
     expect(applicantPanel).toContain("Seat block balance payable");
     expect(leadFeeLedger).toContain("SEAT|BLOCK");
-    expect(provisionStudentFees).toContain(".eq(\"type\", \"application_fee\")");
-    expect(provisionStudentFees).toContain("remainingApplicationCredit");
+    expect(provisionStudentFees).not.toContain("remainingApplicationCredit");
+    expect(provisionStudentFees).toContain("reconcile_application_fee");
   });
 
   it("shows DAOTT seat-block fee heads and application-fee adjustment in the offer letter PDF", () => {

@@ -93,7 +93,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const isSuperAdmin = role === "super_admin";
   const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant", "office_admin"].includes(role || "");
   const canProvision = isFinanceRole;
-  const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
+  const canRequestConcession = ["principal", "school_coordinator", "office_assistant", "counsellor", "super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
   const canReallocate = hasPermission("fee_ledger:reallocate") || ["super_admin", "accountant", "office_admin"].includes(role || "");
   // Taking money at the counter is cashier-only, same gate as OfflinePaymentDialog.
   // Works for both lead-based candidates and lead-less (school) students — the
@@ -462,10 +462,20 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     toast({ title: "Sent on WhatsApp", description: `Delivered to ${loginLink.phone}.` });
   };
 
-  const totalFee = fees.reduce((s, f) => s + Number(f.total_amount || 0), 0);
-  const totalPaid = fees.reduce((s, f) => s + Number(f.paid_amount || 0), 0);
-  const totalConcession = fees.reduce((s, f) => s + Number(f.concession || 0), 0);
-  const totalBalance = fees.reduce((s, f) => s + Number(f.balance || 0), 0);
+  // Application-fee receipts live on their own FORM-FEE / NB-REG / MR-REG head
+  // (term "registration", shown in the leading One-time Fees section). That
+  // head is deliberately excluded from the course Total / Paid / Balance math,
+  // so the summary cards read the academic fee only.
+  const isApplicationFeeRow = (f: any) => {
+    const code = String(f.fee_codes?.code || "");
+    const name = String(f.fee_codes?.name || "");
+    return /^(FORM-FEE|MR-REG|NB-REG)$/i.test(code) || /application fee/i.test(name);
+  };
+  const billableFees = fees.filter((f: any) => !isApplicationFeeRow(f));
+  const totalFee = billableFees.reduce((s, f) => s + Number(f.total_amount || 0), 0);
+  const totalPaid = billableFees.reduce((s, f) => s + Number(f.paid_amount || 0), 0);
+  const totalConcession = billableFees.reduce((s, f) => s + Number(f.concession || 0), 0);
+  const totalBalance = billableFees.reduce((s, f) => s + Number(f.balance || 0), 0);
 
   // Group consecutive rows by term (fees are due_date-ordered, so same-term
   // rows are already adjacent) — lets tuition + boarding for a quarter read
@@ -921,7 +931,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                           )}
                           {pendingWaivers[f.id] > 0 && (
                             <span className="text-[10px] font-medium text-warning" title="Waiver awaiting super-admin approval">
-                              +₹{pendingWaivers[f.id].toLocaleString("en-IN")} pending
+                              Under Approval
                             </span>
                           )}
                         </div>

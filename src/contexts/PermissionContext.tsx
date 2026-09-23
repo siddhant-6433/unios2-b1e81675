@@ -62,7 +62,29 @@ export const PermissionProvider = ({ children }: { children: ReactNode }) => {
       console.error("Failed to load permissions:", error.message);
       setPermissions(new Set());
     } else {
-      setPermissions(new Set(data || []));
+      const next = new Set<string>(data || []);
+      // Library capabilities can also come from a per-branch library_staff_assignment,
+      // granted by a super admin from the Library access matrix — independent of the
+      // user's role. Mirror the SQL capability model so the UI matches RLS.
+      const { data: assignments } = await supabase
+        .from("library_staff_assignments")
+        .select("assignment_role, can_catalog, can_circulate, can_inventory, can_digitize, can_manage_settings")
+        .eq("user_id", user.id)
+        .eq("active", true);
+      if (assignments?.length) {
+        const has = (key: string) =>
+          assignments.some((a) => a.assignment_role === "manager" || a[key]);
+        next.add("library:view");
+        if (has("can_catalog")) next.add("library:catalog");
+        if (has("can_circulate")) next.add("library:circulate");
+        if (has("can_inventory")) next.add("library:inventory");
+        if (has("can_digitize")) next.add("library:digitize");
+        if (has("can_manage_settings")) next.add("library:manage_settings");
+        if (assignments.some((a) => a.assignment_role === "manager" || a.can_manage_settings || a.can_inventory || a.can_circulate)) {
+          next.add("library:export");
+        }
+      }
+      setPermissions(next);
     }
     setLoading(false);
   }, [user?.id, role, roleLoaded]);

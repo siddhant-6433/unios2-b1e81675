@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { pickLeadForSchoolBrand, schoolLeadBrand } from "../_shared/schoolLeadBrand.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -311,6 +312,27 @@ function normalisePhone(phone: string): string {
   return `+${digits}`;
 }
 
+async function navyaAutoOutboundCallsEnabled(supabase: any): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("_app_config")
+    .select("value")
+    .eq("key", "voice_agent_settings")
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Could not read voice_agent_settings; defaulting auto outbound calls to enabled:", error.message);
+    return true;
+  }
+
+  try {
+    const settings = data?.value ? JSON.parse(data.value) : {};
+    return settings.auto_outbound_calls_enabled !== false;
+  } catch (err) {
+    console.warn("Could not parse voice_agent_settings; defaulting auto outbound calls to enabled:", err);
+    return true;
+  }
+}
+
 // ─── Meta course-answer resolution ──────────────────────────────────
 // Meta lead forms are multi-course, so we resolve the course from the in-form
 // "which course?" answer (already extracted + normalised by parseMetaAds),
@@ -523,13 +545,19 @@ Deno.serve(async (req) => {
     // ── Duplicate detection by phone ──
     const attributionKeys = Object.keys(attribution) as (keyof typeof attribution)[];
 
-    const { data: existing } = await supabase
+    const { data: existingRows } = await supabase
       .from("leads")
-      .select(`id, name, stage, source, secondary_source, tertiary_source, source_history, ${attributionKeys.join(", ")}`)
+      .select(`id, name, stage, source, secondary_source, tertiary_source, source_history, campus_id, portal_brand, lead_institution_type, is_mirror, ${attributionKeys.join(", ")}`)
       .eq("phone", normPhone)
       .eq("is_mirror", false)
-      .limit(1)
-      .maybeSingle();
+      .limit(5);
+
+    const incomingBrand = schoolLeadBrand({
+      portal_brand: attribution.portal_brand,
+      campus_id: null,
+      lead_institution_type: attribution.portal_brand === "mirai" ? "school" : "college",
+    });
+    const existing = pickLeadForSchoolBrand(existingRows as any[], incomingBrand);
 
     if (existing) {
       const existingLead = existing as any;
@@ -719,7 +747,7 @@ Deno.serve(async (req) => {
     });
 
     // For chat widget leads: schedule AI call after 10 minutes (after chat likely ends)
-    if (skipAiCallSources.includes(leadSource)) {
+    if (skipAiCallSources.includes(leadSource) && await navyaAutoOutboundCallsEnabled(supabase)) {
       const scheduledAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
       await supabase.from("ai_call_queue" as any).insert({
         lead_id: lead.id,

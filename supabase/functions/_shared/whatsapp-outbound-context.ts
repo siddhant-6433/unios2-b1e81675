@@ -59,6 +59,27 @@ export function responsePolicyForTemplate(templateKey: string | null | undefined
   return "engine";
 }
 
+/** 10-digit / 91-prefixed / Meta ID keys so Mirai replies match campaign sends. */
+export function whatsappMatchKeys(value: string | null | undefined): string[] {
+  const d = digits(value);
+  if (!d) return [];
+  if (d.length === 10) return [d, `91${d}`];
+  if (d.length === 12 && d.startsWith("91")) return [d, d.slice(2)];
+  return [d];
+}
+
+function uniqueKeys(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.flatMap((value) => whatsappMatchKeys(value)))];
+}
+
+function keysOverlap(left: Iterable<string>, right: Iterable<string>): boolean {
+  const set = new Set(left);
+  for (const key of right) {
+    if (set.has(key)) return true;
+  }
+  return false;
+}
+
 export async function recordWhatsAppOutboundContext(
   admin: SupabaseLike,
   patch: OutboundContextPatch,
@@ -89,28 +110,47 @@ export async function recordWhatsAppOutboundContext(
 export async function loadLatestOutboundContext(
   admin: SupabaseLike,
   phone: string,
-  businessNumber: string | null | undefined,
+  businessNumber?: string | string[] | null,
 ): Promise<Record<string, unknown> | null> {
-  const normalizedPhone = digits(phone);
-  if (!normalizedPhone) return null;
+  const phoneKeys = uniqueKeys([phone]);
+  if (!phoneKeys.length) return null;
 
-  let query = admin
+  const requested = Array.isArray(businessNumber) ? businessNumber : [businessNumber];
+  const requestedKeys = new Set(uniqueKeys(requested));
+
+  if (requestedKeys.size > 0) {
+    const { data: channels } = await admin
+      .from("whatsapp_channels")
+      .select("business_number, meta_phone_number_id")
+      .eq("is_active", true);
+    for (const channel of (channels || []) as Array<{ business_number?: string | null; meta_phone_number_id?: string | null }>) {
+      const channelKeys = uniqueKeys([channel.business_number, channel.meta_phone_number_id]);
+      if (keysOverlap(requestedKeys, channelKeys)) {
+        for (const key of channelKeys) requestedKeys.add(key);
+      }
+    }
+  }
+
+  const { data, error } = await admin
     .from("whatsapp_outbound_context")
     .select("id,message_id,provider_message_id,phone,business_number,provider,lead_id,campaign_id,campaign_recipient_id,template_key,outbound_kind,expected_reply_type,response_policy,metadata,expires_at,created_at")
-    .eq("phone", normalizedPhone);
-
-  const normalizedBusiness = digits(businessNumber || "");
-  if (normalizedBusiness) query = query.eq("business_number", normalizedBusiness);
-
-  const { data, error } = await query
+    .in("phone", phoneKeys)
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(25);
+
   if (error) {
     console.error("whatsapp_outbound_context lookup failed:", error.message);
     return null;
   }
-  const expiresAt = typeof data?.expires_at === "string" ? new Date(data.expires_at).getTime() : null;
-  if (expiresAt && expiresAt < Date.now()) return null;
-  return data as Record<string, unknown> | null;
+
+  const now = Date.now();
+  const rows = ((data as Record<string, unknown>[] | null) || []).filter((row) => {
+    const expiresAt = typeof row.expires_at === "string" ? new Date(row.expires_at).getTime() : null;
+    if (expiresAt && expiresAt < now) return false;
+    if (!requestedKeys.size) return true;
+    const rowKeys = whatsappMatchKeys(typeof row.business_number === "string" ? row.business_number : "");
+    if (!rowKeys.length) return true;
+    return keysOverlap(requestedKeys, rowKeys);
+  });
+  return rows[0] || null;
 }

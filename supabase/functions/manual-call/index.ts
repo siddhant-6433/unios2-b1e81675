@@ -80,6 +80,27 @@ Deno.serve(async (req) => {
       return json({ error: "Only staff and academic partners can place cloud calls." }, 403);
     }
 
+    // One live bridge call per counsellor. Plivo rings the counsellor's own
+    // phone, so without this a stale or duplicated client trigger (double
+    // click, an overlapping auto-next, a second tab) places a second call
+    // while the first is still connected — Plivo reports simultaneous calls.
+    // The 15-minute window bounds the check so a stuck row can never lock a
+    // counsellor out permanently.
+    const { data: liveCall } = await db
+      .from("ai_call_records")
+      .select("call_uuid, status, created_at")
+      .eq("caller_user_id", userId)
+      .eq("call_type", "manual")
+      .in("status", ["initiated", "in_progress"])
+      .gte("created_at", new Date(Date.now() - 15 * 60 * 1000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (liveCall) {
+      return json({ error: "You already have a call in progress. End or cancel it before starting another." }, 409);
+    }
+
     let leadName: string | null = null;
     let leadPhone: string | null = null;
     let courseName: string | null = null;

@@ -170,6 +170,32 @@ describe("accessPolicy", () => {
     } as never)).toBe(true);
   });
 
+  it("does not widen explicit roles with anyPermission", () => {
+    const teacherWithHr = state({
+      role: "teacher",
+      realRole: "teacher",
+      permissions: ["hr:view"],
+    });
+    expect(canSeePolicyItem(teacherWithHr, {
+      title: "ID Card Center",
+      url: "/id-card-center",
+      roles: ["super_admin", "principal", "office_admin", "office_assistant", "school_coordinator", "campus_admin"],
+      anyPermission: ["hr:view"],
+    } as never)).toBe(false);
+
+    const principal = state({
+      role: "principal",
+      realRole: "principal",
+      permissions: [],
+    });
+    expect(canSeePolicyItem(principal, {
+      title: "ID Card Center",
+      url: "/id-card-center",
+      roles: ["super_admin", "principal", "office_admin", "office_assistant", "school_coordinator", "campus_admin"],
+      anyPermission: ["hr:view"],
+    } as never)).toBe(true);
+  });
+
   it("hides the calling sprints from counsellors", () => {
     const counsellor = state({ role: "counsellor", realRole: "counsellor" });
     // They hold call_log:view, so only blockedRoles keeps these out.

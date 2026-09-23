@@ -10,39 +10,15 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Video, ExternalLink, CheckCircle, Users, Plus, Pencil, Instagram, Linkedin, Youtube, Trash2, Undo2, RotateCcw, X, BellRing } from "lucide-react";
+import { Video, ExternalLink, CheckCircle, Users, Plus, Pencil, BellRing } from "lucide-react";
 import {
-  VIDEO_BRANDS, VIDEO_BRAND_LABEL, CONTENT_TYPE_LABEL, STATUS_BADGE,
-  type VideoBrand, type VideoContentType, type VideoStatus,
+  VIDEO_BRAND_LABEL, CONTENT_TYPE_LABEL, STATUS_BADGE,
+  type VideoStatus,
 } from "@/lib/videoBrands";
 import { BankDetailsFields } from "@/components/bank/BankDetailsFields";
-import { VideoHistory } from "@/components/video/VideoHistory";
 import { ZohoVendorLinkField } from "@/components/video/ZohoVendorLinkField";
 import { isValidIfsc } from "@/lib/bankDetails";
-import { uploadVideoImages } from "@/lib/videoUpload";
-
-type VideoRow = {
-  id: string;
-  editor_id: string;
-  brand: VideoBrand;
-  title: string;
-  content_type: VideoContentType;
-  drive_url: string;
-  status: VideoStatus;
-  rejection_reason: string | null;
-  rejection_screenshots: string[] | null;
-  editor_notified_at: string | null;
-  instagram_url: string | null;
-  instagram_posted_on: string | null;
-  linkedin_url: string | null;
-  linkedin_posted_on: string | null;
-  youtube_url: string | null;
-  youtube_posted_on: string | null;
-  thumbnail_youtube_url: string | null;
-  thumbnail_instagram_url: string | null;
-  approved_at: string | null;
-  created_at: string;
-};
+import { VideoReviewPanel, type VideoRow } from "@/components/video/VideoReviewPanel";
 
 type EditorRow = {
   id: string; user_id: string | null; name: string; email: string | null;
@@ -61,37 +37,6 @@ function sourceLabel(url: string): string {
   return /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
 }
 
-function fmtPostedAt(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" });
-}
-
-// Published social links rendered inline as clickable URLs (not plain text),
-// each with its posting date+time. Returns null when nothing's been posted.
-function PostedLinks({ v }: { v: VideoRow }) {
-  const items = [
-    { url: v.instagram_url, posted: v.instagram_posted_on, Icon: Instagram, color: "text-pink-600", label: "Instagram" },
-    { url: v.linkedin_url,  posted: v.linkedin_posted_on,  Icon: Linkedin,  color: "text-info-foreground", label: "LinkedIn" },
-    { url: v.youtube_url,   posted: v.youtube_posted_on,   Icon: Youtube,   color: "text-destructive",  label: "YouTube" },
-  ].filter(i => i.url);
-  if (items.length === 0) return null;
-  return (
-    <div className="rounded-xl border border-border bg-card p-3 space-y-2">
-      <p className="text-[10px] text-muted-foreground uppercase font-semibold">Published Links</p>
-      {items.map(({ url, posted, Icon, color, label }) => (
-        <div key={label} className="flex items-center gap-2 min-w-0">
-          <Icon className={`h-3.5 w-3.5 shrink-0 ${color}`} />
-          <a href={url!} target="_blank" rel="noreferrer"
-             className="text-xs text-primary hover:underline truncate flex-1">{url}</a>
-          {posted && <span className="text-[10px] text-muted-foreground shrink-0">{fmtPostedAt(posted)}</span>}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export default function VideoApprovals() {
   const { user, role } = useAuth();
   const { toast } = useToast();
@@ -104,9 +49,6 @@ export default function VideoApprovals() {
   const [statusFilter, setStatusFilter] = useState<VideoStatus | "all">("all");
 
   const [selected, setSelected] = useState<VideoRow | null>(null);
-  const [rejectReason, setRejectReason] = useState("");
-  const [screenshots, setScreenshots] = useState<File[]>([]);
-  const [acting, setActing] = useState(false);
 
   // Editor management
   const [editorForm, setEditorForm] = useState<EditorRow | null>(null);
@@ -132,109 +74,6 @@ export default function VideoApprovals() {
     for (const v of videos) c[v.status] = (c[v.status] || 0) + 1;
     return c;
   }, [videos]);
-
-  const handleApprove = async () => {
-    if (!selected) return;
-    setActing(true);
-    const { error } = await supabase.from("videos" as any).update({
-      status: "approved",
-      approved_by: user?.id,
-      approved_at: new Date().toISOString(),
-      rejection_reason: null,
-      rejection_screenshots: null,
-    }).eq("id", selected.id);
-    if (error) {
-      toast({ title: "Approve failed", description: error.message, variant: "destructive" });
-      setActing(false); return;
-    }
-    // Notify the editor on WhatsApp to post & submit the published links.
-    // Fire-and-forget — never block the approval on a notification.
-    supabase.functions.invoke("video-notify", {
-      body: { event: "approved", video_id: selected.id },
-    }).catch(() => { /* notification failure is non-fatal */ });
-    toast({ title: "Video approved" });
-    setActing(false);
-    setSelected(null);
-    fetchAll();
-  };
-
-  // Revoke a prior approval — sends the video back to the pending queue and
-  // clears the approval stamp. The before-change trigger recomputes
-  // is_billable (→ false) automatically. Super-admin only (RLS-enforced).
-  const handleRevoke = async () => {
-    if (!selected) return;
-    if (!window.confirm(`Revoke approval for "${selected.title}"? It returns to the pending queue.`)) return;
-    setActing(true);
-    const { error } = await supabase.from("videos" as any).update({
-      status: "pending_approval",
-      approved_by: null,
-      approved_at: null,
-      rejection_reason: null,
-      rejection_screenshots: null,
-    }).eq("id", selected.id);
-    if (error) {
-      toast({ title: "Revoke failed", description: error.message, variant: "destructive" });
-      setActing(false); return;
-    }
-    toast({ title: "Approval revoked — back in queue" });
-    setActing(false);
-    setSelected(null);
-    fetchAll();
-  };
-
-  const handleDelete = async () => {
-    if (!selected) return;
-    if (!window.confirm(`Delete "${selected.title}" permanently? This cannot be undone.`)) return;
-    setActing(true);
-    const { error } = await supabase.from("videos" as any).delete().eq("id", selected.id);
-    if (error) {
-      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
-      setActing(false); return;
-    }
-    toast({ title: "Video deleted" });
-    setActing(false);
-    setSelected(null);
-    fetchAll();
-  };
-
-  // Send a video back to the editor for correction — reuses the "rejected"
-  // status (relabelled "Needs Correction") plus notes and optional screenshots
-  // pointing at exactly what to fix. The editor can then resubmit.
-  const handleSendForCorrection = async () => {
-    if (!selected) return;
-    if (!rejectReason.trim()) {
-      toast({ title: "Please add correction notes", variant: "destructive" }); return;
-    }
-    setActing(true);
-    let urls: string[] = [];
-    try {
-      urls = await uploadVideoImages("video-rejections", selected.id, screenshots);
-    } catch (e: any) {
-      toast({ title: "Screenshot upload failed", description: e.message, variant: "destructive" });
-      setActing(false); return;
-    }
-    const { error } = await supabase.from("videos" as any).update({
-      status: "rejected",
-      approved_by: user?.id,
-      approved_at: new Date().toISOString(),
-      rejection_reason: rejectReason.trim(),
-      rejection_screenshots: urls.length ? urls : null,
-    }).eq("id", selected.id);
-    if (error) {
-      toast({ title: "Failed to send for correction", description: error.message, variant: "destructive" });
-      setActing(false); return;
-    }
-    // Notify the editor on WhatsApp with the correction notes. Fire-and-forget.
-    supabase.functions.invoke("video-notify", {
-      body: { event: "correction", video_id: selected.id },
-    }).catch(() => { /* notification failure is non-fatal */ });
-    toast({ title: "Sent back for correction" });
-    setActing(false);
-    setRejectReason("");
-    setScreenshots([]);
-    setSelected(null);
-    fetchAll();
-  };
 
   const openEditorDialog = async (editor: EditorRow | null) => {
     setEditorForm(editor ?? {
@@ -469,139 +308,17 @@ export default function VideoApprovals() {
       )}
 
       {/* Review dialog */}
-      <Dialog open={!!selected} onOpenChange={(o) => { if (!o) { setSelected(null); setRejectReason(""); setScreenshots([]); } }}>
-        <DialogContent className="max-w-md">
+      <Dialog open={!!selected} onOpenChange={(o) => { if (!o) setSelected(null); }}>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Video className="h-5 w-5 text-primary" /> Review Video</DialogTitle>
           </DialogHeader>
           {selected && (
-            <div className="space-y-3">
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase font-semibold">Title</p>
-                <p className="text-sm font-medium">{selected.title}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase font-semibold">Editor</p>
-                  <p className="text-sm">{editorById[selected.editor_id]?.name || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase font-semibold">Brand</p>
-                  <p className="text-sm">{VIDEO_BRAND_LABEL[selected.brand]}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase font-semibold">Type</p>
-                  <p className="text-sm">{CONTENT_TYPE_LABEL[selected.content_type]}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase font-semibold">Status</p>
-                  <Badge className={`border-0 text-[10px] font-semibold ${STATUS_BADGE[selected.status].color}`}>
-                    {STATUS_BADGE[selected.status].label}
-                  </Badge>
-                  {selected.editor_notified_at && (selected.status === "rejected" || selected.status === "approved") && (
-                    <p className="mt-1 flex items-center gap-1 text-[10px] text-success">
-                      <BellRing className="h-3 w-3" /> Editor notified {fmtPostedAt(selected.editor_notified_at)}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <a href={selected.drive_url} target="_blank" rel="noreferrer"
-                 className="inline-flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10">
-                <ExternalLink className="h-4 w-4" /> Open {sourceLabel(selected.drive_url)} Link
-              </a>
-
-              {(selected.thumbnail_youtube_url || selected.thumbnail_instagram_url) && (
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase font-semibold mb-1.5">Thumbnails</p>
-                  <div className="flex gap-3">
-                    {[
-                      { url: selected.thumbnail_youtube_url, label: "YouTube 16:9", box: "h-20 w-36" },
-                      { url: selected.thumbnail_instagram_url, label: "Instagram 9:16", box: "h-32 w-[4.5rem]" },
-                    ].map(t => t.url ? (
-                      <a key={t.label} href={t.url} target="_blank" rel="noreferrer" className="text-center">
-                        <img src={t.url} alt={t.label} className={`${t.box} rounded-lg object-cover border border-border`} />
-                        <span className="mt-1 block text-[9px] text-muted-foreground">{t.label}</span>
-                      </a>
-                    ) : null)}
-                  </div>
-                </div>
-              )}
-
-              <PostedLinks v={selected} />
-
-              <VideoHistory videoId={selected.id} canComment />
-
-              {selected.status === "rejected" && (selected.rejection_reason || selected.rejection_screenshots?.length) && (
-                <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-xs">
-                  <p className="font-semibold text-destructive mb-1">Correction requested</p>
-                  {selected.rejection_reason && <p>{selected.rejection_reason}</p>}
-                  {selected.rejection_screenshots?.length ? (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {selected.rejection_screenshots.map((u, i) => (
-                        <a key={i} href={u} target="_blank" rel="noreferrer">
-                          <img src={u} alt={`Screenshot ${i + 1}`} className="h-16 w-16 rounded-lg object-cover border border-border" />
-                        </a>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              )}
-
-              {selected.status === "pending_approval" && isSuperAdmin && (
-                <>
-                  <div>
-                    <label className="text-xs font-medium mb-1 block">Correction notes (required if sending back)</label>
-                    <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} rows={2}
-                      className={inputCls + " resize-none"} placeholder="e.g. Drive link not accessible, off-brand, fix the intro, etc." />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium mb-1 block">Screenshots (optional — show what to fix)</label>
-                    <input type="file" accept="image/*" multiple
-                      onChange={e => { setScreenshots(prev => [...prev, ...Array.from(e.target.files || [])]); e.target.value = ""; }}
-                      className="text-xs file:mr-2 file:rounded-lg file:border-0 file:bg-muted file:px-2 file:py-1 file:text-xs" />
-                    {screenshots.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {screenshots.map((f, i) => (
-                          <div key={i} className="relative">
-                            <img src={URL.createObjectURL(f)} alt={f.name} className="h-14 w-14 rounded-lg object-cover border border-border" />
-                            <button type="button" onClick={() => setScreenshots(s => s.filter((_, j) => j !== i))}
-                              className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-white flex items-center justify-center">
-                              <X className="h-2.5 w-2.5" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex gap-2 pt-2 border-t border-border">
-                    <Button variant="outline" className="flex-1 gap-1.5 text-destructive hover:bg-destructive/5"
-                            onClick={handleSendForCorrection} disabled={acting}>
-                      {acting ? <ButtonOrb state="working" /> : <RotateCcw className="h-4 w-4" />} Send for correction
-                    </Button>
-                    <Button className="flex-1 gap-1.5 bg-success hover:bg-success/90"
-                            onClick={handleApprove} disabled={acting}>
-                      {acting ? <ButtonOrb state="working" onFilled /> : <CheckCircle className="h-4 w-4" />} Approve
-                    </Button>
-                  </div>
-                </>
-              )}
-
-              {/* Admin overrides — revoke a prior approval, or delete the video. */}
-              {isSuperAdmin && (
-                <div className="flex gap-2 pt-2 border-t border-border">
-                  {(selected.status === "approved" || selected.status === "published") && (
-                    <Button variant="outline" className="flex-1 gap-1.5 text-warning-foreground hover:bg-warning/5"
-                            onClick={handleRevoke} disabled={acting}>
-                      {acting ? <ButtonOrb state="working" /> : <Undo2 className="h-4 w-4" />} Revoke approval
-                    </Button>
-                  )}
-                  <Button variant="outline" className="flex-1 gap-1.5 text-destructive hover:bg-destructive/5"
-                          onClick={handleDelete} disabled={acting}>
-                    {acting ? <ButtonOrb state="working" /> : <Trash2 className="h-4 w-4" />} Delete video
-                  </Button>
-                </div>
-              )}
-            </div>
+            <VideoReviewPanel
+              video={selected}
+              editorName={editorById[selected.editor_id]?.name}
+              onDone={() => { setSelected(null); fetchAll(); }}
+            />
           )}
         </DialogContent>
       </Dialog>

@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Sparkles } from "lucide-react";
 import { NavyaKnowledgeContent } from "./NavyaKnowledge";
 
@@ -24,6 +25,7 @@ import { NavyaKnowledgeContent } from "./NavyaKnowledge";
 type Provider = "gemini" | "sarvam" | "cartesia";
 
 type VoiceTuning = {
+  auto_outbound_calls_enabled: boolean;
   gemini_silence_ms: number;
   sarvam_filler_threshold_ms: number;
   sarvam_pace: number;
@@ -83,6 +85,7 @@ function VoiceProviderCard() {
     (supabase.rpc("get_voice_agent_settings" as any) as any).then(({ data }: any) => {
       // Defaults match the migration so the UI always renders something useful
       setTuning({
+        auto_outbound_calls_enabled: data?.auto_outbound_calls_enabled !== false,
         gemini_silence_ms:          data?.gemini_silence_ms          ?? 1500,
         sarvam_filler_threshold_ms: data?.sarvam_filler_threshold_ms ?? 700,
         sarvam_pace:                Number(data?.sarvam_pace ?? 1.0),
@@ -144,6 +147,15 @@ function VoiceProviderCard() {
       if (data) setTuning(data);
       return;
     }
+    if (Object.prototype.hasOwnProperty.call(patch, "auto_outbound_calls_enabled")) {
+      toast({
+        title: patch.auto_outbound_calls_enabled ? "Auto outbound calls enabled" : "Auto outbound calls disabled",
+        description: patch.auto_outbound_calls_enabled
+          ? "New eligible leads can be queued for Navya calls again."
+          : "New auto-call queueing is paused and pending queued calls have been marked skipped.",
+      });
+      return;
+    }
     toast({ title: "Saved", description: "Active on new calls within ~30s." });
   };
 
@@ -198,6 +210,31 @@ function VoiceProviderCard() {
               is shown so admins aren't editing knobs that don't apply. */}
       {tuning && (
         <div className="border-t border-border pt-4 space-y-4">
+          <div className="rounded-xl border border-border bg-muted/30 p-3">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex-1 min-w-[240px]">
+                <p className="text-sm font-semibold text-foreground">Automatic outbound calls</p>
+                <p className="text-[12px] text-muted-foreground mt-0.5">
+                  {tuning.auto_outbound_calls_enabled
+                    ? "Navya can automatically queue eligible new leads for outbound voice calls."
+                    : "Navya will not auto-queue outbound calls. Existing pending auto-call queue rows were skipped when this was disabled."}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                {tuningSaving && <span className="text-[11px] text-muted-foreground">Saving...</span>}
+                <span className="text-xs font-medium text-muted-foreground">
+                  {tuning.auto_outbound_calls_enabled ? "Enabled" : "Disabled"}
+                </span>
+                <Switch
+                  checked={tuning.auto_outbound_calls_enabled}
+                  disabled={tuningSaving}
+                  onCheckedChange={(next) => patchTuning({ auto_outbound_calls_enabled: next })}
+                  aria-label="Toggle Navya automatic outbound calls"
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs font-semibold text-foreground/80 uppercase tracking-wide">
               Tuning · {tuningLabel}

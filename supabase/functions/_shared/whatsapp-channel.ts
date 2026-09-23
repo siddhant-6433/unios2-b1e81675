@@ -30,10 +30,20 @@ export interface WhatsAppChannelHint {
   route?: WhatsAppChannelRoute | null;
   businessPhoneNumberId?: string | null;
   businessNumber?: string | null;
+  /**
+   * WABA the template lives in. A template can only be sent from a number in
+   * its own WABA, so a non-default value pins the channel to that account and
+   * disqualifies every other one. NULL/undefined means the default WABA and
+   * leaves routing unchanged.
+   */
+  wabaId?: string | null;
   requireAi?: boolean;
   requireManualReply?: boolean;
   requireBulk?: boolean;
 }
+
+/** NULL waba_id is the default/main WABA; normalise so it compares cleanly. */
+export const normWaba = (w: string | null | undefined): string => w || "MAIN";
 
 export interface WhatsAppSendResult {
   ok: boolean;
@@ -176,7 +186,13 @@ function scoreChannel(channel: WhatsAppChannel, hint: WhatsAppChannelHint): numb
   const channelBusinessNumber = digits(channel.business_number);
 
   if (hint.provider && channel.provider !== hint.provider) return -1;
+  // A template can only go out from a number in the template's own WABA. When
+  // the caller knows the WABA, a channel in any other WABA is disqualified and
+  // the match dominates the route/business-number scores (which only break
+  // ties within the right account).
+  if (hint.wabaId && normWaba(channel.waba_id) !== normWaba(hint.wabaId)) return -1;
   if (hint.route && channel.route === hint.route) score += 2;
+  if (hint.wabaId) score += 6;
   if (hint.businessPhoneNumberId && !isLikelyBusinessPhoneNumber(hint.businessPhoneNumberId) && channel.meta_phone_number_id === hint.businessPhoneNumberId) score += 5;
   if (hintedBusinessNumber && channelBusinessNumber && hintedBusinessNumber === channelBusinessNumber) score += 5;
   if (!channelAllowed(channel, hint)) return -1;

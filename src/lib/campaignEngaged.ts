@@ -58,6 +58,15 @@ export function campaignPhoneDigits(phone: string): string {
   return phone.replace(/\D/g, "");
 }
 
+/** Keep in sync with public.whatsapp_match_keys and the outbound-context helper. */
+export function whatsappMatchKeys(value: string | null | undefined): string[] {
+  const d = campaignPhoneDigits(value || "");
+  if (!d) return [];
+  if (d.length === 10) return [d, `91${d}`];
+  if (d.length === 12 && d.startsWith("91")) return [d, d.slice(2)];
+  return [d];
+}
+
 /** Collapse +91 / 91-prefix variants so the same person is one conversation. */
 export function normalizeCampaignPhoneDigits(phone: string): string {
   const digits = campaignPhoneDigits(phone);

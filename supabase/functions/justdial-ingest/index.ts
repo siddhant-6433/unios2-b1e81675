@@ -17,6 +17,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { pickLeadForSchoolBrand } from "../_shared/schoolLeadBrand.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -180,13 +181,13 @@ Deno.serve(async (req) => {
     );
 
     // ── Duplicate check ───────────────────────────────────────────────────
-    const { data: existing } = await supabase
+    const { data: existingRows } = await supabase
       .from("leads")
-      .select("id, name, stage, source, secondary_source, tertiary_source, source_history, jd_contract_id")
+      .select("id, name, stage, source, secondary_source, tertiary_source, source_history, jd_contract_id, campus_id, portal_brand, lead_institution_type, is_mirror")
       .eq("phone", normPhone)
       .eq("is_mirror", false)
-      .limit(1)
-      .maybeSingle();
+      .limit(5);
+    const existing = pickLeadForSchoolBrand(existingRows as any[], "nimt");
 
     if (existing) {
       console.log(`Duplicate: ${existing.name} (${existing.stage})`);

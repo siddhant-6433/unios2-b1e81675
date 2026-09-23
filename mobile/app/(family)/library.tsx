@@ -58,6 +58,17 @@ function normalizeIsbn(value: string) {
   return value.replace(/[^0-9Xx]/g, '');
 }
 
+// Decodes the NIMT:ACC:<accession> QR printed on our labels, plus plain ISBNs and
+// raw accession/barcode values.
+function parseScanned(raw: string): { accession: string; isbn: string } {
+  const value = (raw || '').trim();
+  const qr = value.match(/^NIMT(?::ACC)?[:\-|/ ]+(.+)$/i);
+  const accession = qr ? qr[1].trim() : value;
+  const digits = normalizeIsbn(accession);
+  const isbn = (digits.length === 13 && (digits.startsWith('978') || digits.startsWith('979'))) || digits.length === 10 ? digits : '';
+  return { accession, isbn };
+}
+
 export default function LibraryScreen() {
   const { role, user } = useAuth();
   const [permission, requestPermission] = useCameraPermissions();
@@ -74,7 +85,10 @@ export default function LibraryScreen() {
   const [auditStatus, setAuditStatus] = useState('available');
   const [capturing, setCapturing] = useState(false);
 
-  const canOperate = role === 'librarian' || role === 'super_admin';
+  // Operate is derived from the server: anyone the access matrix (or the librarian
+  // campus fallback) lets catalog a branch can scan. Falls back to role for the
+  // first render before the branch check returns.
+  const [canOperate, setCanOperate] = useState(role === 'librarian' || role === 'super_admin');
 
   const fetchLibrary = useCallback(async () => {
     setLoading(true);
@@ -87,26 +101,14 @@ export default function LibraryScreen() {
       user?.id
         ? (supabase as any).from('library_members').select('id').eq('user_id', user.id).maybeSingle()
         : Promise.resolve({ data: null }),
-      role === 'super_admin'
-        ? (supabase as any)
-            .from('library_branches')
-            .select('id, name, code')
-            .eq('active', true)
-            .order('name')
-        : canOperate
-        ? (supabase as any)
-            .from('library_staff_assignments')
-            .select('branch_id, library_branches(id, name, code)')
-            .eq('active', true)
-        : Promise.resolve({ data: [] }),
+      (supabase as any).rpc('library_my_branches', { _action: 'catalog' }),
     ]);
 
     if (itemRes.data) setItems(itemRes.data);
-    const assignedBranches = role === 'super_admin'
-      ? (branchRes.data || [])
-      : (branchRes.data || []).map((row: any) => row.library_branches).filter(Boolean);
-    setBranches(assignedBranches);
-    setSelectedBranchId((current) => current || assignedBranches[0]?.id || '');
+    const operableBranches = (branchRes.data || []) as LibraryBranch[];
+    setBranches(operableBranches);
+    setCanOperate(operableBranches.length > 0 || role === 'super_admin');
+    setSelectedBranchId((current) => current || operableBranches[0]?.id || '');
 
     const memberId = memberRes.data?.id;
     if (memberId) {
@@ -121,7 +123,7 @@ export default function LibraryScreen() {
       setLoans([]);
     }
     setLoading(false);
-  }, [canOperate, role, user?.id]);
+  }, [role, user?.id]);
 
   useEffect(() => {
     fetchLibrary();
@@ -158,7 +160,9 @@ export default function LibraryScreen() {
     setCapturing(true);
     try {
       if (!selectedBranchId) throw new Error('Select or assign a library before capturing records.');
-      const isbn = normalizeIsbn(value);
+      // A QR/accession code is stored as the barcode; only an ISBN-shaped code
+      // triggers a metadata lookup.
+      const { accession, isbn } = parseScanned(value);
       let suggested = {};
       let confidence = 0.2;
       if (isbn) {
@@ -172,7 +176,7 @@ export default function LibraryScreen() {
       const { data: inserted, error } = await (supabase as any).from('library_digitization_records').insert({
         branch_id: selectedBranchId,
         source: 'barcode',
-        scanned_barcode: value,
+        scanned_barcode: accession || value,
         isbn: isbn || null,
         suggested_metadata: suggested,
         confidence,
@@ -230,7 +234,7 @@ export default function LibraryScreen() {
       if (!issueAdmissionNo.trim()) throw new Error('Enter the student admission number before scanning.');
       const { error } = await (supabase as any).rpc('library_issue_by_admission_no', {
         _branch_id: selectedBranchId,
-        _accession_or_barcode: value.trim(),
+        _accession_or_barcode: parseScanned(value).accession || value.trim(),
         _admission_no: issueAdmissionNo.trim(),
         _due_on: null,
       });
@@ -252,7 +256,7 @@ export default function LibraryScreen() {
       if (!selectedBranchId) throw new Error('Select or assign a library before returning books.');
       const { data, error } = await (supabase as any).rpc('library_return_by_accession', {
         _branch_id: selectedBranchId,
-        _accession_or_barcode: value.trim(),
+        _accession_or_barcode: parseScanned(value).accession || value.trim(),
       });
       if (error) throw error;
       const fine = Array.isArray(data) ? data[0]?.fine_amount : data?.fine_amount;
@@ -271,7 +275,8 @@ export default function LibraryScreen() {
     setCapturing(true);
     try {
       if (!selectedBranchId) throw new Error('Select or assign a library before shelf audit.');
-      const item = items.find((row) => row.branch_id === selectedBranchId && (row.accession_no === value.trim() || row.barcode === value.trim()));
+      const scannedAccession = parseScanned(value).accession || value.trim();
+      const item = items.find((row) => row.branch_id === selectedBranchId && (row.accession_no === scannedAccession || row.barcode === scannedAccession));
       if (!item) throw new Error('No catalog copy found for this accession or barcode.');
       const { error } = await (supabase as any)
         .from('library_items')

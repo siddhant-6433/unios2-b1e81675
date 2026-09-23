@@ -33,6 +33,12 @@ const PAY_TYPES: { value: string; label: string }[] = [
   { value: "other",               label: "Other Charges" },
 ];
 
+// A consultant credit note is a non-cash settlement of a student's fee; it is
+// never an application-fee payment. Filing one as 'application_fee' mislabels
+// the receipt and inflates the student's "Application fee paid" (Pranjal Singh,
+// receipt N382), so the option is withheld in credit-note mode.
+const CREDIT_NOTE_PAY_TYPES = PAY_TYPES.filter(p => p.value !== "application_fee");
+
 // Payment modes the candidate's offline channel might use. The DB CHECK
 // constraint accepts ('cash','upi','bank_transfer','cheque','online','gateway')
 // — we expose these as user-friendly labels and pack any extra context
@@ -169,6 +175,13 @@ export function OfflinePaymentDialog({
   const [creditNoteId, setCreditNoteId] = useState<string>("");
   const isCreditNote = mode === CREDIT_NOTE_MODE;
   const selectedNote = creditNotes.find(n => n.id === creditNoteId) || null;
+  // For a lead the default type is 'application_fee'; a credit note must never
+  // carry that label, so normalise it away as soon as the mode is credit-note.
+  const feeTypeOptions = isCreditNote ? CREDIT_NOTE_PAY_TYPES : PAY_TYPES;
+
+  useEffect(() => {
+    if (isCreditNote && type === "application_fee") setType("other");
+  }, [isCreditNote, type]);
 
   // Load active consultants the first time the credit-note mode is opened.
   useEffect(() => {
@@ -246,6 +259,10 @@ export function OfflinePaymentDialog({
   const submitCreditNote = async (amt: number) => {
     if (!consultantId) { toast({ title: "Select a consultant", variant: "destructive" }); return; }
     if (!creditNoteId) { toast({ title: "Select a credit note", variant: "destructive" }); return; }
+    if (type === "application_fee") {
+      toast({ title: "Not allowed", description: "A consultant credit note cannot be filed as an Application Fee.", variant: "destructive" });
+      return;
+    }
     if (selectedNote && amt > selectedNote.remaining) {
       toast({ title: "Amount exceeds credit note balance", description: `Remaining ₹${selectedNote.remaining.toLocaleString("en-IN")}.`, variant: "destructive" });
       return;
@@ -499,7 +516,7 @@ export function OfflinePaymentDialog({
               <SelectField
                 value={type}
                 onValueChange={setType}
-                options={PAY_TYPES.map(p => ({ value: p.value, label: p.label }))}
+                options={feeTypeOptions.map(p => ({ value: p.value, label: p.label }))}
                 label="Fee Type"
                 allowEmpty={false}
               />

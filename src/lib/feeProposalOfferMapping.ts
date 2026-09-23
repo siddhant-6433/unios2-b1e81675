@@ -33,6 +33,7 @@ export interface OfferWaiverInsertDraft {
   term: string;
   amount: number;
   reason: string;
+  fee_category?: string | null;
   source_type: "fee_proposal";
   source_fee_proposal_id: string;
   source_fee_proposal_child_key: string;
@@ -83,6 +84,7 @@ export function buildOfferWaiversFromFeeProposalChild(source: FeeProposalSource)
       term,
       amount,
       reason: `Approved fee proposal${revision} - ${label}`,
+      fee_category: item?.category || null,
       source_type: "fee_proposal",
       source_fee_proposal_id: source.proposalId,
       source_fee_proposal_child_key: source.childKey,

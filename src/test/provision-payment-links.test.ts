@@ -12,9 +12,11 @@ describe("edge provisioner writes payment links", () => {
     expect(edgeFn).toContain("creditLinks");
     expect(edgeFn).toContain("const drawFrom = (");
     expect(edgeFn).toContain('.from("fee_ledger_payments").insert(');
-    // Payment ids are needed for attribution, so both queues select id.
-    expect(edgeFn).toMatch(/\.select\("id, amount"\)[\s\S]{0,200}"application_fee"/);
+    // Payment ids are needed for attribution, so the token queue selects id.
+    // (Application fees are booked onto their own head by the SQL
+    // reconcile_application_fee, not by this provisioner.)
     expect(edgeFn).toMatch(/\.select\("id, amount"\)[\s\S]{0,200}"token_fee"/);
+    expect(edgeFn).not.toMatch(/\.eq\("type", "application_fee"\)/);
   });
 
   it("drains credit already applied on an earlier run before attributing", () => {
@@ -25,6 +27,13 @@ describe("edge provisioner writes payment links", () => {
 
   it("never fails provisioning because the link insert failed", () => {
     expect(edgeFn).toContain("link insert failed");
+  });
+
+  it("still syncs offer waivers when the ledger already exists", () => {
+    expect(edgeFn).toContain("async function syncLedgerConcessions");
+    expect(edgeFn).toContain("if (newRows.length === 0)");
+    expect(edgeFn).toContain("await syncLedgerConcessions(db, studentId)");
+    expect(edgeFn).not.toMatch(/if \(newRows\.length === 0\) return 0;/);
   });
 });
 

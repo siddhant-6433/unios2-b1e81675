@@ -15,6 +15,7 @@ import {
   markWhatsAppInboundEvent,
   recordWhatsAppInboundEvent,
 } from "../_shared/whatsapp-inbound-events.ts";
+import { pickLeadForSchoolBrand } from "../_shared/schoolLeadBrand.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -225,12 +226,12 @@ Deno.serve(async (req) => {
     // ── Find or create the lead (mirrors whatsapp-ai-reply) ──────────────────
     const { data: existingLeads } = await admin
       .from("leads")
-      .select("id, counsellor_id, name, stage, person_role")
+      .select("id, counsellor_id, name, stage, person_role, campus_id, portal_brand, lead_institution_type, is_mirror")
       .or(`phone.eq.${fromDigits},phone.eq.${leadPhone},phone.eq.+${fromDigits}`)
       .eq("is_mirror", false)
-      .limit(1);
+      .limit(5);
 
-    let lead = existingLeads?.[0] || null;
+    let lead = pickLeadForSchoolBrand(existingLeads, "nimt");
 
     if (!lead) {
       // Same primitive the Meta webhook uses: promotes a bulk-imported

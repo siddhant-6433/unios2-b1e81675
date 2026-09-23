@@ -31,7 +31,7 @@ import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDi
 import { ApplicantDeadlineTicker } from "@/components/layout/ApplicantDeadlineTicker";
 import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { captureAttribution, trackPixelLead } from "@/lib/analytics";
-import { PORTAL_CONFIGS, type PortalId } from "@/components/apply/portalConfig";
+import { PORTAL_CONFIGS, pickLeadForPortal, type PortalId } from "@/components/apply/portalConfig";
 import { displayValue } from "@/lib/displayValue";
 
 type OnBehalfContext = {
@@ -65,6 +65,7 @@ function OtpLogin({
   onAuthenticated: (phone: string, name: string, onBehalf?: OnBehalfContext | null, portalId?: PortalId | null) => void;
 }) {
   const { toast } = useToast();
+  const portal = usePortal();
   const [phone, setPhone] = useState("");
 
   // Pre-fill phone from URL query parameter (e.g. ?phone=9876543210)
@@ -246,14 +247,14 @@ function OtpLogin({
         }
         onAuthenticated(phone, googleName || "Applicant");
       } else {
-        const { data: lead } = await supabase
+        const { data: leads } = await supabase
           .from("leads")
-          .select("name")
+          .select("name, campus_id, portal_brand, lead_institution_type, is_mirror")
           .eq("phone", phone)
           .eq("is_mirror", false)
           .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(5);
+        const lead = pickLeadForPortal(leads, portal.id);
 
         onAuthenticated(phone, lead?.name || "Applicant");
       }
@@ -296,7 +297,6 @@ function OtpLogin({
     }
   };
 
-  const portal = usePortal();
   const passwordLoginEnabled = portal.id === "nimt";
   const renderLoginLogo = (placement: "desktop" | "mobile") => {
     const compact = placement === "mobile";
