@@ -18,6 +18,8 @@ import { normalizeIsbn, findDuplicateReason as findDuplicateReasonPure, remember
 import { detectHeaderRow, forwardFill, resolveColumns, parseAmount, parseIntLoose, splitPlacePublisher, cleanAuthorName, normalizePublisher } from "@/lib/libraryImport";
 import { CatalogEntityManager } from "@/components/library/CatalogEntityManager";
 import { LibraryAccessMatrix, type AccessMatrixRow, type AccessPatch } from "@/components/library/LibraryAccessMatrix";
+import { PublisherNormalizer } from "@/components/library/PublisherNormalizer";
+import { BarcodeScanner } from "@/components/library/BarcodeScanner";
 
 type LibraryBook = {
   id: string;
@@ -226,6 +228,15 @@ function numberOrNull(value: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// Treat a scanned code as an ISBN only when it really looks like one, so a Code128
+// accession barcode isn't mistaken for a book number.
+function isbnFromScan(value: string): string {
+  const digits = normalizeIsbn(value);
+  if (digits.length === 13 && (digits.startsWith("978") || digits.startsWith("979"))) return digits;
+  if (digits.length === 10) return digits;
+  return "";
+}
+
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -396,6 +407,8 @@ const Library = () => {
   const [returnAccession, setReturnAccession] = useState("");
   const [inventoryForm, setInventoryForm] = useState({ accession_no: "", status: "available", shelf_location: "", rack: "" });
   const [digitizeForm, setDigitizeForm] = useState({ isbn: "", scanned_barcode: "", source: "barcode", raw_ocr_text: "" });
+  const [digitizePreview, setDigitizePreview] = useState<{ isbn: string; title?: string; authors?: string[]; publisher?: string } | null>(null);
+  const [scanner, setScanner] = useState<null | "issue" | "return" | "digitize">(null);
   const [reviewEdits, setReviewEdits] = useState<Record<string, DigitizationReviewEdit>>({});
   const [selectedDigitization, setSelectedDigitization] = useState<Set<string>>(new Set());
   const [enrichFilter, setEnrichFilter] = useState<"all" | "enriched" | "no_match" | "not_tried" | "missing_cover">("all");
@@ -1180,6 +1193,39 @@ const Library = () => {
     }
   };
 
+  // Camera scan → fills the right field for the active flow. Digitize additionally
+  // detects an ISBN, looks the book up, and previews the metadata before capture.
+  const handleScanDetected = async (value: string) => {
+    const kind = scanner;
+    if (kind === "issue") {
+      setCirculationForm((p) => ({ ...p, accession_no: value }));
+      toast({ title: "Barcode scanned", description: `${value} — enter the admission number, then Issue.` });
+      return;
+    }
+    if (kind === "return") {
+      setReturnAccession(value);
+      toast({ title: "Barcode scanned", description: `Ready to return ${value}.` });
+      return;
+    }
+    const isbn = isbnFromScan(value);
+    setDigitizeForm((p) => ({ ...p, scanned_barcode: value, isbn: isbn || p.isbn }));
+    setDigitizePreview(isbn ? { isbn } : null);
+    if (isbn) {
+      try {
+        const { data } = await supabase.functions.invoke("library-book-lookup", { body: { isbn } });
+        if (data?.book) {
+          setDigitizePreview({ isbn, title: data.book.title, authors: data.book.authors, publisher: data.book.publisher });
+        }
+      } catch {
+        /* preview is best-effort */
+      }
+    }
+    toast({
+      title: isbn ? "ISBN scanned" : "Barcode scanned",
+      description: isbn ? `ISBN ${isbn} — details matched below, then Capture.` : `${value} recorded as an accession/barcode.`,
+    });
+  };
+
   const handleInventoryUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canInventory) return;
@@ -1249,6 +1295,7 @@ const Library = () => {
       if (error) throw error;
       toast({ title: duplicateReason ? "Captured as duplicate" : "Digitization record captured", description: duplicateReason || (Object.keys(suggested).length ? "Metadata matched and queued for review." : "Queued for librarian review.") });
       setDigitizeForm({ isbn: "", scanned_barcode: "", source: "barcode", raw_ocr_text: "" });
+      setDigitizePreview(null);
       fetchLibrary();
       fetchDigitization();
     } catch (err: any) {
@@ -2066,12 +2113,30 @@ const Library = () => {
         </TabsContent>
 
         <TabsContent value="circulation" className="grid gap-4 xl:grid-cols-2">
-          {canCirculate && !scopeReady && <div className="xl:col-span-2"><ScopeNotice action="issue or return books" /></div>}
+          {canCirculate && !scopeReady && <div className="col-span-full"><ScopeNotice action="issue or return books" /></div>}
+          {canCirculate && (
+            <Card className="col-span-full lg:hidden">
+              <CardHeader className="pb-2"><CardTitle className="text-base">Scan with camera</CardTitle></CardHeader>
+              <CardContent className="grid grid-cols-2 gap-3">
+                <Button type="button" disabled={!scopeReady} className="h-14 text-base" onClick={() => setScanner("issue")}>
+                  <Barcode className="mr-2 h-5 w-5" /> Issue
+                </Button>
+                <Button type="button" variant="outline" disabled={!scopeReady} className="h-14 text-base" onClick={() => setScanner("return")}>
+                  <Barcode className="mr-2 h-5 w-5" /> Return
+                </Button>
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardHeader><CardTitle className="text-base">Issue Book</CardTitle></CardHeader>
             <CardContent>
               <form onSubmit={handleIssue} className="space-y-3">
-                <Input label="Accession / Barcode" value={circulationForm.accession_no} required disabled={!canCirculate || !scopeReady} onChange={(accession_no) => setCirculationForm((p) => ({ ...p, accession_no }))} />
+                <div className="flex items-end gap-2">
+                  <div className="min-w-0 flex-1"><Input label="Accession / Barcode" value={circulationForm.accession_no} required disabled={!canCirculate || !scopeReady} onChange={(accession_no) => setCirculationForm((p) => ({ ...p, accession_no }))} /></div>
+                  <Button type="button" variant="outline" className="h-10 shrink-0" disabled={!canCirculate || !scopeReady} onClick={() => setScanner("issue")}>
+                    <Barcode className="mr-2 h-4 w-4" /> <span className="hidden sm:inline">Scan</span>
+                  </Button>
+                </div>
                 <Input label="Student Admission No." value={circulationForm.admission_no} required disabled={!canCirculate || !scopeReady} onChange={(admission_no) => setCirculationForm((p) => ({ ...p, admission_no }))} />
                 <div className="rounded-xl border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                   <p className="font-medium text-foreground">Borrowing rule</p>
@@ -2094,7 +2159,10 @@ const Library = () => {
             <CardHeader><CardTitle className="text-base">Return Book</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <form onSubmit={handleReturn} className="flex gap-2">
-                <input value={returnAccession} disabled={!canCirculate || !scopeReady} onChange={(e) => setReturnAccession(e.target.value)} placeholder="Accession or barcode" className="flex-1 rounded-xl border border-input bg-background px-3 py-2 text-sm" />
+                <input value={returnAccession} disabled={!canCirculate || !scopeReady} onChange={(e) => setReturnAccession(e.target.value)} placeholder="Accession or barcode" className="min-w-0 flex-1 rounded-xl border border-input bg-background px-3 py-2 text-sm" />
+                <Button type="button" variant="outline" disabled={!canCirculate || !scopeReady} onClick={() => setScanner("return")}>
+                  <Barcode className="h-4 w-4" /> <span className="hidden sm:inline">Scan</span>
+                </Button>
                 <Button type="submit" disabled={!canCirculate || !scopeReady || saving === "return"}>
                   {saving === "return" ? <ButtonOrb state="working" onFilled /> : <RotateCcw className="mr-2 h-4 w-4" />}
                   Return
@@ -2132,6 +2200,19 @@ const Library = () => {
               <CardHeader><CardTitle className="text-base">Capture Offline Record</CardTitle></CardHeader>
               <CardContent>
                 <form onSubmit={handleDigitize} className="space-y-3">
+                  <Button type="button" className="h-12 w-full text-base" disabled={!canDigitize || !scopeReady} onClick={() => setScanner("digitize")}>
+                    <Barcode className="mr-2 h-5 w-5" /> Scan ISBN / barcode
+                  </Button>
+                  {digitizePreview && (
+                    <div className="rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-xs">
+                      <p className="font-medium text-foreground">{digitizePreview.title || "ISBN detected"}</p>
+                      <p className="text-muted-foreground">
+                        ISBN {digitizePreview.isbn}
+                        {digitizePreview.authors?.length ? ` · ${digitizePreview.authors.join(", ")}` : ""}
+                        {digitizePreview.publisher ? ` · ${digitizePreview.publisher}` : ""}
+                      </p>
+                    </div>
+                  )}
                   <Select label="Source" value={digitizeForm.source} disabled={!canDigitize || !scopeReady} options={["barcode", "cover_photo", "spine_photo", "csv_import", "manual"]} onChange={(source) => setDigitizeForm((p) => ({ ...p, source }))} />
                   <Input label="ISBN" value={digitizeForm.isbn} disabled={!canDigitize || !scopeReady} onChange={(isbn) => setDigitizeForm((p) => ({ ...p, isbn }))} />
                   <Input label="Scanned Barcode" value={digitizeForm.scanned_barcode} disabled={!canDigitize || !scopeReady} onChange={(scanned_barcode) => setDigitizeForm((p) => ({ ...p, scanned_barcode }))} />
@@ -2410,7 +2491,8 @@ const Library = () => {
           />
         </TabsContent>
 
-        <TabsContent value="publishers">
+        <TabsContent value="publishers" className="space-y-4">
+          <PublisherNormalizer canManage={canCatalog} active={activeTab === "publishers"} />
           <CatalogEntityManager
             nounSingular="publisher" nounPlural="publishers" canManage={canCatalog} active={activeTab === "publishers"}
             listRpc="library_list_publishers" dupPairsRpc="library_publisher_duplicate_pairs"
@@ -2779,6 +2861,13 @@ const Library = () => {
           )}
         </TabsContent>
       </Tabs>
+
+      <BarcodeScanner
+        open={scanner !== null}
+        title={scanner === "issue" ? "Scan book to issue" : scanner === "return" ? "Scan book to return" : "Scan ISBN or barcode"}
+        onClose={() => setScanner(null)}
+        onDetected={handleScanDetected}
+      />
     </div>
   );
 };

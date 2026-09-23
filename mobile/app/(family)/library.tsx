@@ -74,7 +74,10 @@ export default function LibraryScreen() {
   const [auditStatus, setAuditStatus] = useState('available');
   const [capturing, setCapturing] = useState(false);
 
-  const canOperate = role === 'librarian' || role === 'super_admin';
+  // Operate is derived from the server: anyone the access matrix (or the librarian
+  // campus fallback) lets catalog a branch can scan. Falls back to role for the
+  // first render before the branch check returns.
+  const [canOperate, setCanOperate] = useState(role === 'librarian' || role === 'super_admin');
 
   const fetchLibrary = useCallback(async () => {
     setLoading(true);
@@ -87,26 +90,14 @@ export default function LibraryScreen() {
       user?.id
         ? (supabase as any).from('library_members').select('id').eq('user_id', user.id).maybeSingle()
         : Promise.resolve({ data: null }),
-      role === 'super_admin'
-        ? (supabase as any)
-            .from('library_branches')
-            .select('id, name, code')
-            .eq('active', true)
-            .order('name')
-        : canOperate
-        ? (supabase as any)
-            .from('library_staff_assignments')
-            .select('branch_id, library_branches(id, name, code)')
-            .eq('active', true)
-        : Promise.resolve({ data: [] }),
+      (supabase as any).rpc('library_my_branches', { _action: 'catalog' }),
     ]);
 
     if (itemRes.data) setItems(itemRes.data);
-    const assignedBranches = role === 'super_admin'
-      ? (branchRes.data || [])
-      : (branchRes.data || []).map((row: any) => row.library_branches).filter(Boolean);
-    setBranches(assignedBranches);
-    setSelectedBranchId((current) => current || assignedBranches[0]?.id || '');
+    const operableBranches = (branchRes.data || []) as LibraryBranch[];
+    setBranches(operableBranches);
+    setCanOperate(operableBranches.length > 0 || role === 'super_admin');
+    setSelectedBranchId((current) => current || operableBranches[0]?.id || '');
 
     const memberId = memberRes.data?.id;
     if (memberId) {
@@ -121,7 +112,7 @@ export default function LibraryScreen() {
       setLoans([]);
     }
     setLoading(false);
-  }, [canOperate, role, user?.id]);
+  }, [role, user?.id]);
 
   useEffect(() => {
     fetchLibrary();
@@ -158,7 +149,13 @@ export default function LibraryScreen() {
     setCapturing(true);
     try {
       if (!selectedBranchId) throw new Error('Select or assign a library before capturing records.');
-      const isbn = normalizeIsbn(value);
+      // Only an ISBN-shaped code triggers a metadata lookup; a Code128 accession
+      // barcode is stored as the barcode/accession instead.
+      const isbnDigits = normalizeIsbn(value);
+      const isbn = (isbnDigits.length === 13 && (isbnDigits.startsWith('978') || isbnDigits.startsWith('979')))
+        || isbnDigits.length === 10
+        ? isbnDigits
+        : '';
       let suggested = {};
       let confidence = 0.2;
       if (isbn) {

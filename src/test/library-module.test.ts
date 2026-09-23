@@ -27,6 +27,16 @@ const libraryQueuePerfMigration = readFileSync(
   "supabase/migrations/20260922180544_library_digitization_queue_perf_and_grants.sql",
   "utf8",
 );
+const publisherCanonicalMigration = readFileSync(
+  "supabase/migrations/20260923044733_library_publisher_canonicalization.sql",
+  "utf8",
+);
+const myBranchesMigration = readFileSync(
+  "supabase/migrations/20260923052956_library_my_branches_rpc.sql",
+  "utf8",
+);
+const barcodeScanner = readFileSync("src/components/library/BarcodeScanner.tsx", "utf8");
+const publisherNormalizer = readFileSync("src/components/library/PublisherNormalizer.tsx", "utf8");
 
 describe("library module", () => {
   it("adds librarian as a first-class role and exposes it in admin role surfaces", () => {
@@ -195,7 +205,9 @@ describe("library module", () => {
     expect(mobileLibrary).toContain("library_issue_by_admission_no");
     expect(mobileLibrary).toContain("library_return_by_accession");
     expect(mobileLibrary).toContain("library_digitization_records");
-    expect(mobileLibrary).toContain("library_staff_assignments");
+    expect(mobileLibrary).toContain("library_my_branches");
+    // Only ISBN-shaped scans trigger a metadata lookup.
+    expect(mobileLibrary).toContain("startsWith('978')");
     expect(mobileLibrary).toContain("branch_id: selectedBranchId");
     expect(mobileLibrary).toContain("library-book-lookup");
     expect(mobileLibrary).toContain("canOperate ? 'Scan, digitize, and audit books' : 'Search catalog and current loans'");
@@ -278,6 +290,43 @@ describe("library module", () => {
     // Postgres grants EXECUTE to PUBLIC by default; revoke it so anon can't reach them.
     expect(libraryQueuePerfMigration).toContain("REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC");
     expect(libraryQueuePerfMigration).toContain("REVOKE EXECUTE ON FUNCTION %s FROM anon");
+  });
+
+  it("clubs publisher variants through a seeded alias dictionary and a review surface", () => {
+    expect(publisherCanonicalMigration).toContain("CREATE TABLE IF NOT EXISTS public.library_publisher_aliases");
+    expect(publisherCanonicalMigration).toContain("public.library_canonical_publisher");
+    expect(publisherCanonicalMigration).toContain("public.library_apply_publisher_canonicalization");
+    expect(publisherCanonicalMigration).toContain("public.library_set_publisher_alias");
+    expect(publisherCanonicalMigration).toContain("ON CONFLICT (alias_norm) DO UPDATE");
+    // Seeded shorthand handled.
+    expect(publisherCanonicalMigration).toContain("Jaypee Brothers Medical Publishers");
+    expect(publisherCanonicalMigration).toContain("Eastern Book Company");
+    expect(publisherCanonicalMigration).toContain("All India Reporter");
+    // upsert now canonicalises before fuzzy matching.
+    expect(publisherCanonicalMigration).toContain("v_name := coalesce(public.library_canonical_publisher(_name), trim(_name))");
+
+    expect(libraryPage).toContain("PublisherNormalizer");
+    expect(publisherNormalizer).toContain("library_publisher_usage");
+    expect(publisherNormalizer).toContain("library_apply_publisher_canonicalization");
+    expect(publisherNormalizer).toContain("library_set_publisher_alias");
+  });
+
+  it("scans barcodes from the phone camera on web and mobile", () => {
+    // Web scanner with native BarcodeDetector + ZXing fallback.
+    expect(barcodeScanner).toContain("BarcodeDetector");
+    expect(barcodeScanner).toContain('import("@zxing/browser")');
+    expect(barcodeScanner).toContain("facingMode");
+    // Wired into circulation + digitization.
+    expect(libraryPage).toContain("BarcodeScanner");
+    expect(libraryPage).toContain("handleScanDetected");
+    expect(libraryPage).toContain('setScanner("issue")');
+    expect(libraryPage).toContain('setScanner("return")');
+    expect(libraryPage).toContain('setScanner("digitize")');
+    expect(libraryPage).toContain("isbnFromScan");
+    expect(libraryPage).toContain("Scan ISBN / barcode");
+    // Server RPC that resolves operable branches without an explicit assignment.
+    expect(myBranchesMigration).toContain("public.library_my_branches");
+    expect(myBranchesMigration).toContain("library_accessible_branch_ids");
   });
 
   it("normalizes external ISBN metadata lookup through one edge function", () => {
