@@ -11,6 +11,9 @@ import { MyPerformancePanel } from "@/components/hr/MyPerformancePanel";
 import { ChangeRequestForm } from "@/components/hr/ChangeRequestForm";
 import { RegularisationRequestForm } from "@/components/hr/RegularisationRequestForm";
 import { MyEngagementPanel } from "@/components/hr/MyEngagementPanel";
+import { MyPayslipsPanel } from "@/components/hr/MyPayslipsPanel";
+import { MyAssetsPanel } from "@/components/hr/MyAssetsPanel";
+import { MyLeaveCalendarPanel } from "@/components/hr/MyLeaveCalendarPanel";
 
 // HR self-service. This is the entire app for the non_teaching role, and the
 // "my own record" view for everyone else — hence permission hr:self, which is
@@ -178,9 +181,12 @@ const MyHr = () => {
           {[
             ["attendance", "My Attendance"],
             ["leave", "My Leave"],
+            ["leave-calendar", "Leave Calendar"],
+            ["payslips", "My Payslips"],
             ["expenses", "My Expenses"],
             ["performance", "My Performance"],
             ["requests", "Requests"],
+            ["assets", "My Assets"],
             ["engagement", "Announcements"],
             ["directory", "Directory"],
             ["holidays", "Holidays"],
@@ -301,6 +307,14 @@ const MyHr = () => {
           )}
         </TabsContent>
 
+        <TabsContent value="leave-calendar" className="mt-6">
+          <MyLeaveCalendarPanel />
+        </TabsContent>
+
+        <TabsContent value="payslips" className="mt-6">
+          <MyPayslipsPanel />
+        </TabsContent>
+
         <TabsContent value="expenses" className="mt-6">
           <MyExpensesPanel />
         </TabsContent>
@@ -315,6 +329,10 @@ const MyHr = () => {
           </p>
           <ChangeRequestForm />
           <RegularisationRequestForm />
+        </TabsContent>
+
+        <TabsContent value="assets" className="mt-6">
+          <MyAssetsPanel />
         </TabsContent>
 
         <TabsContent value="engagement" className="mt-6">

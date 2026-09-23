@@ -173,6 +173,8 @@ const hrSubMenu: MenuItem[] = [
   { title: "Announcements", url: "/hr-announcements", icon: Megaphone, permission: "hr:engage_manage" },
   { title: "Helpdesk", url: "/hr-helpdesk", icon: MessageSquare, permission: "hr:helpdesk_manage" },
   { title: "Reports", url: "/hr-reports", icon: BarChart3, permission: "hr:view" },
+  { title: "Org Chart", url: "/hr-org", icon: GitMerge, permission: "hr:view" },
+  { title: "Assets", url: "/hr-assets", icon: FolderOpen, permission: "hr:assets_manage" },
   { title: "Settings", url: "/hr-settings", icon: Settings, permission: "hr:employees_edit" },
 ];
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { UserPlus, MessageSquare, ExternalLink, Sparkles, Briefcase, CheckCircle2, XCircle, Clock, Search, CalendarClock, FileText } from "lucide-react";
+import { UserPlus, MessageSquare, ExternalLink, Sparkles, Briefcase, CheckCircle2, XCircle, Clock, Search, CalendarClock, FileText, Star, ClipboardCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
@@ -44,7 +44,22 @@ interface InterviewRow {
   status: string;
   location: string | null;
   meeting_link: string | null;
+  rating: number | null;
+  recommend: string | null;
+  feedback_notes: string | null;
+  feedback_at: string | null;
+  duration_mins: number | null;
+  panel: string[] | null;
 }
+
+type Recommend = "strong_yes" | "yes" | "no" | "strong_no";
+
+const RECOMMEND_LABEL: Record<string, string> = {
+  strong_yes: "Strong yes",
+  yes: "Yes",
+  no: "No",
+  strong_no: "Strong no",
+};
 
 const STATUS_TABS: { key: Status; label: string }[] = [
   { key: "all", label: "All" },
@@ -103,6 +118,13 @@ const HrJobApplicants = () => {
   const [interviewMeetingLink, setInterviewMeetingLink] = useState("");
   const [interviewNotes, setInterviewNotes] = useState("");
   const [interviewSaving, setInterviewSaving] = useState(false);
+
+  // Interview feedback
+  const [feedbackFor, setFeedbackFor] = useState<string | null>(null);
+  const [feedbackRating, setFeedbackRating] = useState(0);
+  const [feedbackRecommend, setFeedbackRecommend] = useState<Recommend | "">("");
+  const [feedbackNotes, setFeedbackNotes] = useState("");
+  const [feedbackSaving, setFeedbackSaving] = useState(false);
 
   // Offer letter
   const [showOfferForm, setShowOfferForm] = useState(false);
@@ -168,6 +190,10 @@ const HrJobApplicants = () => {
     setInterviewLocation("");
     setInterviewMeetingLink("");
     setInterviewNotes("");
+    setFeedbackFor(null);
+    setFeedbackRating(0);
+    setFeedbackRecommend("");
+    setFeedbackNotes("");
     setShowOfferForm(false);
     setOfferRole(row.desired_role || "");
     setOfferCtc("");
@@ -180,7 +206,7 @@ const HrJobApplicants = () => {
   async function fetchInterviews(applicantId: string) {
     const { data, error } = await supabase
       .from("interviews" as any)
-      .select("id, scheduled_at, mode, status, location, meeting_link")
+      .select("id, scheduled_at, mode, status, location, meeting_link, rating, recommend, feedback_notes, feedback_at, duration_mins, panel")
       .eq("job_applicant_id", applicantId)
       .order("scheduled_at", { ascending: false });
     if (error) {
@@ -225,6 +251,28 @@ const HrJobApplicants = () => {
     setInterviewNotes("");
     fetchInterviews(active.id);
     fetchAll();
+  }
+
+  async function submitFeedback() {
+    if (!active || !feedbackFor || !feedbackRating || !feedbackRecommend) return;
+    setFeedbackSaving(true);
+    const { error } = await supabase.rpc("record_interview_feedback" as any, {
+      _interview_id: feedbackFor,
+      _rating: feedbackRating,
+      _recommend: feedbackRecommend,
+      _notes: feedbackNotes || null,
+    });
+    setFeedbackSaving(false);
+    if (error) {
+      toast({ title: "Failed to record feedback", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Feedback recorded" });
+    setFeedbackFor(null);
+    setFeedbackRating(0);
+    setFeedbackRecommend("");
+    setFeedbackNotes("");
+    fetchInterviews(active.id);
   }
 
   async function generateOfferLetter() {
@@ -517,20 +565,115 @@ const HrJobApplicants = () => {
                   <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
                     <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Scheduled interviews</p>
                     {interviews.map(iv => (
-                      <div key={iv.id} className="flex items-center justify-between text-[12.5px]">
-                        <span>
-                          {new Date(iv.scheduled_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
-                          {" · "}<span className="capitalize">{iv.mode.replace("_", " ")}</span>
-                          {" · "}<span className="capitalize text-muted-foreground">{iv.status}</span>
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 px-2 text-[11px]"
-                          onClick={() => navigate(`/whatsapp-inbox?phone=${encodeURIComponent(active.phone || "")}`)}
-                        >
-                          <MessageSquare className="h-3 w-3 mr-1" /> Notify on WhatsApp
-                        </Button>
+                      <div key={iv.id} className="space-y-2 border-b border-border/50 pb-2 last:border-0 last:pb-0">
+                        <div className="flex items-center justify-between text-[12.5px]">
+                          <span>
+                            {new Date(iv.scheduled_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                            {" · "}<span className="capitalize">{iv.mode.replace("_", " ")}</span>
+                            {" · "}<span className="capitalize text-muted-foreground">{iv.status}</span>
+                            {iv.duration_mins != null && (
+                              <>{ " · " }<span className="text-muted-foreground">{iv.duration_mins} min</span></>
+                            )}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            {canInterview && iv.status === "scheduled" && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 px-2 text-[11px]"
+                                onClick={() => {
+                                  setFeedbackFor(feedbackFor === iv.id ? null : iv.id);
+                                  setFeedbackRating(iv.rating || 0);
+                                  setFeedbackRecommend((iv.recommend as Recommend) || "");
+                                  setFeedbackNotes(iv.feedback_notes || "");
+                                }}
+                              >
+                                <ClipboardCheck className="h-3 w-3 mr-1" /> Record feedback
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-2 text-[11px]"
+                              onClick={() => navigate(`/whatsapp-inbox?phone=${encodeURIComponent(active.phone || "")}`)}
+                            >
+                              <MessageSquare className="h-3 w-3 mr-1" /> Notify on WhatsApp
+                            </Button>
+                          </div>
+                        </div>
+
+                        {iv.rating != null && (
+                          <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
+                            <span className="inline-flex items-center gap-0.5" title={`Rating ${iv.rating}/5`}>
+                              {[1, 2, 3, 4, 5].map(n => (
+                                <Star
+                                  key={n}
+                                  className={`h-3 w-3 ${n <= (iv.rating || 0) ? "fill-amber-400 text-amber-400" : "text-muted-foreground/40"}`}
+                                />
+                              ))}
+                            </span>
+                            {iv.recommend && (
+                              <Badge className="bg-pastel-blue text-foreground/80 border-0 text-[10px]">
+                                {RECOMMEND_LABEL[iv.recommend] || iv.recommend}
+                              </Badge>
+                            )}
+                            {iv.feedback_notes && <span className="italic">“{iv.feedback_notes}”</span>}
+                          </div>
+                        )}
+
+                        {feedbackFor === iv.id && (
+                          <div className="rounded-md border border-border bg-background p-3 space-y-3">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Rating</label>
+                                <div className="mt-1.5 flex items-center gap-1">
+                                  {[1, 2, 3, 4, 5].map(n => (
+                                    <button
+                                      key={n}
+                                      type="button"
+                                      onClick={() => setFeedbackRating(n)}
+                                      className="p-0.5"
+                                      aria-label={`Rate ${n} of 5`}
+                                    >
+                                      <Star className={`h-4 w-4 ${n <= feedbackRating ? "fill-amber-400 text-amber-400" : "text-muted-foreground/40"}`} />
+                                    </button>
+                                  ))}
+                                  <span className="ml-1 text-[11.5px] text-muted-foreground">{feedbackRating || "—"}/5</span>
+                                </div>
+                              </div>
+                              <div>
+                                <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Recommendation</label>
+                                <select
+                                  value={feedbackRecommend}
+                                  onChange={e => setFeedbackRecommend(e.target.value as Recommend)}
+                                  className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                                >
+                                  <option value="">Select…</option>
+                                  <option value="strong_yes">Strong yes</option>
+                                  <option value="yes">Yes</option>
+                                  <option value="no">No</option>
+                                  <option value="strong_no">Strong no</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Notes</label>
+                              <Textarea
+                                value={feedbackNotes}
+                                onChange={e => setFeedbackNotes(e.target.value)}
+                                placeholder="Interview observations…"
+                                className="mt-1"
+                                rows={2}
+                              />
+                            </div>
+                            <div className="flex justify-end gap-2">
+                              <Button size="sm" variant="ghost" onClick={() => setFeedbackFor(null)}>Cancel</Button>
+                              <Button size="sm" onClick={submitFeedback} disabled={feedbackSaving || !feedbackRating || !feedbackRecommend}>
+                                {feedbackSaving ? "Saving..." : "Submit feedback"}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

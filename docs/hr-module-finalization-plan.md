@@ -323,3 +323,36 @@ logic, source-guard tests for security invariants, build + lint, and a stakehold
 
 ### Testing caveat
 The `.env` targets the live production Supabase and no test credentials are available, so authenticated browser QA across stakeholder roles could not be run here. Coverage relies on build + unit/guard tests; the stakeholder matrix in §7 is the script for a credentialed pass.
+
+---
+
+## 13. Phase 2 — payroll completion + core-HR depth
+
+Shipped on top of §12.
+
+### Backend — 3 migrations
+| Migration (slug) | What it does |
+|---|---|
+| `hr_payroll_payslips_adjustments` | `my_payslips()` + `payslip_detail()` read RPCs; self-read RLS limited to **released** (locked/paid) cycles; `apply_payroll_adjustments()` writes LOP days from approved unpaid leave and approved expense claims as ad-hoc earnings. |
+| `hr_interview_feedback` | Feedback columns on `interviews` (rating, recommendation, notes, panel, duration) + `record_interview_feedback()`; the unused `interview_rounds`/`interview_feedback` pair marked deprecated. |
+| `hr_assets_and_org` | Asset categories/register/assignments (one active assignment per asset), `assign_asset`/`return_asset`/`hr_asset_summary`, `asset_assignments_inbox` view, and `hr_org_chart()`; `hr:assets_manage`. |
+
+### Frontend
+- **Payslips:** `PayslipDialog` (+pure `src/lib/payslip.ts`) with PDF download; `MyPayslipsPanel` in MyHr; a "Payslip" action on every payroll line.
+- **Payroll reconciliation:** "Leave & expenses" button on a run applies LOP + reimbursements before calculating.
+- **Leave calendar:** `LeaveCalendarPanel` (HR month grid from `leave_calendar`) and `MyLeaveCalendarPanel` (self).
+- **Org chart:** `OrgChartPanel` + `/hr-org` from `hr_org_chart()`.
+- **Assets:** `AssetsPanel` (register, assign/return, summary) + `/hr-assets`, `MyAssetsPanel` in MyHr; `hr:assets_manage`.
+- **Recruitment:** interview feedback capture (rating/recommendation/notes) inside the applicant dialog.
+
+### Verification (phase 2)
+- `npm run build` — passes.
+- New pure-logic tests: payslip (12), leave calendar (17), assets (12) → 41.
+- `src/test/hr-phase2-guardrails.test.ts` (13 tests) locks in the new RPCs, released-only payslip visibility, asset permissioning, and routes.
+- `npm test` — failure set still identical to the `origin/main` baseline (17 files / 19 tests, unrelated); **+59 passing tests** vs phase 1.
+- `npm run lint:access` — no new violations.
+
+### Still deferred
+- F&F settlement computation; expense-advance settle-ups; encashment/comp-off.
+- Custom fields, e-sign, assets↔payroll depreciation.
+- Mobile: consolidate the duplicated leave modal and wire the stubbed Finances/Documents tabs (untestable here without a simulator/credentials).
