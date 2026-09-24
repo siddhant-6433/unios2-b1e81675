@@ -7,13 +7,11 @@ import {
   Barcode,
   Bell,
   BookOpen,
-  Briefcase,
   Calendar,
   CalendarOff,
   Camera,
   CheckCircle2,
   Clock,
-  FileText,
   IndianRupee,
   MessageCircle,
   Phone,
@@ -316,28 +314,8 @@ function WorkScaffold({ title, subtitle, children }: { title: string; subtitle: 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <ScreenHeader title={title} subtitle={subtitle} />
         {children}
-        {/* HR self-service is available to every employee, whatever their role
-            workspace is — counsellors and others previously had no HR entry. */}
-        <MyHrSection />
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-function MyHrSection() {
-  return (
-    <>
-      <SectionTitle title="HR & payroll" />
-      <View style={styles.actionGrid}>
-        <ActionTile icon={CalendarOff} label="My HR" subtitle="Leave, attendance, docs" tone="purple" onPress={() => router.push('/(staff)/work/hr' as any)} />
-        <ActionTile icon={Clock} label="Punch" subtitle="Mark attendance" tone="green" onPress={() => router.push('/(staff)/work/punch' as any)} />
-        <ActionTile icon={IndianRupee} label="Payslips" subtitle="Your salary slips" tone="blue" onPress={() => router.push('/(staff)/work/payslips' as any)} />
-        <ActionTile icon={Briefcase} label="Expenses" subtitle="Claims and advances" tone="orange" onPress={() => router.push('/(staff)/work/expenses' as any)} />
-        <ActionTile icon={CalendarOff} label="Comp Off" subtitle="Credits and balance" tone="pink" onPress={() => router.push('/(staff)/work/comp-off' as any)} />
-        <ActionTile icon={IndianRupee} label="Encashment" subtitle="Cash out leave" tone="yellow" onPress={() => router.push('/(staff)/work/encashment' as any)} />
-        <ActionTile icon={FileText} label="Documents" subtitle="Your uploaded files" tone="neutral" onPress={() => router.push('/(staff)/work/documents' as any)} />
-      </View>
-    </>
   );
 }
 

@@ -16,11 +16,15 @@ import {
   Fingerprint,
   CheckCircle,
   Calendar,
+  CalendarOff,
   MessageCircle,
   Users,
   MapPin,
   ChevronRight,
   AlertCircle,
+  Briefcase,
+  FileText,
+  IndianRupee,
 } from 'lucide-react-native';
 import { useTheme } from '../../../theme/ThemeContext';
 import { spacing, radius } from '../../../theme/tokens';
@@ -275,6 +279,50 @@ function StaffHome({ userId, isAdmin }: { userId: string; isAdmin: boolean }) {
           icon={<Fingerprint size={20} color={colors.ink} />}
           label="Punch"
           onPress={() => router.push('/(staff)/work/punch' as any)}
+        />
+      </View>
+
+      {/* HR self-service lives here, on the employee's own Me tab — everything
+          about this employee: leave, payslips, expenses, comp-off, documents. */}
+      <Text style={[styles.sectionLabel, { color: colors.ink, marginTop: spacing.lg }]}>
+        HR
+      </Text>
+      <View style={styles.pinGrid}>
+        <Pin
+          colors={colors}
+          icon={<CalendarOff size={20} color={colors.ink} />}
+          label="My HR"
+          onPress={() => router.push('/(staff)/work/hr' as any)}
+        />
+        <Pin
+          colors={colors}
+          icon={<IndianRupee size={20} color={colors.ink} />}
+          label="Payslips"
+          onPress={() => router.push('/(staff)/work/payslips' as any)}
+        />
+        <Pin
+          colors={colors}
+          icon={<Briefcase size={20} color={colors.ink} />}
+          label="Expenses"
+          onPress={() => router.push('/(staff)/work/expenses' as any)}
+        />
+        <Pin
+          colors={colors}
+          icon={<CalendarOff size={20} color={colors.ink} />}
+          label="Comp Off"
+          onPress={() => router.push('/(staff)/work/comp-off' as any)}
+        />
+        <Pin
+          colors={colors}
+          icon={<IndianRupee size={20} color={colors.ink} />}
+          label="Encashment"
+          onPress={() => router.push('/(staff)/work/encashment' as any)}
+        />
+        <Pin
+          colors={colors}
+          icon={<FileText size={20} color={colors.ink} />}
+          label="Documents"
+          onPress={() => router.push('/(staff)/work/documents' as any)}
         />
       </View>
     </View>
