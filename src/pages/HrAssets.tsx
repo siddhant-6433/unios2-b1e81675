@@ -5,6 +5,7 @@
 // wiring the router needs.
 
 import { AssetsPanel } from "@/components/hr/AssetsPanel";
+import { AssetDepreciationPanel } from "@/components/hr/AssetDepreciationPanel";
 
 export default function HrAssets() {
   return (
@@ -16,6 +17,7 @@ export default function HrAssets() {
         </p>
       </div>
       <AssetsPanel />
+      <AssetDepreciationPanel />
     </div>
   );
 }
