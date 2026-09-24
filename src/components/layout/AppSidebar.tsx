@@ -162,7 +162,9 @@ const hrSubMenu: MenuItem[] = [
   // everyone else's. For the non_teaching role this is the entire app.
   { title: "My HR", url: "/my-hr", icon: UserCheck, permission: "hr:self" },
   { title: "HR Overview", url: "/hr", icon: Briefcase, permission: "hr:view" },
+  { title: "Job Openings", url: "/hr-job-openings", icon: Briefcase, permission: "hr:view" },
   { title: "Job Applicants", url: "/hr-job-applicants", icon: UserPlus, permission: "hr:view" },
+  { title: "Onboarding", url: "/hr-onboarding", icon: UserPlus, permission: "hr:view" },
   { title: "WhatsApp Inbox", url: "/whatsapp-inbox?scope=hr", icon: WhatsAppIcon, permission: "hr:view" },
   { title: "Attendance", url: "/hr-attendance", icon: Fingerprint, permission: "hr:view" },
   { title: "Leave Mgmt", url: "/hr-leave", icon: CalendarOff, permission: "hr:view" },

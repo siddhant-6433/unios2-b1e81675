@@ -204,6 +204,8 @@ export const STAFF_ROUTE_POLICIES: readonly RoutePolicy[] = [
   { path: "/hr-encashment", permission: "hr:leave_approve", staffOnly: true },
   { path: "/hr-custom-fields", permission: "hr:employees_edit", staffOnly: true },
   { path: "/hr-team", permission: "hr:employees_edit", staffOnly: true },
+  { path: "/hr-job-openings", permission: "hr:view", staffOnly: true },
+  { path: "/hr-onboarding", permission: "hr:view", staffOnly: true },
   { path: "/hr-settings", permission: "hr:employees_edit", staffOnly: true },
   { path: "/admin", anyPermission: ["campuses_courses:view", "user_management:view", "permissions:view"], staffOnly: true },
   { path: "/id-card-center", roles: ["super_admin", "principal", "office_admin", "office_assistant", "school_coordinator", "campus_admin"], anyPermission: ["hr:view"], staffOnly: true },

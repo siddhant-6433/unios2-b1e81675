@@ -1,17 +1,33 @@
-import { useEffect, useMemo, useState } from "react";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { UserPlus, MessageSquare, ExternalLink, Sparkles, Briefcase, CheckCircle2, XCircle, Clock, Search, CalendarClock, FileText, Star, ClipboardCheck } from "lucide-react";
+import { UserPlus, MessageSquare, ExternalLink, Sparkles, Briefcase, CheckCircle2, XCircle, Clock, Search, CalendarClock, FileText, Star, ClipboardCheck, Upload, Mail, UserCog, UserCheck, MapPin, Ban } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/contexts/PermissionContext";
 
-type Status = "all" | "new" | "reviewing" | "shortlisted" | "interview" | "rejected" | "hired" | "withdrawn";
+type Status = "all" | "new" | "reviewing" | "shortlisted" | "interview" | "offered" | "rejected" | "hired" | "withdrawn";
+
+type CommStage = "acknowledgement" | "interview_invite" | "offer" | "regret";
+
+const COMM_LABEL: Record<CommStage, string> = {
+  acknowledgement: "Acknowledgement",
+  interview_invite: "Interview invite",
+  offer: "Offer",
+  regret: "Regret",
+};
+
+const NONE = "__none__";
 
 interface JobApplicantRow {
   id: string;
@@ -35,6 +51,15 @@ interface JobApplicantRow {
   lead_source: string | null;
   last_message_preview: string | null;
   inbound_message_count: number | null;
+  notes: string | null;
+  rating: number | null;
+  stage_changed_at: string | null;
+  job_opening_id: string | null;
+  job_opening_title: string | null;
+  applied_via: string | null;
+  cover_note: string | null;
+  source_channel: string | null;
+  source_message_id: string | null;
 }
 
 interface InterviewRow {
@@ -50,6 +75,25 @@ interface InterviewRow {
   feedback_at: string | null;
   duration_mins: number | null;
   panel: string[] | null;
+  interviewer_id: string | null;
+}
+
+interface ProfileLite {
+  user_id: string;
+  display_name: string | null;
+}
+
+interface OptionRow {
+  id: string;
+  name: string;
+}
+
+interface HiringVenue {
+  id: string | null;
+  name: string | null;
+  address: string | null;
+  map_url: string | null;
+  kind: string | null;
 }
 
 type Recommend = "strong_yes" | "yes" | "no" | "strong_no";
@@ -67,8 +111,10 @@ const STATUS_TABS: { key: Status; label: string }[] = [
   { key: "reviewing", label: "Reviewing" },
   { key: "shortlisted", label: "Shortlisted" },
   { key: "interview", label: "Interview" },
+  { key: "offered", label: "Offered" },
   { key: "hired", label: "Hired" },
   { key: "rejected", label: "Rejected" },
+  { key: "withdrawn", label: "Withdrawn" },
 ];
 
 const STATUS_BADGE: Record<string, string> = {
@@ -76,6 +122,7 @@ const STATUS_BADGE: Record<string, string> = {
   reviewing: "bg-pastel-yellow text-foreground/80",
   shortlisted: "bg-pastel-purple text-foreground/80",
   interview: "bg-pastel-orange text-foreground/80",
+  offered: "bg-pastel-mint text-foreground/80",
   hired: "bg-pastel-green text-foreground/80",
   rejected: "bg-pastel-red text-foreground/80",
   withdrawn: "bg-muted text-muted-foreground",
@@ -92,10 +139,15 @@ function formatDate(s: string | null): string {
   return new Date(s).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+function displayName(p: ProfileLite): string {
+  return p.display_name || "Unnamed";
+}
+
 const HrJobApplicants = () => {
   const navigate = useNavigate();
   const { can } = usePermissions();
   const { toast } = useToast();
+  const resumeInputRef = useRef<HTMLInputElement | null>(null);
   const canRecruit = can("hr", "recruitment_edit");
   const canInterview = can("hr", "interviews_edit") || canRecruit;
   const canOffer = can("hr", "documents_generate") || canRecruit;
@@ -108,6 +160,15 @@ const HrJobApplicants = () => {
   const [activeNotes, setActiveNotes] = useState("");
   const [activeRole, setActiveRole] = useState("");
   const [saving, setSaving] = useState(false);
+  const [assignSaving, setAssignSaving] = useState(false);
+  const [resumeUploading, setResumeUploading] = useState(false);
+  const [commsSending, setCommsSending] = useState<CommStage | null>(null);
+
+  // Reference data
+  const [staff, setStaff] = useState<ProfileLite[]>([]);
+  const [venues, setVenues] = useState<HiringVenue[]>([]);
+  const [departments, setDepartments] = useState<OptionRow[]>([]);
+  const [campuses, setCampuses] = useState<OptionRow[]>([]);
 
   // Interview scheduling
   const [interviews, setInterviews] = useState<InterviewRow[]>([]);
@@ -117,6 +178,10 @@ const HrJobApplicants = () => {
   const [interviewLocation, setInterviewLocation] = useState("");
   const [interviewMeetingLink, setInterviewMeetingLink] = useState("");
   const [interviewNotes, setInterviewNotes] = useState("");
+  const [interviewInterviewerId, setInterviewInterviewerId] = useState("");
+  const [interviewPanel, setInterviewPanel] = useState<string[]>([]);
+  const [interviewDuration, setInterviewDuration] = useState("30");
+  const [interviewVenueId, setInterviewVenueId] = useState("");
   const [interviewSaving, setInterviewSaving] = useState(false);
 
   // Interview feedback
@@ -134,7 +199,31 @@ const HrJobApplicants = () => {
   const [offerLegalEntity, setOfferLegalEntity] = useState("");
   const [offerSaving, setOfferSaving] = useState(false);
 
+  // Convert to employee
+  const [showHireForm, setShowHireForm] = useState(false);
+  const [hireJoiningDate, setHireJoiningDate] = useState("");
+  const [hireCtc, setHireCtc] = useState("");
+  const [hireJobTitle, setHireJobTitle] = useState("");
+  const [hireDepartmentId, setHireDepartmentId] = useState("");
+  const [hireCampusId, setHireCampusId] = useState("");
+  const [hireSaving, setHireSaving] = useState(false);
+
+  useEffect(() => { loadRefData(); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchAll(); }, [tab]);
+
+  async function loadRefData() {
+    const [profilesRes, venuesRes, deptRes, campusRes] = await Promise.all([
+      supabase.from("profiles").select("user_id, display_name").order("display_name"),
+      supabase.from("hiring_venues" as any).select("id, name, address, map_url, kind").order("name"),
+      supabase.from("departments").select("id, name").order("name"),
+      supabase.from("campuses").select("id, name").order("name"),
+    ]);
+    setStaff(((profilesRes.data as any[]) || []).filter(p => p.user_id));
+    setVenues((venuesRes.data as any[]) || []);
+    setDepartments((deptRes.data as any[]) || []);
+    setCampuses((campusRes.data as any[]) || []);
+  }
 
   async function fetchAll() {
     setLoading(true);
@@ -176,13 +265,15 @@ const HrJobApplicants = () => {
       (r.name || "").toLowerCase().includes(q)
       || (r.phone || "").toLowerCase().includes(q)
       || (r.desired_role || "").toLowerCase().includes(q)
+      || (r.job_opening_title || "").toLowerCase().includes(q)
+      || (r.assigned_to_name || "").toLowerCase().includes(q)
       || (r.last_message_preview || "").toLowerCase().includes(q)
     );
   }, [items, search]);
 
   function openDetail(row: JobApplicantRow) {
     setActive(row);
-    setActiveNotes("");
+    setActiveNotes(row.notes || "");
     setActiveRole(row.desired_role || "");
     setShowInterviewForm(false);
     setInterviewDateTime("");
@@ -190,6 +281,10 @@ const HrJobApplicants = () => {
     setInterviewLocation("");
     setInterviewMeetingLink("");
     setInterviewNotes("");
+    setInterviewInterviewerId("");
+    setInterviewPanel([]);
+    setInterviewDuration("30");
+    setInterviewVenueId("");
     setFeedbackFor(null);
     setFeedbackRating(0);
     setFeedbackRecommend("");
@@ -199,6 +294,12 @@ const HrJobApplicants = () => {
     setOfferCtc("");
     setOfferJoiningDate("");
     setOfferLegalEntity("");
+    setShowHireForm(false);
+    setHireJoiningDate("");
+    setHireCtc("");
+    setHireJobTitle(row.desired_role || "");
+    setHireDepartmentId("");
+    setHireCampusId("");
     setInterviews([]);
     fetchInterviews(row.id);
   }
@@ -206,7 +307,7 @@ const HrJobApplicants = () => {
   async function fetchInterviews(applicantId: string) {
     const { data, error } = await supabase
       .from("interviews" as any)
-      .select("id, scheduled_at, mode, status, location, meeting_link, rating, recommend, feedback_notes, feedback_at, duration_mins, panel")
+      .select("id, scheduled_at, mode, status, location, meeting_link, rating, recommend, feedback_notes, feedback_at, duration_mins, panel, interviewer_id")
       .eq("job_applicant_id", applicantId)
       .order("scheduled_at", { ascending: false });
     if (error) {
@@ -216,39 +317,101 @@ const HrJobApplicants = () => {
     setInterviews((data as any[]) || []);
   }
 
+  async function moveApplicant(id: string, status: string) {
+    setSaving(true);
+    const { error } = await supabase.rpc("move_job_applicant" as any, {
+      _applicant_id: id,
+      _status: status,
+      _note: null,
+    });
+    setSaving(false);
+    if (error) {
+      toast({ title: "Update failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Updated", description: `Status changed to ${status}` });
+    setActive(null);
+    fetchAll();
+  }
+
+  async function assignApplicant(userId: string | null) {
+    if (!active) return;
+    setAssignSaving(true);
+    const { error } = await supabase.rpc("assign_job_applicant" as any, {
+      _applicant_id: active.id,
+      _user_id: userId,
+    });
+    setAssignSaving(false);
+    if (error) {
+      toast({ title: "Assignment failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    const name = userId ? staff.find(s => s.user_id === userId)?.display_name || "recruiter" : null;
+    setActive({ ...active, assigned_to: userId, assigned_to_name: name });
+    toast({ title: userId ? `Assigned to ${name}` : "Unassigned" });
+    fetchAll();
+  }
+
+  async function uploadResume(file: File) {
+    if (!active) return;
+    setResumeUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("filename", file.name);
+      fd.append("prefix", `resumes/${active.id}`);
+      const { data, error } = await supabase.functions.invoke("r2-upload", { body: fd });
+      if (error) throw new Error(error.message || "Upload failed");
+      const url = (data as { url?: string; error?: string } | null)?.url;
+      if (!url) throw new Error((data as { error?: string } | null)?.error || "Upload returned no URL");
+
+      const { error: updErr } = await supabase
+        .from("job_applicants" as any)
+        .update({ resume_url: url })
+        .eq("id", active.id);
+      if (updErr) throw updErr;
+
+      setActive({ ...active, resume_url: url });
+      toast({ title: "Resume uploaded" });
+      fetchAll();
+    } catch (e: any) {
+      toast({ title: "Resume upload failed", description: String(e?.message || e), variant: "destructive" });
+    } finally {
+      setResumeUploading(false);
+      if (resumeInputRef.current) resumeInputRef.current.value = "";
+    }
+  }
+
   async function scheduleInterview() {
     if (!active || !interviewDateTime) return;
     setInterviewSaving(true);
-    const { data: userData } = await supabase.auth.getUser();
-    const { error } = await supabase.from("interviews" as any).insert({
-      job_applicant_id: active.id,
-      scheduled_at: new Date(interviewDateTime).toISOString(),
-      mode: interviewMode,
-      location: interviewLocation || null,
-      meeting_link: interviewMeetingLink || null,
-      notes: interviewNotes || null,
-      created_by: userData.user?.id,
+    const { error } = await supabase.rpc("schedule_job_interview" as any, {
+      _applicant_id: active.id,
+      _scheduled_at: new Date(interviewDateTime).toISOString(),
+      _mode: interviewMode,
+      _location: interviewLocation || null,
+      _meeting_link: interviewMeetingLink || null,
+      _interviewer_id: interviewInterviewerId || null,
+      _panel: interviewPanel,
+      _duration_mins: interviewDuration ? Number(interviewDuration) : null,
+      _notes: interviewNotes || null,
     });
+    setInterviewSaving(false);
     if (error) {
-      setInterviewSaving(false);
       toast({ title: "Failed to schedule interview", description: error.message, variant: "destructive" });
       return;
     }
-    const { error: statusError } = await supabase
-      .from("job_applicants" as any)
-      .update({ status: "interview" })
-      .eq("id", active.id);
-    setInterviewSaving(false);
-    if (statusError) {
-      toast({ title: "Interview scheduled, but status update failed", description: statusError.message, variant: "destructive" });
-    } else {
-      toast({ title: "Interview scheduled" });
-    }
+    toast({ title: "Interview scheduled" });
     setShowInterviewForm(false);
     setInterviewDateTime("");
     setInterviewLocation("");
     setInterviewMeetingLink("");
     setInterviewNotes("");
+    setInterviewInterviewerId("");
+    setInterviewPanel([]);
+    setInterviewDuration("30");
+    setInterviewVenueId("");
+    setActive(a => (a ? { ...a, status: "interview" } : a));
     fetchInterviews(active.id);
     fetchAll();
   }
@@ -292,24 +455,59 @@ const HrJobApplicants = () => {
       toast({ title: "Failed to generate offer letter", description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: "Offer letter submitted for approval" });
+    toast({ title: "Offer letter submitted for approval", description: "Applicant moved to offered." });
     setShowOfferForm(false);
+    setActive({ ...active, status: "offered" });
+    fetchAll();
   }
 
-  async function updateStatus(id: string, status: string) {
-    setSaving(true);
-    const { error } = await supabase
-      .from("job_applicants" as any)
-      .update({ status })
-      .eq("id", id);
-    setSaving(false);
+  async function hireApplicant() {
+    if (!active || !hireJoiningDate) return;
+    setHireSaving(true);
+    const { error } = await supabase.rpc("hire_job_applicant" as any, {
+      _applicant_id: active.id,
+      _joining_date: hireJoiningDate,
+      _ctc_annual: hireCtc ? Number(hireCtc) : null,
+      _job_title: hireJobTitle || active.desired_role || null,
+      _department_id: hireDepartmentId || null,
+      _campus_id: hireCampusId || null,
+    });
+    setHireSaving(false);
     if (error) {
-      toast({ title: "Update failed", description: error.message, variant: "destructive" });
+      toast({ title: "Failed to convert to employee", description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: "Updated", description: `Status changed to ${status}` });
+    toast({ title: "Converted to employee", description: "The applicant is now on the employee roster." });
+    setShowHireForm(false);
     setActive(null);
     fetchAll();
+  }
+
+  async function sendEmail(stage: CommStage) {
+    if (!active) return;
+    const interviewId = stage === "interview_invite" ? interviews[0]?.id ?? null : null;
+    if (stage === "interview_invite" && !interviewId) {
+      toast({
+        title: "Schedule an interview first",
+        description: "There is no interview to send an invite for.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setCommsSending(stage);
+    const { data, error } = await supabase.functions.invoke("hiring-notify", {
+      body: { applicant_id: active.id, stage, interview_id: interviewId },
+    });
+    setCommsSending(null);
+    if (error) {
+      toast({ title: "Email failed", description: error.message || "Could not send the email.", variant: "destructive" });
+      return;
+    }
+    if ((data as { skipped?: string } | null)?.skipped === "already_sent") {
+      toast({ title: "Already sent", description: `${COMM_LABEL[stage]} email was sent to this candidate earlier.` });
+      return;
+    }
+    toast({ title: "Email sent", description: `Sent the ${COMM_LABEL[stage].toLowerCase()} email.` });
   }
 
   async function saveDetails() {
@@ -317,9 +515,7 @@ const HrJobApplicants = () => {
     setSaving(true);
     const patch: any = {};
     if (activeRole && activeRole !== (active.desired_role || "")) patch.desired_role = activeRole;
-    if (activeNotes) {
-      patch.notes = activeNotes;
-    }
+    if (activeNotes !== (active.notes || "")) patch.notes = activeNotes || null;
     if (Object.keys(patch).length === 0) { setSaving(false); return; }
 
     const { error } = await supabase
@@ -332,8 +528,12 @@ const HrJobApplicants = () => {
       return;
     }
     toast({ title: "Saved" });
+    setActive({ ...active, ...patch });
     fetchAll();
   }
+
+  const canSave = activeNotes !== (active?.notes || "")
+    || activeRole !== (active?.desired_role || "");
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -401,6 +601,7 @@ const HrJobApplicants = () => {
                   <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Last message</th>
                   <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Source</th>
                   <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Received</th>
+                  <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Assignee</th>
                   <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
                   <th></th>
                 </tr>
@@ -412,9 +613,21 @@ const HrJobApplicants = () => {
                       <div className="flex flex-col">
                         <span className="font-medium text-foreground">{r.name || "—"}</span>
                         <span className="text-[11px] text-muted-foreground font-mono">{r.phone || "—"}</span>
+                        {r.rating != null && r.rating > 0 && (
+                          <span className="mt-0.5 inline-flex items-center gap-0.5" title={`Rating ${r.rating}/5`}>
+                            {[1, 2, 3, 4, 5].map(n => (
+                              <Star key={n} className={`h-2.5 w-2.5 ${n <= (r.rating || 0) ? "fill-amber-400 text-amber-400" : "text-muted-foreground/40"}`} />
+                            ))}
+                          </span>
+                        )}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-foreground/80">{r.desired_role || <span className="text-muted-foreground">—</span>}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col">
+                        <span className="text-foreground/80">{r.desired_role || <span className="text-muted-foreground">—</span>}</span>
+                        {r.job_opening_title && <span className="text-[11px] text-muted-foreground">{r.job_opening_title}</span>}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-foreground/80">{formatExp(r.experience_years)}</td>
                     <td className="px-4 py-3 max-w-[280px]">
                       <p className="truncate text-foreground/80" title={r.last_message_preview || ""}>
@@ -425,31 +638,51 @@ const HrJobApplicants = () => {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {r.classification_source === "llm" ? (
-                        <Badge className="bg-pastel-purple text-foreground/80 border-0 text-[10px]" title={r.ai_reasoning || ""}>
-                          <Sparkles className="h-2.5 w-2.5 mr-1" /> AI
-                          {r.ai_confidence != null && ` ${(r.ai_confidence * 100).toFixed(0)}%`}
-                        </Badge>
-                      ) : r.classification_source === "regex" ? (
-                        <Badge className="bg-muted text-muted-foreground border-0 text-[10px]">Auto</Badge>
-                      ) : r.classification_source === "manual" ? (
-                        <Badge className="bg-pastel-blue text-foreground/80 border-0 text-[10px]">Manual</Badge>
-                      ) : (
-                        <Badge className="bg-muted text-muted-foreground border-0 text-[10px]">{r.classification_source}</Badge>
-                      )}
+                      <div className="flex flex-col gap-0.5">
+                        {r.classification_source === "llm" ? (
+                          <Badge className="bg-pastel-purple text-foreground/80 border-0 text-[10px] w-fit" title={r.ai_reasoning || ""}>
+                            <Sparkles className="h-2.5 w-2.5 mr-1" /> AI
+                            {r.ai_confidence != null && ` ${(r.ai_confidence * 100).toFixed(0)}%`}
+                          </Badge>
+                        ) : r.classification_source === "regex" ? (
+                          <Badge className="bg-muted text-muted-foreground border-0 text-[10px] w-fit">Auto</Badge>
+                        ) : r.classification_source === "manual" ? (
+                          <Badge className="bg-pastel-blue text-foreground/80 border-0 text-[10px] w-fit">Manual</Badge>
+                        ) : (
+                          <Badge className="bg-muted text-muted-foreground border-0 text-[10px] w-fit">{r.classification_source}</Badge>
+                        )}
+                        {(r.applied_via || r.cover_note) && (
+                          <span className="text-[10px] text-muted-foreground capitalize">{r.applied_via || "note"}</span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-[12px] text-muted-foreground">{formatDate(r.last_message_at || r.created_at)}</td>
+                    <td className="px-4 py-3 text-[12.5px] text-foreground/80">{r.assigned_to_name || <span className="text-muted-foreground">—</span>}</td>
                     <td className="px-4 py-3">
                       <Badge className={`${STATUS_BADGE[r.status] || "bg-muted text-muted-foreground"} border-0 text-[10px] capitalize`}>{r.status}</Badge>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); navigate(`/whatsapp-inbox?phone=${encodeURIComponent(r.phone || "")}`); }}
-                        className="text-muted-foreground hover:text-foreground"
-                        title="Open conversation"
-                      >
-                        <MessageSquare className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        {r.resume_url && (
+                          <a
+                            href={r.resume_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Open resume"
+                          >
+                            <FileText className="h-4 w-4" />
+                          </a>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); navigate(`/whatsapp-inbox?phone=${encodeURIComponent(r.phone || "")}`); }}
+                          className="text-muted-foreground hover:text-foreground"
+                          title="Open conversation"
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -467,6 +700,7 @@ const HrJobApplicants = () => {
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <UserPlus className="h-5 w-5" /> {active.name || active.phone || "Applicant"}
+                  <Badge className={`${STATUS_BADGE[active.status] || "bg-muted text-muted-foreground"} border-0 text-[10px] capitalize ml-1`}>{active.status}</Badge>
                 </DialogTitle>
               </DialogHeader>
 
@@ -474,11 +708,72 @@ const HrJobApplicants = () => {
                 <div className="grid grid-cols-2 gap-3">
                   <div><label className="text-[11px] uppercase tracking-wide text-muted-foreground">Phone</label><p className="font-mono">{active.phone || "—"}</p></div>
                   <div><label className="text-[11px] uppercase tracking-wide text-muted-foreground">Email</label><p>{active.email || "—"}</p></div>
+                  <div><label className="text-[11px] uppercase tracking-wide text-muted-foreground">Applied via</label><p className="capitalize">{active.applied_via || active.source_channel || "—"}</p></div>
+                  <div><label className="text-[11px] uppercase tracking-wide text-muted-foreground">Job opening</label><p>{active.job_opening_title || "—"}</p></div>
                   <div><label className="text-[11px] uppercase tracking-wide text-muted-foreground">First contact</label><p>{formatDate(active.first_message_at)}</p></div>
                   <div><label className="text-[11px] uppercase tracking-wide text-muted-foreground">Last message</label><p>{formatDate(active.last_message_at)}</p></div>
                   <div><label className="text-[11px] uppercase tracking-wide text-muted-foreground">Experience</label><p>{formatExp(active.experience_years)}</p></div>
-                  <div><label className="text-[11px] uppercase tracking-wide text-muted-foreground">Status</label><p className="capitalize">{active.status}</p></div>
+                  <div><label className="text-[11px] uppercase tracking-wide text-muted-foreground">Stage changed</label><p>{formatDate(active.stage_changed_at)}</p></div>
                 </div>
+
+                {/* Assignment */}
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <label className="text-[11px] uppercase tracking-wide text-muted-foreground flex items-center gap-1"><UserCog className="h-3 w-3" /> Assigned to</label>
+                    <Select
+                      value={active.assigned_to || NONE}
+                      onValueChange={v => assignApplicant(v === NONE ? null : v)}
+                      disabled={!canRecruit || assignSaving}
+                    >
+                      <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>Unassigned</SelectItem>
+                        {staff.map(s => (
+                          <SelectItem key={s.user_id} value={s.user_id}>{displayName(s)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Resume */}
+                <div className="flex items-center gap-2">
+                  <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Resume</label>
+                  {active.resume_url ? (
+                    <a href={active.resume_url} target="_blank" rel="noreferrer" className="text-primary hover:underline inline-flex items-center gap-1 text-[12.5px]">
+                      <FileText className="h-3.5 w-3.5" /> View resume
+                    </a>
+                  ) : (
+                    <span className="text-[12.5px] text-muted-foreground">Not uploaded</span>
+                  )}
+                  {canRecruit && (
+                    <>
+                      <input
+                        ref={resumeInputRef}
+                        type="file"
+                        accept=".pdf,.doc,.docx"
+                        className="hidden"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) uploadResume(f); }}
+                      />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-[11px]"
+                        disabled={resumeUploading}
+                        onClick={() => resumeInputRef.current?.click()}
+                      >
+                        <Upload className="h-3 w-3 mr-1" /> {resumeUploading ? "Uploading…" : active.resume_url ? "Replace" : "Upload resume"}
+                      </Button>
+                    </>
+                  )}
+                </div>
+
+                {active.cover_note && (
+                  <div>
+                    <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Cover note</label>
+                    <p className="rounded-md bg-muted/30 px-3 py-2 mt-1 whitespace-pre-wrap">{active.cover_note}</p>
+                  </div>
+                )}
 
                 {active.ai_reasoning && (
                   <div className="rounded-lg border border-border bg-muted/20 p-3">
@@ -518,17 +813,24 @@ const HrJobApplicants = () => {
                   />
                 </div>
 
+                {/* Stage moves */}
                 <div className="flex flex-wrap items-center gap-2 pt-2">
                   {canRecruit && (
                     <>
-                      <Button size="sm" variant="outline" onClick={() => updateStatus(active.id, "reviewing")} disabled={saving}>
+                      <Button size="sm" variant="outline" onClick={() => moveApplicant(active.id, "reviewing")} disabled={saving}>
                         <Clock className="h-3.5 w-3.5 mr-1" /> Mark reviewing
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => updateStatus(active.id, "shortlisted")} disabled={saving}>
+                      <Button size="sm" variant="outline" onClick={() => moveApplicant(active.id, "shortlisted")} disabled={saving}>
                         <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Shortlist
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => updateStatus(active.id, "rejected")} disabled={saving}>
+                      <Button size="sm" variant="outline" onClick={() => moveApplicant(active.id, "offered")} disabled={saving}>
+                        <FileText className="h-3.5 w-3.5 mr-1" /> Mark offered
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => moveApplicant(active.id, "rejected")} disabled={saving}>
                         <XCircle className="h-3.5 w-3.5 mr-1" /> Reject
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => moveApplicant(active.id, "withdrawn")} disabled={saving}>
+                        <Ban className="h-3.5 w-3.5 mr-1" /> Withdraw
                       </Button>
                     </>
                   )}
@@ -540,6 +842,31 @@ const HrJobApplicants = () => {
                   {canOffer && (
                     <Button size="sm" variant="outline" onClick={() => setShowOfferForm(v => !v)}>
                       <FileText className="h-3.5 w-3.5 mr-1" /> Generate offer letter
+                    </Button>
+                  )}
+                  {canRecruit && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="sm" variant="outline" disabled={!!commsSending}>
+                          <Mail className="h-3.5 w-3.5 mr-1" /> {commsSending ? "Sending…" : "Send email"}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start">
+                        {(Object.keys(COMM_LABEL) as CommStage[]).map(stage => (
+                          <DropdownMenuItem key={stage} onSelect={() => sendEmail(stage)}>
+                            {COMM_LABEL[stage]}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                  {canRecruit && (
+                    <Button
+                      size="sm"
+                      variant={active.status === "offered" || active.status === "hired" ? "default" : "outline"}
+                      onClick={() => setShowHireForm(true)}
+                    >
+                      <UserCheck className="h-3.5 w-3.5 mr-1" /> Convert to employee
                     </Button>
                   )}
                   <Button size="sm" variant="outline" asChild>
@@ -554,7 +881,7 @@ const HrJobApplicants = () => {
                   </Button>
                   {canRecruit && (
                     <div className="ml-auto">
-                      <Button size="sm" onClick={saveDetails} disabled={saving || (!activeNotes && activeRole === (active.desired_role || ""))}>
+                      <Button size="sm" onClick={saveDetails} disabled={saving || !canSave}>
                         Save
                       </Button>
                     </div>
@@ -591,16 +918,14 @@ const HrJobApplicants = () => {
                                 <ClipboardCheck className="h-3 w-3 mr-1" /> Record feedback
                               </Button>
                             )}
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 px-2 text-[11px]"
-                              onClick={() => navigate(`/whatsapp-inbox?phone=${encodeURIComponent(active.phone || "")}`)}
-                            >
-                              <MessageSquare className="h-3 w-3 mr-1" /> Notify on WhatsApp
-                            </Button>
                           </div>
                         </div>
+
+                        {iv.location && (
+                          <p className="flex items-center gap-1 text-[11.5px] text-muted-foreground">
+                            <MapPin className="h-3 w-3" /> {iv.location}
+                          </p>
+                        )}
 
                         {iv.rating != null && (
                           <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
@@ -705,6 +1030,30 @@ const HrJobApplicants = () => {
                         </select>
                       </div>
                       <div>
+                        <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Venue</label>
+                        <Select
+                          value={interviewVenueId || NONE}
+                          onValueChange={v => {
+                            if (v === NONE) { setInterviewVenueId(""); return; }
+                            setInterviewVenueId(v);
+                            const venue = venues.find(x => x.id === v);
+                            if (venue) {
+                              setInterviewLocation([venue.name, venue.address].filter(Boolean).join(", "));
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="Pick a venue" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={NONE}>No venue</SelectItem>
+                            {venues.filter(v => v.id).map(v => (
+                              <SelectItem key={v.id as string} value={v.id as string}>
+                                {v.name || "Venue"}{v.address ? ` — ${v.address}` : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
                         <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Location</label>
                         <input
                           value={interviewLocation}
@@ -721,6 +1070,51 @@ const HrJobApplicants = () => {
                           placeholder="e.g. https://meet.google.com/..."
                           className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
                         />
+                      </div>
+                      <div>
+                        <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Duration (mins)</label>
+                        <Input
+                          type="number"
+                          min={5}
+                          step={5}
+                          value={interviewDuration}
+                          onChange={e => setInterviewDuration(e.target.value)}
+                          className="mt-1 h-9"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Interviewer</label>
+                        <Select
+                          value={interviewInterviewerId || NONE}
+                          onValueChange={v => setInterviewInterviewerId(v === NONE ? "" : v)}
+                        >
+                          <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="Pick interviewer" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={NONE}>Unassigned</SelectItem>
+                            {staff.map(s => (
+                              <SelectItem key={s.user_id} value={s.user_id}>{displayName(s)}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Panel</label>
+                      <div className="mt-1 max-h-32 overflow-y-auto rounded-md border border-border p-2 space-y-1">
+                        {staff.length === 0 && <p className="text-[11.5px] text-muted-foreground">No staff found.</p>}
+                        {staff.map(s => (
+                          <label key={s.user_id} className="flex items-center gap-2 text-[12.5px] cursor-pointer">
+                            <Checkbox
+                              checked={interviewPanel.includes(s.user_id)}
+                              onCheckedChange={checked => {
+                                setInterviewPanel(prev => checked
+                                  ? [...prev, s.user_id]
+                                  : prev.filter(id => id !== s.user_id));
+                              }}
+                            />
+                            {displayName(s)}
+                          </label>
+                        ))}
                       </div>
                     </div>
                     <div>
@@ -789,6 +1183,85 @@ const HrJobApplicants = () => {
                     </div>
                   </div>
                 )}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Convert to employee dialog */}
+      <Dialog open={showHireForm} onOpenChange={setShowHireForm}>
+        <DialogContent className="max-w-lg">
+          {active && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <UserCheck className="h-5 w-5" /> Convert to employee
+                </DialogTitle>
+              </DialogHeader>
+              <p className="text-[12.5px] text-muted-foreground -mt-2">
+                Onboard {active.name || active.phone || "this applicant"} onto the employee roster.
+              </p>
+              <div className="space-y-3 text-sm">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Joining date</label>
+                    <input
+                      type="date"
+                      value={hireJoiningDate}
+                      onChange={e => setHireJoiningDate(e.target.value)}
+                      className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Annual CTC</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={hireCtc}
+                      onChange={e => setHireCtc(e.target.value)}
+                      placeholder="e.g. 480000"
+                      className="mt-1 h-9"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Job title</label>
+                  <Input
+                    value={hireJobTitle}
+                    onChange={e => setHireJobTitle(e.target.value)}
+                    placeholder="e.g. Assistant Professor"
+                    className="mt-1 h-9"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Department</label>
+                    <Select value={hireDepartmentId || NONE} onValueChange={v => setHireDepartmentId(v === NONE ? "" : v)}>
+                      <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="Pick department" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>None</SelectItem>
+                        {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Campus</label>
+                    <Select value={hireCampusId || NONE} onValueChange={v => setHireCampusId(v === NONE ? "" : v)}>
+                      <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="Pick campus" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>None</SelectItem>
+                        {campuses.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button size="sm" variant="ghost" onClick={() => setShowHireForm(false)}>Cancel</Button>
+                  <Button size="sm" onClick={hireApplicant} disabled={hireSaving || !hireJoiningDate}>
+                    {hireSaving ? "Converting..." : "Convert to employee"}
+                  </Button>
+                </div>
               </div>
             </>
           )}
