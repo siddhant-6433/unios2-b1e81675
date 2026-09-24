@@ -118,8 +118,16 @@ function TimeSection({ userId }: { userId: string }) {
       {/* Attendance section */}
       <Text style={styles.sectionTitle}>Attendance</Text>
       <View style={styles.cardGrid}>
-        <MenuCard icon={Clock} title="Logs & Shifts" sub="View attendance logs" color="#0284c7" bg="#f0f9ff" />
-        <MenuCard icon={History} title="Request History" sub="Attendance requests" color="#7c3aed" bg="#f5f3ff" />
+        <MenuCard
+          icon={Clock} title="Logs & Shifts" sub="View attendance logs"
+          color="#0284c7" bg="#f0f9ff"
+          onPress={() => router.push({ pathname: '/(staff)/work/attendance-logs', params: { tab: 'logs' } } as any)}
+        />
+        <MenuCard
+          icon={History} title="Request History" sub="Attendance requests"
+          color="#7c3aed" bg="#f5f3ff"
+          onPress={() => router.push({ pathname: '/(staff)/work/attendance-logs', params: { tab: 'corrections' } } as any)}
+        />
       </View>
 
       {/* Recent punches */}
@@ -259,7 +267,11 @@ function DocumentsSection() {
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Documents</Text>
       <View style={styles.cardGrid}>
-        <MenuCard icon={FileText} title="Org Documents" sub="Policies and forms" color="#d97706" bg="#fffbeb" />
+        <MenuCard
+          icon={FileText} title="Org Documents" sub="Policies and forms"
+          color="#d97706" bg="#fffbeb"
+          onPress={() => router.push('/(staff)/work/documents' as any)}
+        />
         <MenuCard
           icon={Download} title="My Documents" sub="Your uploaded files"
           color="#7c3aed" bg="#f5f3ff"

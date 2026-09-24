@@ -18,6 +18,7 @@ export default function WorkStackLayout() {
       <Stack.Screen name="punch" options={{ title: 'Attendance Punch' }} />
       <Stack.Screen name="leave" options={{ title: 'Leave' }} />
       <Stack.Screen name="hr" options={{ title: 'HR' }} />
+      <Stack.Screen name="attendance-logs" options={{ title: 'Attendance' }} />
       <Stack.Screen name="payslips" options={{ title: 'Payslips' }} />
       <Stack.Screen name="expenses" options={{ title: 'Expenses' }} />
       <Stack.Screen name="documents" options={{ title: 'Documents' }} />
