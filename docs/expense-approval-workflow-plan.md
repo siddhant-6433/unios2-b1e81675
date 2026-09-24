@@ -168,11 +168,31 @@ Video-portal parity: the same three verbs (approve / send for correction / rejec
 - E2E (web): submit without proof → blocked; with proof → L1 approve → L2 approve → Zoho bill created (test org) → mark reimbursed.
 - Mobile: attach proof + resubmit after correction.
 
-## 12. Open questions (need product decisions)
+## 12. Decisions (confirmed)
 
-1. **Who is “team lead”?** Use `employee_profiles.reports_to` (per-employee manager) or role-based (`principal` / `campus_admin` per campus)? Or both (manager first, escalate to principal)?
-2. **Threshold routing** — must *every* claim go to superadmin, or only above ₹X (small claims approved by L1 only)?
-3. **Zoho vendor per employee** — one vendor per employee (recommended) or reuse a generic “Staff Reimbursements” vendor?
-4. **Tax/accounting** — which Zoho expense account / COA, GST/TDS treatment, and whether advances already recovered should net off the bill.
-5. **Reimbursement path** — via payroll (current `mark_expense_reimbursed`) or a direct Zoho payment only?
-6. **Multiple proofs** — is one receipt enough, or do we need multi-file + a specific “proof type” (bill/invoice/photo)?
+1. **Team lead = the reporting manager**, defined from an HR-managed team structure (see §13). L1 is the employee's `reporting manager`; if none is set, fall back to campus `principal`/`campus_admin`, then any `hr:expenses_approve` holder.
+2. **Every claim goes to superadmin** (no threshold; all claims need L1 → L2).
+3. **One Zoho vendor per employee.** Bank/AC details are captured separately (`employee_bank_details`, `hr:bank_edit`) and pushed to the Zoho vendor via `zohoAddVendorBankAccount`.
+4. **Zoho company already linked. No TDS** on employee reimbursements (amount = claim amount; expense account from `zohoResolveExpenseAccount`).
+5. **Both reimbursement paths**: via payroll (`mark_expense_reimbursed`) **and** a direct Zoho vendor payment (`record_payment`).
+6. **Multiple proofs** supported (`expense_claim_attachments`, multi-file).
+
+---
+
+## 13. Prerequisite — HR team structure & reporting managers (Keka-style)
+
+HR/super_admin must be able to define who reports to whom; the reporting manager then shows on the employee's profile and drives expense L1 routing.
+
+**Backend** (`hr_reporting_structure`)
+- `employee_profiles.reports_to` (auth user) already exists, plus `reports_to_name` and `dotted_line_manager`. Add:
+  - `manager_user_id` is already `reports_to`; validate on set (manager must be an active staff account, not the employee themself, and must not create a cycle).
+  - RPC `set_reporting_manager(_employee_profile_id uuid, _manager_user_id uuid)` `SECURITY DEFINER`, `hr:employees_edit`.
+  - RPC `hr_team_structure()` → one row per employee: employee name/id, `reporting_manager` name + id, department, campus, designation (drives the HR Team Structure table).
+  - Update `hr_org_chart()` to prefer `reports_to` and fall back to `reports_to_name`.
+- RLS: HR (`hr:employees_edit`) writes; manager name is readable wherever the directory already is.
+
+**Frontend**
+- New HR page **Team Structure** (`/hr-team`, `hr:employees_edit`): a table of employees with a reporting-manager picker (search `employee_profiles`), department/campus columns, and validation feedback (cycle/self errors). Optionally a bulk update from a CSV later.
+- **Profile display:** the reporting manager appears on the employee's profile — web `EmployeeProfileDialog` (Job tab) and the mobile profile screen show “Reports to: <name>”.
+
+This ships **before** the expense L1 routing, because L1 depends on it.

@@ -178,6 +178,7 @@ const hrSubMenu: MenuItem[] = [
   { title: "Advances", url: "/hr-advances", icon: CreditCard, permission: "hr:expenses_approve" },
   { title: "Comp Off", url: "/hr-comp-off", icon: CalendarOff, permission: "hr:attendance_edit" },
   { title: "Encashment", url: "/hr-encashment", icon: IndianRupee, permission: "hr:leave_approve" },
+  { title: "Team Structure", url: "/hr-team", icon: Users, permission: "hr:employees_edit" },
   { title: "Custom Fields", url: "/hr-custom-fields", icon: ListPlus, permission: "hr:employees_edit" },
   { title: "Full & Final", url: "/hr-settlements", icon: LogOut, permission: "hr:employees_edit" },
   { title: "Settings", url: "/hr-settings", icon: Settings, permission: "hr:employees_edit" },

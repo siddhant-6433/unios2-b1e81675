@@ -115,6 +115,7 @@ const HrAdvances           = lazy(() => import("./pages/HrAdvances"));
 const HrCompOff            = lazy(() => import("./pages/HrCompOff"));
 const HrEncashment         = lazy(() => import("./pages/HrEncashment"));
 const HrCustomFields       = lazy(() => import("./pages/HrCustomFields"));
+const HrTeamStructure      = lazy(() => import("./pages/HrTeamStructure"));
 const HrSettings           = lazy(() => import("./pages/HrSettings"));
 const ConsultantCreditNotes = lazy(() => import("./pages/ConsultantCreditNotes"));
 const ParentPortal         = lazy(() => import("./pages/ParentPortal"));
@@ -394,6 +395,7 @@ const App = () => (
                       <Route path="/hr-comp-off" element={<RequirePermission module="hr" action="attendance_edit"><HrCompOff /></RequirePermission>} />
                       <Route path="/hr-encashment" element={<RequirePermission module="hr" action="leave_approve"><HrEncashment /></RequirePermission>} />
                       <Route path="/hr-custom-fields" element={<RequirePermission module="hr" action="employees_edit"><HrCustomFields /></RequirePermission>} />
+                      <Route path="/hr-team" element={<RequirePermission module="hr" action="employees_edit"><HrTeamStructure /></RequirePermission>} />
                       <Route path="/hr-settings" element={<RequirePermission module="hr" action="employees_edit"><HrSettings /></RequirePermission>} />
 
                       {/* Admin — user_management:view */}

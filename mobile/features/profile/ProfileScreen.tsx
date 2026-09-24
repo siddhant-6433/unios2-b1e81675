@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, SafeAreaView,
   TouchableOpacity, Alert, Switch,
@@ -7,16 +7,32 @@ import { useAuth } from '../../contexts/AuthContext';
 import { router } from 'expo-router';
 import { colors, spacing, radius, typography } from '../../constants/Colors';
 import {
-  User, Phone, Building2, Shield, Smartphone,
+  User, Phone, Building2, Shield, Smartphone, Users,
   LogOut, ChevronRight, CheckCircle, Fingerprint, Trash2,
 } from 'lucide-react-native';
 import { useAppLock } from '../applock/AppLockGate';
 import { invokeEdge } from '../../lib/invokeEdge';
+import { supabase } from '../../lib/supabase';
 
 export default function ProfileScreen() {
   const { profile, role, signOut } = useAuth();
   const { isEnabled: appLockEnabled, isSupported: appLockSupported, setEnabled: setAppLockEnabled } = useAppLock();
   const [isDeleting, setIsDeleting] = useState(false);
+  // Reporting manager (set by HR in the team structure); hidden when none.
+  const [manager, setManager] = useState<{ name: string; designation: string | null } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data, error } = await (supabase as any).rpc('my_reporting_manager');
+      if (!active || error) return;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (row?.manager_name) {
+        setManager({ name: row.manager_name, designation: row.manager_designation ?? null });
+      }
+    })();
+    return () => { active = false; };
+  }, []);
 
   const handleDeleteAccount = () => {
     Alert.alert(
@@ -86,6 +102,13 @@ export default function ProfileScreen() {
           <InfoRow icon={Phone} label="Phone" value={profile?.phone || '—'} />
           <InfoRow icon={Shield} label="Role" value={roleLabel} />
           <InfoRow icon={Building2} label="Campus" value={profile?.campus_id ? 'Assigned' : 'All Campuses'} />
+          {manager && (
+            <InfoRow
+              icon={Users}
+              label="Reports to"
+              value={manager.designation ? `${manager.name} · ${manager.designation}` : manager.name}
+            />
+          )}
         </View>
 
         {/* Device binding */}

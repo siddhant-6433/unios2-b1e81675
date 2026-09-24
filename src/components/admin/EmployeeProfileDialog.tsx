@@ -69,6 +69,8 @@ interface EmployeeProfile {
   time_type: string;
   notice_period_days: number;
   employment_status: string;
+  reports_to: string;
+  reports_to_name: string;
   pan_number: string;
   aadhaar_number: string;
   education: { degree: string; branch: string; university: string; year_completion: string; percentage: string }[];
@@ -95,6 +97,7 @@ const emptyProfile: EmployeeProfile = {
   campus_id: "", institution_id: "", department_id: "",
   worker_type: "Permanent",
   time_type: "Full Time", notice_period_days: 90, employment_status: "Working",
+  reports_to: "", reports_to_name: "",
   pan_number: "", aadhaar_number: "", education: [], experience: [], professional_summary: "",
 };
 
@@ -134,6 +137,9 @@ const EmployeeProfileDialog = ({
   // since user_roles writes are super_admin-only by RLS.
   const [userRoles, setUserRoles] = useState<string[]>([]);
   const [rolesBusy, setRolesBusy] = useState(false);
+  // Reporting manager display name. Usually present on the row itself; fetched
+  // only when reports_to is set but the denormalised name is blank.
+  const [reportsToName, setReportsToName] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -154,6 +160,7 @@ const EmployeeProfileDialog = ({
     setBankLoaded(false);
     setBank(emptyBank);
     setExistingMatch(null);
+    setReportsToName("");
 
     (async () => {
       // Look the employee row up by whichever key the caller had.
@@ -212,12 +219,15 @@ const EmployeeProfileDialog = ({
           time_type: str("time_type") || "Full Time",
           notice_period_days: (empData.notice_period_days as number | null) ?? 90,
           employment_status: str("employment_status") || "Working",
+          reports_to: str("reports_to"),
+          reports_to_name: str("reports_to_name"),
           pan_number: str("pan_number"),
           aadhaar_number: str("aadhaar_number"),
           education: (empData.education as never) || [],
           experience: (empData.experience as never) || [],
           professional_summary: str("professional_summary"),
         });
+        setReportsToName(str("reports_to_name"));
         setIsNew(false);
       } else {
         // No employee_profiles row yet — pre-fill from profiles.
@@ -253,6 +263,25 @@ const EmployeeProfileDialog = ({
       setBankLoaded(true);
     })();
   }, [open, canEditBank, profile.id, bankLoaded]);
+
+  // reports_to_name is denormalised on the employee row; when it is blank but
+  // a manager is linked, resolve the name from the manager's own profile.
+  useEffect(() => {
+    if (!open || !profile.reports_to || reportsToName) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("employee_profiles")
+        .select("display_name, first_name, last_name")
+        .eq("user_id", profile.reports_to)
+        .maybeSingle();
+      if (cancelled) return;
+      const d = data as { display_name?: string | null; first_name?: string | null; last_name?: string | null } | null;
+      const name = d?.display_name?.trim() || [d?.first_name, d?.last_name].filter(Boolean).join(" ").trim();
+      if (name) setReportsToName(name);
+    })();
+    return () => { cancelled = true; };
+  }, [open, profile.reports_to, reportsToName]);
 
   if (!open) return null;
 
@@ -930,6 +959,16 @@ const EmployeeProfileDialog = ({
                         <option value="Terminated">Terminated</option>
                         <option value="On Notice">On Notice</option>
                       </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Reports to</label>
+                      <div
+                        className="w-full rounded-xl border border-input bg-muted/40 px-3 py-2 text-sm text-foreground"
+                        title={reportsToName || "No reporting manager"}
+                      >
+                        {reportsToName || "—"}
+                      </div>
+                      <p className="mt-1 text-[10px] text-muted-foreground">Set on Team Structure.</p>
                     </div>
                   </div>
                 </Section>
