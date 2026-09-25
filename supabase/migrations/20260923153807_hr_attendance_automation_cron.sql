@@ -93,7 +93,7 @@ GRANT EXECUTE ON FUNCTION public.hr_notify_probation_due() TO service_role;
 -- ── Schedules ───────────────────────────────────────────────────────────────
 -- All times UTC (IST = UTC+5:30).
 
-DO $$
+DO $sched$
 BEGIN
   IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'hr-auto-punch-out') THEN
     PERFORM cron.unschedule('hr-auto-punch-out');
@@ -128,4 +128,4 @@ BEGIN
   PERFORM cron.schedule('hr-probation-reminders', '5 3 * * *',
     $$SELECT public.hr_notify_probation_due()$$);
 END;
-$$;
+$sched$;

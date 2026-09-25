@@ -293,7 +293,7 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.expire_comp_off_credits() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.expire_comp_off_credits() TO service_role;
 
-DO $$
+DO $sched$
 BEGIN
   IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'hr-comp-off-expiry') THEN
     PERFORM cron.unschedule('hr-comp-off-expiry');
@@ -301,7 +301,7 @@ BEGIN
   PERFORM cron.schedule('hr-comp-off-expiry', '10 3 * * *',
     $$SELECT public.expire_comp_off_credits()$$);
 END;
-$$;
+$sched$;
 
 -- ── Self-service balance ────────────────────────────────────────────────────
 
