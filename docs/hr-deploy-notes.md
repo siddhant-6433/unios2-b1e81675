@@ -31,6 +31,8 @@ Deploy the new functions; the rest already exist.
 supabase functions deploy zoho-expense-bill-sync   # expense → Zoho vendor bill
 supabase functions deploy hiring-notify            # candidate emails (uses send-email/Resend)
 supabase functions deploy apply-job                # public careers intake (verify_jwt off)
+supabase functions deploy resume-parse             # AI resume parse/rank (Gemini)
+supabase functions deploy interview-meet           # Google Meet + Calendar for interviews
 ```
 
 - `zoho-expense-bill-sync` reuses `_shared/zoho.ts` and the `ZOHO_*` secrets.
@@ -39,6 +41,11 @@ supabase functions deploy apply-job                # public careers intake (veri
 - `apply-job` is public (`verify_jwt = false`, added to `supabase/config.toml`) and needs the
   existing `R2_*` secrets to store resumes. It creates `job_applicants` with the service role,
   so no anon INSERT policy is required.
+- `resume-parse` needs `GEMINI_API_KEY` (or `GOOGLE_AI_API_KEY`) — already set for other AI features.
+- `interview-meet` is **optional**: with `GOOGLE_SERVICE_ACCOUNT_JSON` (a Google Workspace service
+  account with Calendar access) + `GOOGLE_CALENDAR_ID` it creates a real Calendar event with Google
+  Meet conferencing; without them it returns a Google Calendar "add event" template URL and a
+  `meet.google.com/new` link for the interviewer to create manually. Nothing breaks if they're unset.
 
 ## 3. Zoho
 
