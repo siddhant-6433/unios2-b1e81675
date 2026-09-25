@@ -137,7 +137,8 @@ GRANT EXECUTE ON FUNCTION public.rank_job_applicants(uuid) TO authenticated, ser
 
 -- ── 5. Surface AI fields + referrer in the inbox view ────────────────────────
 
-CREATE OR REPLACE VIEW public.job_applicants_inbox AS -- lint-allow: HR-only inbox; LEFT JOIN to leads only nulls l.email for roles without leads RLS, never drops rows
+DROP VIEW IF EXISTS public.job_applicants_inbox;
+CREATE VIEW public.job_applicants_inbox AS -- lint-allow: HR-only inbox; LEFT JOIN to leads only nulls l.email for roles without leads RLS, never drops rows
 SELECT
   ja.id, ja.lead_id, ja.status, ja.name, ja.source_phone AS phone,
   ja.desired_role, ja.experience_years, ja.resume_url,

@@ -528,7 +528,8 @@ GRANT EXECUTE ON FUNCTION public.mark_expense_reimbursed(uuid, uuid, text) TO au
 
 -- ── 9. Stage-aware inbox view ───────────────────────────────────────────────
 
-CREATE OR REPLACE VIEW public.expense_claims_inbox AS
+DROP VIEW IF EXISTS public.expense_claims_inbox;
+CREATE VIEW public.expense_claims_inbox AS
 SELECT
   c.id, c.employee_profile_id, c.submitted_by, c.title, c.amount, c.currency,
   c.expense_date, c.description, c.receipt_url, c.status, c.decision_note, c.decided_at,

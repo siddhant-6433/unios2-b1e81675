@@ -7,7 +7,8 @@
 
 -- ── 1. Richer applicant inbox ───────────────────────────────────────────────
 
-CREATE OR REPLACE VIEW public.job_applicants_inbox AS -- lint-allow: HR-only inbox; the LEFT JOIN to leads only nulls l.email for roles without leads RLS, it never drops applicant rows
+DROP VIEW IF EXISTS public.job_applicants_inbox;
+CREATE VIEW public.job_applicants_inbox AS -- lint-allow: HR-only inbox; the LEFT JOIN to leads only nulls l.email for roles without leads RLS, it never drops applicant rows
 SELECT
   ja.id,
   ja.lead_id,
