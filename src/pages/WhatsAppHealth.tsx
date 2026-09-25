@@ -12,6 +12,7 @@ type Overall = {
   window_days: number;
   since: string;
   total: number;
+  web_sends: number;
   sent: number;
   delivered: number;
   read: number;
@@ -158,7 +159,8 @@ const WhatsAppHealth = () => {
   const toggleTplExpand = (key: string) =>
     setExpandedTpl((s) => {
       const next = new Set(s);
-      next.has(key) ? next.delete(key) : next.add(key);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
 
@@ -251,7 +253,7 @@ const WhatsAppHealth = () => {
             WhatsApp Health & Spam Triage
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Aggregated send health, Meta error codes, and per-number / per-template breakdown.
+            API send health, Meta error codes, and per-number / per-template breakdown. WhatsApp Web opens are counted separately and are not delivery-confirmed.
             Use the failed-% column and the Meta error codes to identify which templates are
             being rate-limited or reported as spam.
           </p>
@@ -357,9 +359,9 @@ const WhatsAppHealth = () => {
       {data && (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <SummaryCard
-              label="Outbound sent"
+              label="API outbound"
               value={data.overall.total.toLocaleString()}
               hint={`${data.overall.distinct_templates} templates, ${data.overall.distinct_phones} numbers`}
             />
@@ -398,6 +400,11 @@ const WhatsAppHealth = () => {
                   : "ok"
               }
             />
+            <SummaryCard
+              label="WhatsApp Web"
+              value={(data.overall.web_sends || 0).toLocaleString()}
+              hint="Prefilled chats opened; send not confirmed"
+            />
           </div>
 
           {/* Daily bar chart */}
@@ -405,7 +412,7 @@ const WhatsAppHealth = () => {
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
                 <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                Daily outbound volume
+                Daily API outbound volume
               </CardTitle>
             </CardHeader>
             <CardContent>

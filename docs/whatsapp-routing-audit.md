@@ -2,6 +2,8 @@
 
 Outbound WhatsApp sends should not all use the same Meta phone number. Spam-prone or high-volume sends can damage the quality rating of operational numbers used for OTP, call follow-ups, and visit confirmations.
 
+Counsellors can also open a prefilled chat in their logged-in WhatsApp Web session. UniOs records that handoff with `send_source = 'whatsapp_web'` and a `sent` status, but WhatsApp Web does not confirm that the counsellor pressed Send or that Meta delivered the message. Exclude these rows when analyzing Meta API delivery, sender quality, or template failures; the WhatsApp Health dashboard reports Web opens separately.
+
 ## Phone Number Routes
 
 Configure these Supabase Edge Function secrets. Each route falls back to `WHATSAPP_API_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID` if the route-specific secret is not set.
@@ -35,6 +37,7 @@ select
   count(*) as messages
 from whatsapp_messages
 where direction = 'outbound'
+  and coalesce(send_source, 'meta_api') = 'meta_api'
   and created_at >= now() - interval '14 days'
 group by 1, 2, 3
 order by messages desc;
@@ -51,6 +54,7 @@ select
   status_error
 from whatsapp_messages
 where direction = 'outbound'
+  and coalesce(send_source, 'meta_api') = 'meta_api'
   and status = 'failed'
   and created_at >= now() - interval '14 days'
 order by created_at desc;
