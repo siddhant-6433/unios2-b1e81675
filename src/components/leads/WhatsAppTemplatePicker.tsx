@@ -98,6 +98,7 @@ export function WhatsAppTemplatePicker({
                         <p className={`text-sm font-medium ${selectedKey === t.key ? "text-success dark:text-success" : ""}`}>{t.label}</p>
                         {t.badge === "Video" && <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-destructive/10 text-destructive">VIDEO</span>}
                         {t.badge === "Location" && <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-info/10 text-info-foreground">LOCATION</span>}
+                        {t.badge === "WEB" && <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary">WEB ONLY</span>}
                         {t.isQuickReply && <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary">KB</span>}
                       </div>
                       <p className="text-[11px] text-muted-foreground mt-0.5">{t.description}</p>

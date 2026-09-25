@@ -8,19 +8,26 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
-import { MessageSquare, Send, Check } from "lucide-react";
+import { MessageSquare, Send, Check, ExternalLink } from "lucide-react";
 import { WhatsAppTemplatePicker } from "@/components/leads/WhatsAppTemplatePicker";
 import {
   TEMPLATES,
   useWhatsAppTemplates,
   renderTemplatePreview,
   sendWhatsAppTemplate,
+  type WhatsAppPickerTemplate,
 } from "@/components/leads/whatsappTemplates";
 import {
   buildTemplateParams,
   resolveCourseTemplateFields,
   type TemplateParamSlot,
 } from "@/lib/whatsappTemplateCatalog";
+import {
+  buildWhatsAppWebUrl,
+  renderWhatsAppWebOnlyTemplate,
+  renderWhatsAppWebTemplate,
+  type WhatsAppWebOnlyTemplate,
+} from "@/lib/whatsappWeb";
 
 interface SendWhatsAppDialogProps {
   open: boolean;
@@ -66,6 +73,8 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
   const [paramOverrides, setParamOverrides] = useState<Record<string, string>>({});
   /** Raw yyyy-mm-dd backing each date picker (paramOverrides holds the readable form we send). */
   const [dateInputs, setDateInputs] = useState<Record<string, string>>({});
+  const [whatsAppWebEnabled, setWhatsAppWebEnabled] = useState(false);
+  const [webOnlyTemplates, setWebOnlyTemplates] = useState<WhatsAppWebOnlyTemplate[]>([]);
 
   // A callback can only be scheduled from today through two months out.
   const todayISO = useMemo(() => toISODate(new Date()), []);
@@ -77,8 +86,48 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
 
   const { allowedKeys, visibleTemplates, templateComponentsByKey, catalogByKey } = useWhatsAppTemplates(open);
 
-  const selectedTmpl = visibleTemplates.find(t => t.key === selectedTemplate) || TEMPLATES.find(t => t.key === selectedTemplate);
-  const catalogEntry = selectedTemplate ? catalogByKey.get(selectedTemplate) : undefined;
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      const { data: config, error: configError } = await supabase.from("whatsapp_web_config")
+        .select("enabled").eq("id", true).maybeSingle();
+      if (cancelled) return;
+      const enabled = !configError && config?.enabled === true;
+      setWhatsAppWebEnabled(enabled);
+      if (!enabled) {
+        setWebOnlyTemplates([]);
+        return;
+      }
+      const { data, error } = await supabase.from("whatsapp_web_templates")
+        .select("template_key, display_name, category, body, attachment_label, attachment_url")
+        .eq("is_active", true)
+        .order("sort_order").order("display_name");
+      if (!cancelled) setWebOnlyTemplates(error ? [] : (data || []) as WhatsAppWebOnlyTemplate[]);
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
+
+  const webOnlyPickerTemplates = useMemo<WhatsAppPickerTemplate[]>(() => webOnlyTemplates.map((template) => ({
+    key: `web__${template.template_key}`,
+    label: template.display_name,
+    description: `WhatsApp Web · ${template.category}`,
+    badge: "WEB",
+    followUpMsg: null,
+    buildParams: () => [],
+    preview: template.body,
+  })), [webOnlyTemplates]);
+  const pickerTemplates = useMemo(
+    () => [...visibleTemplates, ...webOnlyPickerTemplates],
+    [visibleTemplates, webOnlyPickerTemplates],
+  );
+  const pickerAllowedKeys = useMemo(() => allowedKeys
+    ? new Set([...allowedKeys, ...webOnlyPickerTemplates.map((template) => template.key)])
+    : null, [allowedKeys, webOnlyPickerTemplates]);
+
+  const selectedWebOnlyTemplate = webOnlyTemplates.find((template) => `web__${template.template_key}` === selectedTemplate);
+  const selectedTmpl = pickerTemplates.find(t => t.key === selectedTemplate) || TEMPLATES.find(t => t.key === selectedTemplate);
+  const catalogEntry = selectedTemplate && !selectedWebOnlyTemplate ? catalogByKey.get(selectedTemplate) : undefined;
 
   // Curated course facts for this lead's course. Without these a hand-sent
   // course_info said "4 years" where every other surface said
@@ -147,15 +196,49 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
     );
   }, [catalogEntry, missingSlots]);
 
-  const previewText = catalogEntry
+  const customWebPreview = selectedWebOnlyTemplate
+    ? renderWhatsAppWebOnlyTemplate(selectedWebOnlyTemplate, {
+        student_name: lead.name, course_name: curatedCourse.course_name || courseName,
+        campus_name: campusName, application_id: lead.application_id,
+      })
+    : null;
+  const previewText = customWebPreview?.ok
+    ? customWebPreview.text
+    : selectedWebOnlyTemplate
+    ? selectedWebOnlyTemplate.body
+    : catalogEntry
     ? catalogEntry.preview.replace(/\{\{(\w+)\}\}/g, (whole, name) => {
         const slot = catalogEntry.paramSlots.find((s) => s.name === name);
         return (slot && sendParams?.[slot.index - 1]) || whole;
       })
     : renderTemplatePreview(selectedTmpl, lead, courseName, campusName, courseDuration, courseType);
 
+  const webTemplateResult = useMemo(() => {
+    if (!selectedTmpl) return { ok: false as const, reason: "Choose a template first." };
+    if (selectedWebOnlyTemplate) {
+      return renderWhatsAppWebOnlyTemplate(selectedWebOnlyTemplate, {
+        student_name: lead.name,
+        course_name: curatedCourse.course_name || courseName,
+        campus_name: campusName,
+        application_id: lead.application_id,
+      });
+    }
+    const followUpText = typeof selectedTmpl.followUpMsg === "function"
+      ? selectedTmpl.followUpMsg(courseName, campusName)
+      : selectedTmpl.followUpMsg;
+    return renderWhatsAppWebTemplate({
+      components: templateComponentsByKey[selectedTmpl.key]
+        || (catalogEntry?.metaName ? templateComponentsByKey[catalogEntry.metaName] : undefined),
+      fallbackText: selectedTmpl.preview,
+      quickReplyText: selectedTmpl.isQuickReply ? selectedTmpl.quickReplyText : undefined,
+      params: sendParams ?? selectedTmpl.buildParams(lead, courseName, campusName, courseDuration, courseType),
+      followUpText,
+      needsMediaHeader: catalogEntry?.needsMediaHeader,
+    });
+  }, [selectedTmpl, selectedWebOnlyTemplate, templateComponentsByKey, sendParams, lead, courseName, campusName, courseDuration, courseType, catalogEntry, curatedCourse.course_name]);
+
   const handleSend = async () => {
-    if (!selectedTmpl) return;
+    if (!selectedTmpl || selectedWebOnlyTemplate) return;
     setSending(true);
     const result = await sendWhatsAppTemplate({
       template: selectedTmpl, lead, courseName, campusName, courseDuration, courseType,
@@ -174,6 +257,43 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
       onOpenChange(false);
       onSuccess?.();
     }, 1200);
+  };
+
+  const handleSendWhatsAppWeb = async () => {
+    if (!selectedTmpl || !webTemplateResult.ok) return;
+    const url = buildWhatsAppWebUrl(lead.phone, webTemplateResult.text);
+    const opened = window.open(url, "_blank");
+    if (!opened) {
+      toast({ title: "WhatsApp Web could not open", description: "Allow pop-ups for UniOs and try again.", variant: "destructive" });
+      return;
+    }
+    opened.opener = null;
+
+    const phoneDigits = lead.phone.replace(/\D/g, "");
+    const { error } = await supabase.from("whatsapp_messages").insert({
+      lead_id: lead.id,
+      direction: "outbound",
+      phone: phoneDigits.length === 10 ? `91${phoneDigits}` : phoneDigits,
+      message_type: selectedWebOnlyTemplate ? "text" : "template",
+      content: webTemplateResult.text,
+      template_key: selectedWebOnlyTemplate?.template_key || selectedTmpl.key,
+      status: "sent",
+      send_source: "whatsapp_web",
+      sender_user_id: profile?.id || null,
+      render_metadata: {
+        send_source: "whatsapp_web",
+        opened_prefilled_chat: true,
+        web_template_key: selectedWebOnlyTemplate?.template_key || null,
+        attachment_url: selectedWebOnlyTemplate?.attachment_url || null,
+      },
+    });
+    if (error) {
+      toast({ title: "WhatsApp Web opened, but logging failed", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    toast({ title: "WhatsApp Web opened", description: "Message logged; WhatsApp Web does not confirm whether it was sent." });
+    onSuccess?.();
   };
 
   const handleClose = (v: boolean) => {
@@ -204,8 +324,8 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
         </div>
 
         <WhatsAppTemplatePicker
-          allowedKeys={allowedKeys}
-          templates={visibleTemplates}
+          allowedKeys={pickerAllowedKeys}
+          templates={pickerTemplates}
           componentsByKey={templateComponentsByKey}
           selectedKey={selectedTemplate}
           onSelect={setSelectedTemplate}
@@ -258,9 +378,20 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
           <Button variant="outline" onClick={() => handleClose(false)} disabled={sending}>
             Cancel
           </Button>
+          {whatsAppWebEnabled && (
+            <Button
+              variant="outline"
+              onClick={handleSendWhatsAppWeb}
+              disabled={!selectedTemplate || sending || sent || missingSlots.length > 0 || !webTemplateResult.ok}
+              title={!webTemplateResult.ok ? webTemplateResult.reason : "Open a prefilled chat in WhatsApp Web"}
+              className="gap-2"
+            >
+              <ExternalLink className="h-4 w-4" /> Send WhatsApp Web
+            </Button>
+          )}
           <Button
             onClick={handleSend}
-            disabled={!selectedTemplate || sending || sent || missingSlots.length > 0}
+            disabled={!selectedTemplate || !!selectedWebOnlyTemplate || sending || sent || missingSlots.length > 0}
             className="gap-2 bg-success hover:bg-success/60"
           >
             {sending ? (

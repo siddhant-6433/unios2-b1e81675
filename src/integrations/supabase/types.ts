@@ -30759,6 +30759,72 @@ export type Database = {
           },
         ]
       }
+      whatsapp_web_config: {
+        Row: {
+          enabled: boolean
+          id: boolean
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          enabled?: boolean
+          id?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          enabled?: boolean
+          id?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      whatsapp_web_templates: {
+        Row: {
+          attachment_label: string | null
+          attachment_url: string | null
+          body: string
+          category: string
+          created_at: string
+          display_name: string
+          id: string
+          is_active: boolean
+          sort_order: number
+          template_key: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          attachment_label?: string | null
+          attachment_url?: string | null
+          body: string
+          category?: string
+          created_at?: string
+          display_name: string
+          id?: string
+          is_active?: boolean
+          sort_order?: number
+          template_key: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          attachment_label?: string | null
+          attachment_url?: string | null
+          body?: string
+          category?: string
+          created_at?: string
+          display_name?: string
+          id?: string
+          is_active?: boolean
+          sort_order?: number
+          template_key?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       whatsapp_messages: {
         Row: {
           ai_feedback: string | null
@@ -30779,6 +30845,7 @@ export type Database = {
           read_by: string | null
           render_metadata: Json | null
           sender_user_id: string | null
+          send_source: string
           status: string | null
           status_error: Json | null
           template_key: string | null
@@ -30803,6 +30870,7 @@ export type Database = {
           read_by?: string | null
           render_metadata?: Json | null
           sender_user_id?: string | null
+          send_source?: string
           status?: string | null
           status_error?: Json | null
           template_key?: string | null
@@ -30827,6 +30895,7 @@ export type Database = {
           read_by?: string | null
           render_metadata?: Json | null
           sender_user_id?: string | null
+          send_source?: string
           status?: string | null
           status_error?: Json | null
           template_key?: string | null

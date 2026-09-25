@@ -14,6 +14,7 @@ import { Plus, Edit, Trash2, Mail, MessageSquare, Eye, RefreshCw, Send, CheckCir
 import { cahetDeadlineDescription } from "@/lib/deadlineRollover";
 import { probePublicMediaUrl } from "@/lib/publicMediaUrl";
 import { WhatsAppTemplateTab } from "@/components/templates/WhatsAppTemplateTab";
+import { WhatsAppWebTemplateAdmin } from "@/components/templates/WhatsAppWebTemplateAdmin";
 import { WHATSAPP_BUSINESS_NAME } from "@/lib/waSenders";
 
 // ── WhatsApp Template (from Meta API) ──
@@ -513,6 +514,10 @@ Buttons:
             className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             Template Visibility
           </TabsTrigger>
+          <TabsTrigger value="whatsapp-web"
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            WhatsApp Web
+          </TabsTrigger>
         </TabsList>
 
         {/* EMAIL TEMPLATES */}
@@ -933,6 +938,10 @@ Buttons:
               </table>
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="whatsapp-web" className="mt-4 space-y-4">
+          <WhatsAppWebTemplateAdmin />
         </TabsContent>
       </Tabs>
 
