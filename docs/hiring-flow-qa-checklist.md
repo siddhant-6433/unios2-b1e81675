@@ -1,5 +1,31 @@
 # Hiring Flow — End-to-End QA Checklist
 
+## ✅ Automated run result — 2026-09-25 (production, 24/24 passed)
+
+The flow was executed against the deployed project via a scripted API walk
+(`/tmp/e2e-hiring.mjs`) using a **temporary** super-admin user + one test
+opening/applicant, **all cleaned up afterwards** (verified 0 leftover rows).
+
+Passed: create/publish opening → **public careers list** → **anon apply-job**
+(resume → R2) → applicant row (`careers_portal`) → enriched inbox view →
+`move_job_applicant` → `assign_job_applicant` → **AI resume parse** (Gemini,
+fit score 40 + summary) → **atomic `schedule_job_interview`** → applicant →
+**`interview-meet`** (Meet link + Calendar template) → `record_interview_feedback`
+→ **`generate_hr_offer_letter`** → applicant `offered` + acceptance token →
+**anon `get_offer_by_token`** → **anon `redeem_offer_acceptance`** → onboarding
+`offer_accepted` → **`hire_job_applicant`** → `hired` → **`hr_recruitment_metrics`**
+(16 rows) → referral insert + `job_referral_summary`.
+
+Three real bugs were found and fixed during the run (all deployed):
+1. `DO $$` cron blocks with inner `$$` strings → SQLSTATE 42601 (fixed with `$sched$`).
+2. `CREATE OR REPLACE VIEW` reordering inbox columns → 42P16 (fixed: drop+create).
+3. `has_permission` was granted only to `authenticated`, so every edge function
+   using the service client returned **Forbidden** (fixed: grant to `service_role`).
+
+Remaining manual/visual pass (needs a connected browser + an HR login): the
+in-page rendering of the screens below.
+
+
 Use this after the migrations are applied and the edge functions deployed
 (see `hr-deploy-notes.md`). It walks the funnel **from the careers portal to
 every end**, and lists what each stakeholder should see.

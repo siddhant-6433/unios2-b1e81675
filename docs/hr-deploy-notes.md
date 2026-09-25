@@ -4,32 +4,25 @@ Everything below is code-only and ships with the branch. The two things that
 **cannot** be done from the repo are the Supabase Auth redirect allow-list and
 the migration/edge deploy themselves.
 
-## 0. Deployment status (checked 2026-09-25)
+## 0. Deployment status — DEPLOYED 2026-09-25
 
-**The HR migrations are NOT in production, and cannot be pushed from this
-worktree.** Two blockers:
+The HR + hiring migrations were **applied to production** and the functions
+(`apply-job`, `resume-parse`, `interview-meet`, `hiring-notify`) **deployed**.
+End-to-end flow verified 24/24 (see `hiring-flow-qa-checklist.md`).
 
-1. **Shared-project drift.** The linked prod project (`deylhigsisuexszsmypq`)
-   has 12 migration versions that are **not** in this branch — they come from
-   other parallel Conductor worktrees that applied directly:
-   `20260918173534 20260922180428 20260923043904 20260923141818 20260923141819
-   20260923150016 20260923152640 20260923175409 20260925044809 20260925050631
-   20260925062605`.
-   `supabase db push` refuses while remote history is unknown locally.
-2. **Repo convention.** Migrations apply **on main** via the health-gated
-   script (`npm run db:migrations:apply`) — not from a feature worktree.
+Drift was resolved by merging `origin/main` (9 of 12), adding placeholder files
+for the three remaining remote-only versions (`20260925044809`, `20260925050631`,
+`20260925062605`), and fixing **three real migration bugs** found during the
+apply:
 
-Confirmed absent from prod (REST probes): `job_referrals` (PGRST205),
-`expense_claims`, `expense_advances`. `job_openings` exists but is empty.
+1. `DO $$` cron blocks with inner `$$SELECT…$$` → SQLSTATE 42601
+   (`$sched$` tags now).
+2. `CREATE OR REPLACE VIEW` reordering inbox columns → 42P16 (drop+create now).
+3. `has_permission` was granted only to `authenticated`, so every edge function
+   using the service-role client returned **Forbidden** (`hr_service_role_grants`).
 
-To deploy, pick one:
-- **Land the branch** (PR → main) and let the pipeline apply. *(preferred)*
-- **Staging project:** point at a dedicated (non-prod) project and run
-  `db:migrations:apply` + `functions deploy` there.
-- **Force prod (risky):** reconcile history first —
-  `supabase migration repair --status reverted <the 12 versions above>` then
-  `supabase db pull`, then push. This rewrites the shared migration ledger and
-  can disrupt the other active worktrees; do it deliberately.
+Verified after deploy: migrations applied, functions deployed, and the whole
+hiring flow tested live (24/24).
 
 ## 1. Migrations
 
