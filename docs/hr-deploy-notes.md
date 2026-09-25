@@ -4,6 +4,33 @@ Everything below is code-only and ships with the branch. The two things that
 **cannot** be done from the repo are the Supabase Auth redirect allow-list and
 the migration/edge deploy themselves.
 
+## 0. Deployment status (checked 2026-09-25)
+
+**The HR migrations are NOT in production, and cannot be pushed from this
+worktree.** Two blockers:
+
+1. **Shared-project drift.** The linked prod project (`deylhigsisuexszsmypq`)
+   has 12 migration versions that are **not** in this branch — they come from
+   other parallel Conductor worktrees that applied directly:
+   `20260918173534 20260922180428 20260923043904 20260923141818 20260923141819
+   20260923150016 20260923152640 20260923175409 20260925044809 20260925050631
+   20260925062605`.
+   `supabase db push` refuses while remote history is unknown locally.
+2. **Repo convention.** Migrations apply **on main** via the health-gated
+   script (`npm run db:migrations:apply`) — not from a feature worktree.
+
+Confirmed absent from prod (REST probes): `job_referrals` (PGRST205),
+`expense_claims`, `expense_advances`. `job_openings` exists but is empty.
+
+To deploy, pick one:
+- **Land the branch** (PR → main) and let the pipeline apply. *(preferred)*
+- **Staging project:** point at a dedicated (non-prod) project and run
+  `db:migrations:apply` + `functions deploy` there.
+- **Force prod (risky):** reconcile history first —
+  `supabase migration repair --status reverted <the 12 versions above>` then
+  `supabase db pull`, then push. This rewrites the shared migration ledger and
+  can disrupt the other active worktrees; do it deliberately.
+
 ## 1. Migrations
 
 Apply through the normal pipeline (do **not** hand-push):
