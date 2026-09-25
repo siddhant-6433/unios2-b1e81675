@@ -301,3 +301,6 @@ verify_jwt = false
 
 [functions.whatsapp-webhook-subscriptions]
 verify_jwt = false
+
+[functions.apply-job]
+verify_jwt = false

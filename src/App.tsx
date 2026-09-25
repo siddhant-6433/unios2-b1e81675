@@ -63,6 +63,9 @@ const NavyaKnowledge       = lazy(() => import("./pages/admin/NavyaKnowledge"));
 const NavyaVoiceAgent      = lazy(() => import("./pages/admin/NavyaVoiceAgent"));
 const IdCardCenter         = lazy(() => import("./pages/IdCardCenter"));
 const ApplyPortal          = lazy(() => import("./pages/ApplyPortal"));
+const Careers              = lazy(() => import("./pages/Careers"));
+const CareerJob            = lazy(() => import("./pages/CareerJob"));
+const OfferAcceptance      = lazy(() => import("./pages/OfferAcceptance"));
 const Consultants          = lazy(() => import("./pages/Consultants"));
 const IncentiveApprovalPage = lazy(() => import("./pages/IncentiveApprovalPage"));
 const AcademicPartners     = lazy(() => import("./pages/AcademicPartners"));
@@ -281,6 +284,10 @@ const App = () => (
               authentication.
             */}
             <Route path="/apply/offer/:token" element={<OfferLinkRedirect />} />
+            {/* Public careers portal + candidate offer acceptance. */}
+            <Route path="/careers" element={<Careers />} />
+            <Route path="/careers/offer/:token" element={<OfferAcceptance />} />
+            <Route path="/careers/:slug" element={<CareerJob />} />
             <Route path="/enquiry" element={<EnquiryForm />} />
             <Route path="/publisher-login" element={<PublisherLogin />} />
             <Route path="/about" element={<About />} />
