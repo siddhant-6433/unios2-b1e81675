@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { UserPlus, MessageSquare, ExternalLink, Sparkles, Briefcase, CheckCircle2, XCircle, Clock, Search, CalendarClock, FileText, Star, ClipboardCheck, Upload, Mail, UserCog, UserCheck, MapPin, Ban } from "lucide-react";
+import { UserPlus, MessageSquare, ExternalLink, Sparkles, Briefcase, CheckCircle2, XCircle, Clock, Search, CalendarClock, FileText, Star, ClipboardCheck, Upload, Mail, UserCog, UserCheck, MapPin, Ban, Download, LayoutGrid, List, History } from "lucide-react";
+import { downloadCsv } from "@/lib/hrReports";
 import { Card, CardContent } from "@/components/ui/card";
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
@@ -117,6 +118,8 @@ const STATUS_TABS: { key: Status; label: string }[] = [
   { key: "withdrawn", label: "Withdrawn" },
 ];
 
+const BOARD_STATUSES = ["new", "reviewing", "shortlisted", "interview", "offered", "hired"] as const;
+
 const STATUS_BADGE: Record<string, string> = {
   new: "bg-pastel-blue text-foreground/80",
   reviewing: "bg-pastel-yellow text-foreground/80",
@@ -156,6 +159,8 @@ const HrJobApplicants = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [viewMode, setViewMode] = useState<"list" | "board">("list");
+  const [timeline, setTimeline] = useState<Array<{ id: string; type: string; description: string; actor: string; created_at: string }>>([]);
   const [active, setActive] = useState<JobApplicantRow | null>(null);
   const [activeNotes, setActiveNotes] = useState("");
   const [activeRole, setActiveRole] = useState("");
@@ -301,7 +306,37 @@ const HrJobApplicants = () => {
     setHireDepartmentId("");
     setHireCampusId("");
     setInterviews([]);
+    setTimeline([]);
     fetchInterviews(row.id);
+    fetchTimeline(row.id);
+  }
+
+  async function fetchTimeline(applicantId: string) {
+    const { data } = await supabase.rpc("job_applicant_timeline" as any, { _applicant_id: applicantId });
+    setTimeline((data as any[]) || []);
+  }
+
+  function exportCsv() {
+    if (filtered.length === 0) {
+      toast({ title: "Nothing to export", description: "No applicants in this view." });
+      return;
+    }
+    downloadCsv(
+      `job-applicants-${tab}-${new Date().toISOString().slice(0, 10)}.csv`,
+      filtered.map((r) => ({
+        name: r.name ?? "",
+        phone: r.phone ?? "",
+        email: r.email ?? "",
+        desired_role: r.desired_role ?? "",
+        status: r.status,
+        applied_via: r.applied_via ?? "",
+        job_opening: r.job_opening_title ?? "",
+        experience_years: r.experience_years ?? "",
+        assigned_to: r.assigned_to_name ?? "",
+        stage_changed_at: r.stage_changed_at ?? "",
+        created_at: r.created_at,
+      })),
+    );
   }
 
   async function fetchInterviews(applicantId: string) {
@@ -568,18 +603,69 @@ const HrJobApplicants = () => {
             )}
           </button>
         ))}
-        <div className="ml-auto relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search name, phone, role..."
-            className="h-8 w-[260px] rounded-md border border-border bg-background pl-8 pr-3 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-ring/20"
-          />
+        <div className="ml-auto flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search name, phone, role..."
+              className="h-8 w-[240px] rounded-md border border-border bg-background pl-8 pr-3 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-ring/20"
+            />
+          </div>
+          <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
+            <button
+              onClick={() => setViewMode("list")}
+              title="List view"
+              className={`rounded p-1.5 ${viewMode === "list" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted/50"}`}
+            >
+              <List className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => setViewMode("board")}
+              title="Board view"
+              className={`rounded p-1.5 ${viewMode === "board" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted/50"}`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={exportCsv}>
+            <Download className="h-3.5 w-3.5" /> Export
+          </Button>
         </div>
       </div>
 
-      {/* List */}
+      {/* Board / List */}
+      {viewMode === "board" ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          {BOARD_STATUSES.map((status) => {
+            const rows = filtered.filter((r) => r.status === status);
+            return (
+              <div key={status} className="rounded-xl border border-border bg-muted/20">
+                <div className="flex items-center justify-between border-b border-border px-3 py-2">
+                  <span className="text-xs font-semibold capitalize text-foreground">{status}</span>
+                  <span className="text-[10px] text-muted-foreground">{rows.length}</span>
+                </div>
+                <div className="space-y-2 p-2">
+                  {rows.length === 0 ? (
+                    <p className="px-1 py-3 text-center text-[11px] text-muted-foreground">—</p>
+                  ) : rows.map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => openDetail(r)}
+                      className="w-full rounded-lg border border-border bg-card p-2.5 text-left transition-colors hover:bg-muted/40"
+                    >
+                      <p className="truncate text-[13px] font-medium text-foreground">{r.name || "—"}</p>
+                      <p className="truncate text-[11px] text-muted-foreground">{r.desired_role || r.job_opening_title || "—"}</p>
+                      <p className="mt-1 truncate text-[10px] text-muted-foreground capitalize">{r.applied_via || r.lead_source || ""}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
       <Card className="border-border/60 shadow-none overflow-hidden">
         <CardContent className="p-0">
           {loading ? (
@@ -691,6 +777,7 @@ const HrJobApplicants = () => {
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* Detail dialog */}
       <Dialog open={!!active} onOpenChange={(open) => !open && setActive(null)}>
@@ -887,6 +974,26 @@ const HrJobApplicants = () => {
                     </div>
                   )}
                 </div>
+
+                {/* Activity timeline */}
+                {timeline.length > 0 && (
+                  <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                      <History className="h-3 w-3" /> Activity
+                    </p>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                      {timeline.map((t) => (
+                        <div key={t.id} className="flex items-start gap-2 text-[12px]">
+                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/60" />
+                          <div className="min-w-0">
+                            <p className="text-foreground">{t.description}</p>
+                            <p className="text-[10px] text-muted-foreground">{t.actor} · {formatDate(t.created_at)}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {interviews.length > 0 && (
                   <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">

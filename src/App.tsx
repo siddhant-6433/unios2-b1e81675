@@ -108,6 +108,7 @@ const HrPayroll            = lazy(() => import("./pages/HrPayroll"));
 const HrJobApplicants      = lazy(() => import("./pages/HrJobApplicants"));
 const HrJobOpenings        = lazy(() => import("./pages/HrJobOpenings"));
 const HrOnboarding         = lazy(() => import("./pages/HrOnboarding"));
+const HrRecruitment        = lazy(() => import("./pages/HrRecruitment"));
 const HrExpenses           = lazy(() => import("./pages/HrExpenses"));
 const HrPerformance        = lazy(() => import("./pages/HrPerformance"));
 const HrAnnouncements      = lazy(() => import("./pages/HrAnnouncements"));
@@ -390,6 +391,7 @@ const App = () => (
                       <Route path="/hr-job-openings" element={<RequirePermission module="hr" action="view"><HrJobOpenings /></RequirePermission>} />
                       <Route path="/hr-job-applicants" element={<RequirePermission module="hr" action="view"><HrJobApplicants /></RequirePermission>} />
                       <Route path="/hr-onboarding" element={<RequirePermission module="hr" action="view"><HrOnboarding /></RequirePermission>} />
+                      <Route path="/hr-recruitment" element={<RequirePermission module="hr" action="view"><HrRecruitment /></RequirePermission>} />
                       <Route path="/hr-attendance" element={<RequirePermission module="hr" action="view"><HrAttendance /></RequirePermission>} />
                       <Route path="/hr-leave" element={<RequirePermission module="hr" action="view"><HrLeaveManagement /></RequirePermission>} />
                       <Route path="/hr-directory" element={<RequirePermission module="hr" action="view"><HrEmployeeDirectory /></RequirePermission>} />
