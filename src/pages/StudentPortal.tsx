@@ -334,6 +334,7 @@ export default function StudentPortal() {
   const todayKey = new Date().toLocaleDateString("en-CA");
   const isOutstanding = (fee: FeeItem) => fee.balance > 0 && fee.status !== "paid";
   const isDueNow = (fee: FeeItem) => isOutstanding(fee) && fee.due_date <= todayKey;
+  const isFutureDue = (fee: FeeItem) => isOutstanding(fee) && fee.due_date > todayKey;
   const dueNowFees = fees.filter(isDueNow);
   const totalDueNow = dueNowFees.reduce((s, f) => s + f.balance, 0);
 
