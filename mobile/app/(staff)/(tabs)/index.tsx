@@ -324,6 +324,12 @@ function StaffHome({ userId, isAdmin }: { userId: string; isAdmin: boolean }) {
           label="Documents"
           onPress={() => router.push('/(staff)/work/documents' as any)}
         />
+        <Pin
+          colors={colors}
+          icon={<Users size={20} color={colors.ink} />}
+          label="Recruitment"
+          onPress={() => router.push('/(staff)/work/recruitment' as any)}
+        />
       </View>
     </View>
   );

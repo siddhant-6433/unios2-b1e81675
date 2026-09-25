@@ -61,6 +61,17 @@ interface JobApplicantRow {
   cover_note: string | null;
   source_channel: string | null;
   source_message_id: string | null;
+  ai_rank_score: number | null;
+  ai_summary: string | null;
+  parsed_profile: {
+    skills?: string[];
+    strengths?: string[];
+    gaps?: string[];
+    total_experience_years?: number;
+    current_role?: string | null;
+  } | null;
+  referrer_name: string | null;
+  referrer_user_id: string | null;
 }
 
 interface InterviewRow {
@@ -160,6 +171,10 @@ const HrJobApplicants = () => {
   const [search, setSearch] = useState("");
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [viewMode, setViewMode] = useState<"list" | "board">("list");
+  const [sortByRank, setSortByRank] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [aiParsingFor, setAiParsingFor] = useState<string | null>(null);
+  const [meetFor, setMeetFor] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<Array<{ id: string; type: string; description: string; actor: string; created_at: string }>>([]);
   const [active, setActive] = useState<JobApplicantRow | null>(null);
   const [activeNotes, setActiveNotes] = useState("");
@@ -264,17 +279,23 @@ const HrJobApplicants = () => {
   }
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return items;
-    const q = search.toLowerCase();
-    return items.filter(r =>
-      (r.name || "").toLowerCase().includes(q)
-      || (r.phone || "").toLowerCase().includes(q)
-      || (r.desired_role || "").toLowerCase().includes(q)
-      || (r.job_opening_title || "").toLowerCase().includes(q)
-      || (r.assigned_to_name || "").toLowerCase().includes(q)
-      || (r.last_message_preview || "").toLowerCase().includes(q)
-    );
-  }, [items, search]);
+    let rows = items;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      rows = rows.filter(r =>
+        (r.name || "").toLowerCase().includes(q)
+        || (r.phone || "").toLowerCase().includes(q)
+        || (r.desired_role || "").toLowerCase().includes(q)
+        || (r.job_opening_title || "").toLowerCase().includes(q)
+        || (r.assigned_to_name || "").toLowerCase().includes(q)
+        || (r.last_message_preview || "").toLowerCase().includes(q)
+      );
+    }
+    if (sortByRank) {
+      rows = [...rows].sort((a, b) => Number(b.ai_rank_score ?? -1) - Number(a.ai_rank_score ?? -1));
+    }
+    return rows;
+  }, [items, search, sortByRank]);
 
   function openDetail(row: JobApplicantRow) {
     setActive(row);
@@ -337,6 +358,63 @@ const HrJobApplicants = () => {
         created_at: r.created_at,
       })),
     );
+  }
+
+  async function parseResume(id: string) {
+    setAiParsingFor(id);
+    const { data, error } = await supabase.functions.invoke("resume-parse", { body: { applicant_id: id } });
+    setAiParsingFor(null);
+    if (error || (data as any)?.error) {
+      toast({
+        title: "Resume parse failed",
+        description: (data as any)?.error || error?.message || "Try again",
+        variant: "destructive",
+      });
+      return;
+    }
+    toast({ title: "Resume parsed", description: `AI fit score ${(data as any)?.rank_score ?? "—"}/100` });
+    await fetchAll();
+    if (active?.id === id) {
+      const { data: fresh } = await supabase.from("job_applicants_inbox" as any).select("*").eq("id", id).maybeSingle();
+      if (fresh) setActive(fresh as any);
+    }
+  }
+
+  async function genMeet(interviewId: string) {
+    setMeetFor(interviewId);
+    const { data, error } = await supabase.functions.invoke("interview-meet", { body: { interview_id: interviewId } });
+    setMeetFor(null);
+    if (error || (data as any)?.error) {
+      toast({ title: "Could not create meeting", description: (data as any)?.error || error?.message, variant: "destructive" });
+      return;
+    }
+    const url = (data as any)?.calendar_url as string | undefined;
+    toast({
+      title: (data as any)?.created_via_api ? "Google Meet + invite created" : "Open Google Calendar to add it",
+      description: `Meet: ${(data as any)?.meet_link ?? ""}`,
+    });
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+    if (active) await fetchInterviews(active.id);
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  }
+
+  async function bulkMove(status: string) {
+    if (selectedIds.length === 0) return;
+    setSaving(true);
+    for (const id of selectedIds) {
+      const { error } = await supabase.rpc("move_job_applicant" as any, { _applicant_id: id, _status: status, _note: null });
+      if (error) {
+        toast({ title: "Bulk move stopped", description: error.message, variant: "destructive" });
+        break;
+      }
+    }
+    setSaving(false);
+    toast({ title: `${selectedIds.length} moved to ${status}` });
+    setSelectedIds([]);
+    await fetchAll();
   }
 
   async function fetchInterviews(applicantId: string) {
@@ -629,11 +707,37 @@ const HrJobApplicants = () => {
               <LayoutGrid className="h-3.5 w-3.5" />
             </button>
           </div>
+          <Button
+            size="sm"
+            variant={sortByRank ? "default" : "outline"}
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => setSortByRank((v) => !v)}
+            title="Sort by AI fit score"
+          >
+            <Sparkles className="h-3.5 w-3.5" /> AI rank
+          </Button>
           <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={exportCsv}>
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
         </div>
       </div>
+
+      {selectedIds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+          <span className="text-xs font-medium text-foreground">{selectedIds.length} selected</span>
+          <Select onValueChange={(v) => bulkMove(v)}>
+            <SelectTrigger className="h-8 w-[200px] text-xs">
+              <SelectValue placeholder="Move to…" />
+            </SelectTrigger>
+            <SelectContent>
+              {["reviewing", "shortlisted", "interview", "offered", "hired", "rejected", "withdrawn"].map((s) => (
+                <SelectItem key={s} value={s} className="text-xs capitalize">{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => setSelectedIds([])}>Clear</Button>
+        </div>
+      )}
 
       {/* Board / List */}
       {viewMode === "board" ? (
@@ -681,6 +785,13 @@ const HrJobApplicants = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/20">
+                  <th className="w-8 px-3 py-2.5 text-left">
+                    <Checkbox
+                      checked={filtered.length > 0 && filtered.every((r) => selectedIds.includes(r.id))}
+                      onCheckedChange={(v) => setSelectedIds(v ? filtered.map((r) => r.id) : [])}
+                      aria-label="Select all"
+                    />
+                  </th>
                   <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Applicant</th>
                   <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Role</th>
                   <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Exp</th>
@@ -695,9 +806,19 @@ const HrJobApplicants = () => {
               <tbody>
                 {filtered.map(r => (
                   <tr key={r.id} className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer" onClick={() => openDetail(r)}>
+                    <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox checked={selectedIds.includes(r.id)} onCheckedChange={() => toggleSelect(r.id)} aria-label="Select applicant" />
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
-                        <span className="font-medium text-foreground">{r.name || "—"}</span>
+                        <span className="font-medium text-foreground flex items-center gap-1.5">
+                          {r.name || "—"}
+                          {r.ai_rank_score != null && (
+                            <Badge className="border-0 bg-pastel-blue text-foreground/80 text-[9px]" title="AI fit score">
+                              <Sparkles className="h-2.5 w-2.5 mr-0.5" /> {Number(r.ai_rank_score).toFixed(0)}
+                            </Badge>
+                          )}
+                        </span>
                         <span className="text-[11px] text-muted-foreground font-mono">{r.phone || "—"}</span>
                         {r.rating != null && r.rating > 0 && (
                           <span className="mt-0.5 inline-flex items-center gap-0.5" title={`Rating ${r.rating}/5`}>
@@ -851,9 +972,46 @@ const HrJobApplicants = () => {
                       >
                         <Upload className="h-3 w-3 mr-1" /> {resumeUploading ? "Uploading…" : active.resume_url ? "Replace" : "Upload resume"}
                       </Button>
+                      {active.resume_url && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1 px-2 text-[11px]"
+                          disabled={aiParsingFor === active.id}
+                          onClick={() => parseResume(active.id)}
+                        >
+                          <Sparkles className="h-3 w-3" /> {aiParsingFor === active.id ? "Parsing…" : "Parse with AI"}
+                        </Button>
+                      )}
                     </>
                   )}
                 </div>
+
+                {(active.ai_summary || active.parsed_profile) && (
+                  <div className="rounded-md border border-primary/20 bg-primary/5 p-3 space-y-1.5">
+                    <p className="text-[11px] uppercase tracking-wide text-primary flex items-center gap-1.5">
+                      <Sparkles className="h-3 w-3" /> AI screen
+                      {active.ai_rank_score != null && (
+                        <Badge className="border-0 bg-pastel-blue text-foreground/80 text-[10px]">
+                          Fit {Number(active.ai_rank_score).toFixed(0)}/100
+                        </Badge>
+                      )}
+                    </p>
+                    {active.ai_summary && <p className="text-[12.5px] text-foreground/90">{active.ai_summary}</p>}
+                    {!!active.parsed_profile?.skills?.length && (
+                      <p className="text-[11.5px] text-muted-foreground">
+                        <span className="font-medium text-foreground/80">Skills: </span>
+                        {active.parsed_profile.skills.slice(0, 12).join(", ")}
+                      </p>
+                    )}
+                    {!!active.parsed_profile?.gaps?.length && (
+                      <p className="text-[11.5px] text-muted-foreground">
+                        <span className="font-medium text-foreground/80">Gaps: </span>
+                        {active.parsed_profile.gaps.join(", ")}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {active.cover_note && (
                   <div>
@@ -1010,6 +1168,17 @@ const HrJobApplicants = () => {
                             )}
                           </span>
                           <div className="flex items-center gap-1">
+                            {canInterview && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 px-2 text-[11px]"
+                                disabled={meetFor === iv.id}
+                                onClick={() => genMeet(iv.id)}
+                              >
+                                <CalendarClock className="h-3 w-3 mr-1" /> {meetFor === iv.id ? "Creating…" : "Meet & Calendar"}
+                              </Button>
+                            )}
                             {canInterview && iv.status === "scheduled" && (
                               <Button
                                 size="sm"

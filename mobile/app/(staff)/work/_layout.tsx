@@ -24,6 +24,7 @@ export default function WorkStackLayout() {
       <Stack.Screen name="documents" options={{ title: 'Documents' }} />
       <Stack.Screen name="comp-off" options={{ title: 'Comp-Off' }} />
       <Stack.Screen name="encashment" options={{ title: 'Leave Encashment' }} />
+      <Stack.Screen name="recruitment" options={{ title: 'Recruitment' }} />
       <Stack.Screen name="team" options={{ title: 'Team' }} />
       <Stack.Screen name="student-photos" options={{ title: 'Photo Day' }} />
       <Stack.Screen name="classes" options={{ title: 'Classes' }} />

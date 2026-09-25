@@ -166,6 +166,7 @@ const hrSubMenu: MenuItem[] = [
   { title: "Job Applicants", url: "/hr-job-applicants", icon: UserPlus, permission: "hr:view" },
   { title: "Onboarding", url: "/hr-onboarding", icon: UserPlus, permission: "hr:view" },
   { title: "Recruitment", url: "/hr-recruitment", icon: BarChart3, permission: "hr:view" },
+  { title: "Referrals", url: "/hr-referrals", icon: Gift, permission: "hr:self" },
   { title: "WhatsApp Inbox", url: "/whatsapp-inbox?scope=hr", icon: WhatsAppIcon, permission: "hr:view" },
   { title: "Attendance", url: "/hr-attendance", icon: Fingerprint, permission: "hr:view" },
   { title: "Leave Mgmt", url: "/hr-leave", icon: CalendarOff, permission: "hr:view" },
