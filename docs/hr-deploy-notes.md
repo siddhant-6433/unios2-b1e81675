@@ -25,13 +25,20 @@ Notable ones (newest first): `hr_cleanup_hygiene`, `hr_expense_approval_workflow
 
 ## 2. Edge functions
 
-Deploy the one new function; the rest already exist.
+Deploy the new functions; the rest already exist.
 
 ```bash
-supabase functions deploy zoho-expense-bill-sync
+supabase functions deploy zoho-expense-bill-sync   # expense → Zoho vendor bill
+supabase functions deploy hiring-notify            # candidate emails (uses send-email/Resend)
+supabase functions deploy apply-job                # public careers intake (verify_jwt off)
 ```
 
-It reuses the existing `_shared/zoho.ts` helpers and the `ZOHO_*` secrets.
+- `zoho-expense-bill-sync` reuses `_shared/zoho.ts` and the `ZOHO_*` secrets.
+- `hiring-notify` uses the seeded `hiring-acknowledgement|interview-invite|offer|regret`
+  email templates via the existing `send-email` function (needs `RESEND_API_KEY`, already set).
+- `apply-job` is public (`verify_jwt = false`, added to `supabase/config.toml`) and needs the
+  existing `R2_*` secrets to store resumes. It creates `job_applicants` with the service role,
+  so no anon INSERT policy is required.
 
 ## 3. Zoho
 
