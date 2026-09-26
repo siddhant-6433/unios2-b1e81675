@@ -15,6 +15,7 @@ const MIGRATIONS = [
   "supabase/migrations/20260922180428_beacon_academic_reports.sql",
   "supabase/migrations/20260923141818_seed_beacon_av2_subjects.sql",
   "supabase/migrations/20260923141819_beacon_office_marks_entry.sql",
+  "supabase/migrations/20260926121859_beacon_marks_entry_roles_and_open.sql",
 ];
 const SUBJECTS_SEED = MIGRATIONS[1];
 
@@ -186,6 +187,7 @@ create table _app_config(key text primary key, value text not null);
 
   await db.query("insert into user_roles(user_id, role) values($1,'super_admin')", [ID.admin]);
   await db.query("insert into user_roles(user_id, role) values($1,'principal')", [ID.principal]);
+  await db.query("insert into user_roles(user_id, role) values($1,'teacher')", [ID.mathTeacher]);
   await db.query("insert into user_institution_access(user_id, institution_id, role) values($1,$2,'principal')", [ID.principal, ID.institution]);
   await db.query("insert into user_institution_access(user_id, institution_id, role) values($1,$2,'office_assistant')", [ID.office, ID.institution]);
 
@@ -548,6 +550,27 @@ describe("Beacon academic RPC migration", () => {
     await asUser(ID.parent1);
     await expect(familyReports(ID.student1)).resolves.toBeInstanceOf(Array);
     await db.exec(`update students set login_disabled=false where id='${ID.student1}'`);
+  });
+
+  it("lets a teacher and the principal enter marks for any paper", async () => {
+    const policyId = await createPolicy(ID.classX, "Class X staff entry", rules());
+    await approvePolicy(policyId);
+    const examId = await createUnitExam(policyId, "Unit Test 7");
+    await asUser(ID.admin);
+    let version = (await action(examId, "open", 1, {})).version;
+    const sciencePaper = (await workspace(examId)).papers.find((paper) => paper.subject_id === ID.science)!;
+    // mathsTeacher holds the teacher role but is not this paper's assigned teacher.
+    await asUser(ID.mathTeacher);
+    version = (await action(examId, "save_marks", version, { paper_id: sciencePaper.id, rows: [
+      { student_id: ID.student1, status: "present", scores: { theory: 60, internal: 12 } },
+      { student_id: ID.student2, status: "present", scores: { theory: 50, internal: 10 } },
+    ] })).version;
+    await asUser(ID.principal);
+    version = (await action(examId, "save_marks", version, { paper_id: sciencePaper.id, rows: [
+      { student_id: ID.student1, status: "present", scores: { theory: 62, internal: 13 } },
+      { student_id: ID.student2, status: "present", scores: { theory: 52, internal: 11 } },
+    ] })).version;
+    expect(version).toBeGreaterThan(1);
   });
 
   it("seeds the Beacon subject master idempotently", async () => {
