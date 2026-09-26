@@ -157,22 +157,33 @@ Deno.serve(async (req) => {
             .eq("route", "hr").eq("provider", "meta").not("meta_phone_number_id", "is", null)
             .limit(1).maybeSingle();
           const params = waTemplate.params.map((k) => variables[k] ?? "");
-          const waRes = await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: authHeader },
-            body: JSON.stringify({
-              template_key: waTemplate.key, params, phone: toPhone, provider: "meta",
-              business_phone_number_id: ch?.meta_phone_number_id ?? undefined,
-            }),
-          });
-          const waData = await waRes.json().catch(() => ({}));
-          const waOk = waRes.ok && (waData.ok !== false) && !waData.error;
+          const sendVia = async (phoneNumberId?: string) => {
+            const r = await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: authHeader },
+              body: JSON.stringify({
+                template_key: waTemplate.key, params, phone: toPhone, provider: "meta",
+                business_phone_number_id: phoneNumberId,
+              }),
+            });
+            const d = await r.json().catch(() => ({}));
+            return { r, d, ok: r.ok && (d.ok !== false) && !d.error };
+          };
+          // Prefer the HR sender; fall back to the default Meta sender, which is
+          // known-good for these templates (the HR number can be blocked by Meta
+          // permissions until its WABA/token link is fixed).
+          let sender = ch?.meta_phone_number_id ?? "default";
+          let { r: waRes, d: waData, ok: waOk } = await sendVia(ch?.meta_phone_number_id ?? undefined);
+          if (!waOk && ch?.meta_phone_number_id) {
+            const retry = await sendVia(undefined);
+            if (retry.ok) { waRes = retry.r; waData = retry.d; waOk = true; sender = "default"; }
+          }
           await admin.from("hiring_notifications").insert({
             applicant_id: applicantId, stage, channel: "whatsapp", template_key: waTemplate.key,
             status: waOk ? "sent" : "failed",
-            detail: waOk ? toPhone : JSON.stringify(waData).slice(0, 300), sent_by: uid,
+            detail: waOk ? `${toPhone} via ${sender}` : JSON.stringify(waData).slice(0, 300), sent_by: uid,
           });
-          results.whatsapp = waOk ? { sent: toPhone } : { error: waData.error || `whatsapp-send ${waRes.status}`, detail: waData };
+          results.whatsapp = waOk ? { sent: toPhone, sender } : { error: waData.error || `whatsapp-send ${waRes.status}`, detail: waData };
         }
       }
     }
