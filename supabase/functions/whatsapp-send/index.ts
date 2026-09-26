@@ -276,6 +276,13 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   // request is allocated (see student-services-notify). Param order must match
   // that function's sendTemplate() call exactly.
   student_services_tat: { name: "student_services_tat", params: ["handler_name", "request_number", "service_name", "student_name", "course_batch", "due_date"] },
+
+  // Hiring (recruitment) — Meta-approved UTILITY templates sent by
+  // hiring-notify on the HR sender. Param order matches the approved bodies.
+  hiring_application_received: { name: "hiring_application_received", params: ["candidate_name", "role"] },
+  hiring_interview_invite: { name: "hiring_interview_invite", params: ["candidate_name", "role", "interview_when", "interview_where"] },
+  hiring_offer_extended: { name: "hiring_offer_extended", params: ["candidate_name", "role", "joining_date"] },
+  hiring_not_proceeding: { name: "hiring_not_proceeding", params: ["candidate_name", "role"] },
 };
 
 function templateBodyFromComponents(components: unknown): string | null {
