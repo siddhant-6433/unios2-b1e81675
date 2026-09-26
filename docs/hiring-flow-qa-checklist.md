@@ -25,6 +25,32 @@ Three real bugs were found and fixed during the run (all deployed):
 Remaining manual/visual pass (needs a connected browser + an HR login): the
 in-page rendering of the screens below.
 
+## ✅ WhatsApp hiring templates — tested 2026-09-26
+
+The four hiring templates are **APPROVED on the WABA** and were sent from
+`hiring-notify` for real:
+
+| Stage | Template | Result |
+|---|---|---|
+| acknowledgement | `hiring_application_received` | sent |
+| interview_invite | `hiring_interview_invite` | sent |
+| offer | `hiring_offer_extended` | sent |
+| regret | `hiring_not_proceeding` | sent |
+
+**Two findings:**
+1. **HR sender blocked by Meta.** Sending from the HR number
+   (`970526789470416`) returns `#200 You do not have the necessary permissions
+   to send messages on behalf of this WhatsApp Business Account`, while the
+   **default** sender delivers. `hiring-notify` therefore prefers the HR sender
+   and **falls back to the default** (recorded as `via default` in
+   `hiring_notifications`). Fix the HR number's WABA/token link in Meta and it
+   will use the HR number automatically.
+2. **Comms suppression.** The test number was blocked by
+   `phone_comms_suppressed` because an archived student's lead holds that phone
+   (the same root cause as the earlier "login disabled" message). The send path
+   correctly refused while suppressed; un-archiving (temporarily) allowed the
+   four sends, then the record was restored.
+
 
 Use this after the migrations are applied and the edge functions deployed
 (see `hr-deploy-notes.md`). It walks the funnel **from the careers portal to
