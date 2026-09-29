@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { AcademicError, AcademicPanel, academicInput, readableAcademicError } from "@/components/beacon/AcademicFields";
+import { AcademicError, AcademicField, AcademicPanel, academicInput, readableAcademicError } from "@/components/beacon/AcademicFields";
 import { PolicyEditor, type AcademicAction } from "@/components/beacon/PolicyEditor";
 import { ExamEditor } from "@/components/beacon/ExamEditor";
 import { ExamWorkspace } from "@/components/beacon/ExamWorkspace";
 import { BEACON_ACADEMICS_ENABLED } from "@/lib/beaconAcademicsFeature";
-import { CBSE_EXAM_STATUS_LABELS, type CbseConfiguration, type CbseWorkspace } from "@/lib/cbseExams";
+import { CBSE_CATEGORY_LABELS, CBSE_EXAM_STATUS_LABELS, type CbseConfiguration, type CbseExam, type CbseWorkspace } from "@/lib/cbseExams";
 import { fetchCbseConfiguration, fetchCbseWorkspace, performCbseAction, setCbseClassTeacher } from "@/lib/cbseExamsClient";
 
 export default function BeaconAcademics() {
@@ -15,6 +15,7 @@ export default function BeaconAcademics() {
   const [workspace,setWorkspace]=useState<CbseWorkspace|null>(null);
   const [examId,setExamId]=useState("");
   const [tab,setTab]=useState<"exams"|"policies"|"create">("exams");
+  const [assessmentKey,setAssessmentKey]=useState("");
   const [error,setError]=useState<string|null>(null);
   const [busy,setBusy]=useState(false);
   const [loading,setLoading]=useState(false);
@@ -35,6 +36,12 @@ export default function BeaconAcademics() {
     mutating.current=true;setBusy(true);setError(null);
     try{const result=await setCbseClassTeacher(workspace.exam.id,teacherUserId,workspace.exam.version,remarks);if(result.error)throw new Error(result.error);const fresh=await fetchCbseWorkspace(workspace.exam.id);if(fresh.error)throw new Error(fresh.error);setWorkspace(fresh.data);await loadConfiguration();return true;}catch(e){setError(readableAcademicError(e));return false;}finally{mutating.current=false;setBusy(false);}
   };
+  const examKey=(e:CbseExam)=>`${e.category}:${e.sequence}`;
+  const examOptionLabel=(e:CbseExam)=>`${CBSE_CATEGORY_LABELS[e.category]}${e.category==="unit_test"||e.category==="pre_board"?` ${e.sequence}`:""}`;
+  const selectedExam=configuration?.exams.find(e=>e.id===examId);
+  const activeAssessment=selectedExam?examKey(selectedExam):assessmentKey;
+  const assessmentOptions=configuration?Array.from(new Map(configuration.exams.map(e=>[examKey(e),examOptionLabel(e)])).entries()).sort((a,b)=>a[1].localeCompare(b[1])):[];
+  const assessmentExams=configuration?configuration.exams.filter(e=>examKey(e)===activeAssessment):[];
   if(!BEACON_ACADEMICS_ENABLED)return <div className="p-6"><AcademicPanel title="Assessments - CBSE"><p className="text-sm text-muted-foreground">Academic reporting is not enabled for this installation. Contact your administrator.</p></AcademicPanel></div>;
   const disabled=busy||isImpersonating;
   return <main className="p-4 sm:p-6 max-w-7xl mx-auto space-y-5"><header className="flex flex-wrap justify-between gap-3"><div><h1 className="text-2xl font-semibold">Assessments - CBSE</h1><p className="text-sm text-muted-foreground mt-1">School performance reports · Avantika and Arthala · Classes I–XII</p></div><Button variant="outline" disabled={busy||loading} onClick={()=>setRefresh(n=>n+1)}>Refresh</Button></header>
@@ -43,7 +50,7 @@ export default function BeaconAcademics() {
     {configuration&&<><nav aria-label="Academic reporting" className="flex flex-wrap gap-2"><Button variant={tab==="exams"?"default":"outline"} disabled={busy} onClick={()=>setTab("exams")}>Exams and reports</Button>{configuration.capabilities.manage&&<><Button variant={tab==="create"?"default":"outline"} disabled={busy} onClick={()=>setTab("create")}>Create exam</Button><Button variant={tab==="policies"?"default":"outline"} disabled={busy} onClick={()=>setTab("policies")}>Assessment policies</Button></>}</nav>
     {tab==="policies"&&<PolicyEditor configuration={configuration} disabled={disabled} canApprove={configuration.capabilities.review} onAction={act}/>}
     {tab==="create"&&<ExamEditor configuration={configuration} disabled={disabled} onAction={act}/>}
-    {tab==="exams"&&<><label className="block text-sm font-medium space-y-2"><span>Select exam or annual report</span><select className={academicInput} disabled={busy} value={examId} onChange={e=>setExamId(e.target.value)}><option value="">Choose an assessment</option>{configuration.exams.map(e=><option key={e.id} value={e.id}>{e.name} · {configuration.courses.find(c=>c.id===e.course_id)?.institution_name} · {e.section||"Whole class"} · {CBSE_EXAM_STATUS_LABELS[e.status]}</option>)}</select></label>{!configuration.exams.length&&<AcademicPanel title="No assessments yet"><p className="text-sm text-muted-foreground">An academic administrator can configure an assessment policy and create the first exam.</p></AcademicPanel>}{workspace&&<ExamWorkspace key={`${workspace.exam.id}:${workspace.exam.version}`} workspace={workspace} configuration={configuration} disabled={disabled} onAction={act} onChangeClassTeacher={changeClassTeacher}/>}</>}
+    {tab==="exams"&&<><div className="grid gap-3 sm:grid-cols-2"><AcademicField label="Assessment"><select aria-label="Assessment" className={academicInput} disabled={busy} value={activeAssessment} onChange={e=>{const k=e.target.value;setAssessmentKey(k);const first=configuration.exams.find(x=>examKey(x)===k);setExamId(first?first.id:"");}}><option value="">Choose an assessment</option>{assessmentOptions.map(([k,label])=><option key={k} value={k}>{label}</option>)}</select></AcademicField><AcademicField label="Class and section"><select aria-label="Class and section" className={academicInput} disabled={busy||!activeAssessment} value={examId} onChange={e=>setExamId(e.target.value)}><option value="">Choose a class</option>{assessmentExams.map(e=><option key={e.id} value={e.id}>{configuration.courses.find(c=>c.id===e.course_id)?.name||e.course_id} · {e.section||"Whole class"} · {CBSE_EXAM_STATUS_LABELS[e.status]}</option>)}</select></AcademicField></div>{!configuration.exams.length&&<AcademicPanel title="No assessments yet"><p className="text-sm text-muted-foreground">An academic administrator can configure an assessment policy and create the first exam.</p></AcademicPanel>}{workspace&&<ExamWorkspace key={`${workspace.exam.id}:${workspace.exam.version}`} workspace={workspace} configuration={configuration} disabled={disabled} onAction={act} onChangeClassTeacher={changeClassTeacher}/>}</>}
     </>}{loading&&<p role="status" className="text-sm text-muted-foreground">Loading academic reports…</p>}
   </main>;
 }
