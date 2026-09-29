@@ -99,7 +99,7 @@ type DownloadPayload = { report_id: string; revision: number; eligibility_token:
 type Configuration = { courses: { code: string; grade: number }[] };
 type WorkspaceResult = {
   exam: { id: string; status: string; revision: number; version: number; fee_cutoff: string };
-  papers: { id: string; subject_id: string; locked_at: string | null }[];
+  papers: { id: string; subject_id: string; locked_at: string | null; can_enter: boolean }[];
   students: { id: string; applicable_subject_ids: string[] }[];
   capabilities: { enter: boolean };
 };
