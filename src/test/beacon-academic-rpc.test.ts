@@ -16,6 +16,7 @@ const MIGRATIONS = [
   "supabase/migrations/20260923141818_seed_beacon_av2_subjects.sql",
   "supabase/migrations/20260923141819_beacon_office_marks_entry.sql",
   "supabase/migrations/20260926121859_beacon_marks_entry_roles_and_open.sql",
+  "supabase/migrations/20260929055340_beacon_class_teachers_assign_and_change.sql",
 ];
 const SUBJECTS_SEED = MIGRATIONS[1];
 
@@ -571,6 +572,25 @@ describe("Beacon academic RPC migration", () => {
       { student_id: ID.student2, status: "present", scores: { theory: 52, internal: 11 } },
     ] })).version;
     expect(version).toBeGreaterThan(1);
+  });
+
+  it("lets the principal change the class teacher but not a teacher", async () => {
+    const policyId = await createPolicy(ID.classX, "Class X class teacher change", rules());
+    await approvePolicy(policyId);
+    const examId = await createUnitExam(policyId, "Unit Test 8");
+    const setClassTeacher = (version: number, teacher: string) =>
+      db.query<{ r: { id: string; version: number } }>(
+        "select public.cbse_set_class_teacher($1::uuid,$2::uuid,$3::integer,$4::text) as r",
+        [examId, teacher, version, "Handover for review"],
+      );
+    await asUser(ID.mathTeacher);
+    await rejects(() => setClassTeacher(1, ID.classTeacher), /principal or super admin/i);
+    await asUser(ID.principal);
+    const res = await setClassTeacher(1, ID.classTeacher);
+    expect(res.rows[0].r.version).toBe(2);
+    const row = await db.query<{ class_teacher_user_id: string }>("select class_teacher_user_id from cbse_exams where id=$1", [examId]);
+    expect(row.rows[0].class_teacher_user_id).toBe(ID.classTeacher);
+    await rejects(() => setClassTeacher(1, ID.classTeacher), /changed in another session/i);
   });
 
   it("seeds the Beacon subject master idempotently", async () => {

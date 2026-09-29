@@ -7,7 +7,7 @@ import { ExamEditor } from "@/components/beacon/ExamEditor";
 import { ExamWorkspace } from "@/components/beacon/ExamWorkspace";
 import { BEACON_ACADEMICS_ENABLED } from "@/lib/beaconAcademicsFeature";
 import { CBSE_EXAM_STATUS_LABELS, type CbseConfiguration, type CbseWorkspace } from "@/lib/cbseExams";
-import { fetchCbseConfiguration, fetchCbseWorkspace, performCbseAction } from "@/lib/cbseExamsClient";
+import { fetchCbseConfiguration, fetchCbseWorkspace, performCbseAction, setCbseClassTeacher } from "@/lib/cbseExamsClient";
 
 export default function BeaconAcademics() {
   const {isImpersonating,user}=useAuth();
@@ -30,6 +30,11 @@ export default function BeaconAcademics() {
     const global=["create_policy","approve_policy","create_exam"].includes(action);
     try{const result=await performCbseAction(global?null:workspace?.exam.id||null,action,global?null:workspace?.exam.version??null,payload);if(result.error)throw new Error(result.error);await loadConfiguration();if(action==="create_exam"&&result.data){setTab("exams");setExamId(result.data.id);}else if(!global&&workspace){const fresh=await fetchCbseWorkspace(workspace.exam.id);if(fresh.error)throw new Error(fresh.error);setWorkspace(fresh.data);}return true;}catch(e){setError(readableAcademicError(e));return false;}finally{mutating.current=false;setBusy(false);}
   };
+  const changeClassTeacher=async(teacherUserId:string,remarks:string):Promise<boolean>=>{
+    if(isImpersonating||mutating.current||!workspace)return false;
+    mutating.current=true;setBusy(true);setError(null);
+    try{const result=await setCbseClassTeacher(workspace.exam.id,teacherUserId,workspace.exam.version,remarks);if(result.error)throw new Error(result.error);const fresh=await fetchCbseWorkspace(workspace.exam.id);if(fresh.error)throw new Error(fresh.error);setWorkspace(fresh.data);await loadConfiguration();return true;}catch(e){setError(readableAcademicError(e));return false;}finally{mutating.current=false;setBusy(false);}
+  };
   if(!BEACON_ACADEMICS_ENABLED)return <div className="p-6"><AcademicPanel title="Assessments - CBSE"><p className="text-sm text-muted-foreground">Academic reporting is not enabled for this installation. Contact your administrator.</p></AcademicPanel></div>;
   const disabled=busy||isImpersonating;
   return <main className="p-4 sm:p-6 max-w-7xl mx-auto space-y-5"><header className="flex flex-wrap justify-between gap-3"><div><h1 className="text-2xl font-semibold">Assessments - CBSE</h1><p className="text-sm text-muted-foreground mt-1">School performance reports · Avantika and Arthala · Classes I–XII</p></div><Button variant="outline" disabled={busy||loading} onClick={()=>setRefresh(n=>n+1)}>Refresh</Button></header>
@@ -38,7 +43,7 @@ export default function BeaconAcademics() {
     {configuration&&<><nav aria-label="Academic reporting" className="flex flex-wrap gap-2"><Button variant={tab==="exams"?"default":"outline"} disabled={busy} onClick={()=>setTab("exams")}>Exams and reports</Button>{configuration.capabilities.manage&&<><Button variant={tab==="create"?"default":"outline"} disabled={busy} onClick={()=>setTab("create")}>Create exam</Button><Button variant={tab==="policies"?"default":"outline"} disabled={busy} onClick={()=>setTab("policies")}>Assessment policies</Button></>}</nav>
     {tab==="policies"&&<PolicyEditor configuration={configuration} disabled={disabled} canApprove={configuration.capabilities.review} onAction={act}/>}
     {tab==="create"&&<ExamEditor configuration={configuration} disabled={disabled} onAction={act}/>}
-    {tab==="exams"&&<><label className="block text-sm font-medium space-y-2"><span>Select exam or annual report</span><select className={academicInput} disabled={busy} value={examId} onChange={e=>setExamId(e.target.value)}><option value="">Choose an assessment</option>{configuration.exams.map(e=><option key={e.id} value={e.id}>{e.name} · {configuration.courses.find(c=>c.id===e.course_id)?.institution_name} · {e.section||"Whole class"} · {CBSE_EXAM_STATUS_LABELS[e.status]}</option>)}</select></label>{!configuration.exams.length&&<AcademicPanel title="No assessments yet"><p className="text-sm text-muted-foreground">An academic administrator can configure an assessment policy and create the first exam.</p></AcademicPanel>}{workspace&&<ExamWorkspace key={`${workspace.exam.id}:${workspace.exam.version}`} workspace={workspace} configuration={configuration} disabled={disabled} onAction={act}/>}</>}
+    {tab==="exams"&&<><label className="block text-sm font-medium space-y-2"><span>Select exam or annual report</span><select className={academicInput} disabled={busy} value={examId} onChange={e=>setExamId(e.target.value)}><option value="">Choose an assessment</option>{configuration.exams.map(e=><option key={e.id} value={e.id}>{e.name} · {configuration.courses.find(c=>c.id===e.course_id)?.institution_name} · {e.section||"Whole class"} · {CBSE_EXAM_STATUS_LABELS[e.status]}</option>)}</select></label>{!configuration.exams.length&&<AcademicPanel title="No assessments yet"><p className="text-sm text-muted-foreground">An academic administrator can configure an assessment policy and create the first exam.</p></AcademicPanel>}{workspace&&<ExamWorkspace key={`${workspace.exam.id}:${workspace.exam.version}`} workspace={workspace} configuration={configuration} disabled={disabled} onAction={act} onChangeClassTeacher={changeClassTeacher}/>}</>}
     </>}{loading&&<p role="status" className="text-sm text-muted-foreground">Loading academic reports…</p>}
   </main>;
 }
