@@ -4,7 +4,7 @@ import type { ReportSnapshot } from "../../../src/lib/cbseExams.ts";
 import { wrapReportText } from "./layout.ts";
 import { decodeBase64, NOTO_SANS_TTF_B64, NOTO_DEVANAGARI_TTF_B64, BEACON_LOGO_PNG_B64 } from "./assets_embedded.ts";
 
-const WIDTH = 595.28, HEIGHT = 841.89, MARGIN = 44, INNER = WIDTH - MARGIN * 2;
+const WIDTH = 595.28, HEIGHT = 841.89, MARGIN = 32, INNER = WIDTH - MARGIN * 2;
 const ink = rgb(0.12, 0.17, 0.21), muted = rgb(0.36, 0.4, 0.44), navy = rgb(0.08, 0.22, 0.31);
 /** Only immutable bundled assets are used; snapshot URLs are deliberately never fetched. */
 export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint8Array> {

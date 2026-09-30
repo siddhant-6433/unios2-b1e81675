@@ -29,9 +29,12 @@ export function createReportHandler<T>(dependencies: ReportHandlerDependencies<T
       if (typeof reportId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reportId)) return error("invalid_report_id", 400);
       const { bytes, grant } = await renderAuthorizedReport(reportId,
         id => dependencies.authorize(authorization, id), dependencies.render);
+      const snapshot = (grant as { snapshot?: { student?: { name?: string }; title?: string } }).snapshot;
+      const clean = (value: string, fallback: string) => value.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || fallback;
+      const filename = `${clean(snapshot?.student?.name ?? "", "Candidate")}-${clean(snapshot?.title ?? "", "Assessment")}-Report-NIMT.pdf`;
       return new Response(new Uint8Array(bytes), { headers: {
         ...headers, "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="academic-report-${reportId}-r${grant.revision}.pdf"`,
+        "Content-Disposition": `attachment; filename="${filename}"`,
       } });
     } catch (cause) {
       // Never log snapshots, identities, marks, ledger balances or RPC messages.

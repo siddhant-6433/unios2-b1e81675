@@ -8,14 +8,30 @@ const number = (value: number | null | undefined, suffix = "") => (value === nul
  * print / Save-as-PDF output (see the print stylesheet below), so the staff
  * preview and the printed report match.
  */
+/** Opens a clean, single-purpose print view so "Save as PDF" is named correctly and has no blank pages. */
+export function printMarksheet(filename: string): void {
+  const element = document.getElementById("beacon-marksheet");
+  if (!element) return;
+  const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]')).map(node => node.outerHTML).join("");
+  const title = filename.replace(/\.pdf$/i, "").replace(/[<>&"]/g, "");
+  const win = window.open("", "_blank", "width=980,height=1200");
+  if (!win) return;
+  win.document.open();
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>${styles}</head><body style="margin:0;background:#fff">${element.outerHTML}</body></html>`);
+  win.document.close();
+  const run = () => { win.focus(); win.print(); };
+  if (win.document.readyState === "complete") window.setTimeout(run, 400);
+  else win.addEventListener("load", () => window.setTimeout(run, 400));
+}
+
 export function ReportMarksheet({ snapshot }: { snapshot: ReportSnapshot }) {
   const { school, student, subjects, summary, attendance, approval } = snapshot;
   const logo = school.logo_url || beaconLogo;
   const attendancePct = attendance.working_days > 0 ? Math.round((attendance.present / attendance.working_days) * 100) : null;
   const resultLabel = summary.result === "pass" ? "PASS" : summary.result === "fail" ? "FAIL" : summary.result === "absent" ? "ABSENT" : "INCOMPLETE";
   const resultTone = summary.result === "pass" ? "text-emerald-700" : summary.result === "fail" ? "text-rose-700" : "text-amber-700";
-  return <div className="beacon-marksheet mx-auto max-w-3xl bg-white text-[13px] leading-snug text-slate-800">
-    <style>{`@media print{body *{visibility:hidden}.beacon-marksheet,.beacon-marksheet *{visibility:visible}.beacon-marksheet{position:absolute;left:0;top:0;width:100%;max-width:none;padding:0 8mm}@page{size:A4;margin:12mm}}`}</style>
+  return <div id="beacon-marksheet" className="beacon-marksheet mx-auto max-w-3xl bg-white text-[13px] leading-snug text-slate-800 print:max-w-none">
+    <style>{`@media print{html,body{background:#fff;margin:0;padding:0}#beacon-marksheet{width:100%;max-width:none;padding:6mm 8mm}@page{size:A4;margin:10mm}}`}</style>
 
     <header className="flex items-start gap-4 border-b-2 border-slate-800 pb-3">
       <img src={logo} alt={`${school.name} logo`} className="h-16 w-16 shrink-0 object-contain" />

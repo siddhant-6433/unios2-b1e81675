@@ -444,7 +444,7 @@ export default function StudentPortal() {
         ))}
       </div>
 
-      {BEACON_ACADEMICS_ENABLED && activeTab === "reports" && <FamilyReports studentId={student.id} />}
+      {BEACON_ACADEMICS_ENABLED && activeTab === "reports" && <FamilyReports studentId={student.id} studentName={student.name} />}
 
       {/* Fees Tab — hidden-fee mode (consultant-managed): due + Pay + receipts only */}
       {activeTab === "fees" && fees.length === 0 && hiddenFee && (

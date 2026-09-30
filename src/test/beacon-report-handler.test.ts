@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createReportHandler } from "../../supabase/functions/beacon-report-pdf/handler";
 import { ReportDeliveryError } from "../../supabase/functions/beacon-report-pdf/delivery";
 const id = "11111111-1111-4111-8111-111111111111";
-const grant = { report_id: id, revision: 1, eligibility_token: "released-clear", snapshot: { private: true } };
+const grant = { report_id: id, revision: 1, eligibility_token: "released-clear", snapshot: { student: { name: "Aarav Sharma" }, title: "Half Yearly Examination" } };
 const request = (body = JSON.stringify({ report_id: id })) => new Request("https://example.test/report", { method: "POST", headers: { Authorization: "Bearer family-token", "Content-Type": "application/json" }, body });
 function setup() {
   const dependencies = { enabled: true, authenticate: vi.fn().mockResolvedValue(true), authorize: vi.fn().mockResolvedValue(grant), render: vi.fn().mockResolvedValue(new Uint8Array([37,80,68,70])), log: vi.fn() };
@@ -15,7 +15,7 @@ describe("Beacon PDF HTTP endpoint", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("application/pdf");
     expect(response.headers.get("Cache-Control")).toContain("private, no-store");
-    expect(response.headers.get("Content-Disposition")).toContain(`r1.pdf`);
+    expect(response.headers.get("Content-Disposition")).toContain("Aarav-Sharma-Half-Yearly-Examination-Report-NIMT.pdf");
     expect(await response.text()).toBe("%PDF");
     expect(dependencies.authenticate).toHaveBeenCalledWith("Bearer family-token");
     expect(dependencies.authorize.mock.calls).toEqual([["Bearer family-token",id],["Bearer family-token",id]]);

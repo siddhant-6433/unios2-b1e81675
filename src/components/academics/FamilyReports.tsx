@@ -17,7 +17,7 @@ const statusCopy: Record<FamilyReport["status"], { label: string; description: s
 type LinkedChild = { id: string; name: string; admission_no: string | null };
 
 /** Child selection only affects academic reports, never the existing fee/payment context. */
-export function FamilyReports({ studentId, selectChild = false }: { studentId: string; selectChild?: boolean }) {
+export function FamilyReports({ studentId, studentName = "", selectChild = false }: { studentId: string; studentName?: string; selectChild?: boolean }) {
   const { user } = useAuth();
   const [children, setChildren] = useState<LinkedChild[]>([]);
   const [selectedId, setSelectedId] = useState(studentId);
@@ -98,7 +98,9 @@ export function FamilyReports({ studentId, selectChild = false }: { studentId: s
       const url = URL.createObjectURL(data);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `academic-report-${report.id}-r${report.revision}.pdf`;
+      const clean = (value: string, fallback: string) => value.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || fallback;
+      const activeStudentName = studentName || children.find(child => child.id === selectedId)?.name || "";
+      anchor.download = `${clean(activeStudentName, "Student")}-${clean(report.title, "Assessment")}-Report-NIMT.pdf`;
       document.body.appendChild(anchor);
       try { anchor.click(); } finally { anchor.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); }
     } catch {
