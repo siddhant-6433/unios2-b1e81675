@@ -47,6 +47,10 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
     for (const name of names) { draw(name, MARGIN + 63, headerY, 13, navy); headerY -= 18; }
     draw("SCHOOL PERFORMANCE REPORT", MARGIN + 63, headerY, 8, muted);
     y = Math.min(HEIGHT - 106, headerY - 30);
+    const banner = 30;
+    page.drawRectangle({ x: MARGIN, y: y - banner, width: INNER, height: banner, color: navy });
+    draw(snapshot.title, MARGIN + (INNER - measure(snapshot.title, 12)) / 2, y - 19, 12, rgb(1, 1, 1));
+    y -= banner + 10;
   };
   const ensure = (height: number) => { if (y - height < 62) newPage(); };
   const paragraph = (text: string, size = 10, color = ink, indent = 0) => {
@@ -56,7 +60,6 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
   const label = (text: string) => { ensure(40); y -= 10; paragraph(text.toUpperCase(), 9, navy); y -= 3; };
   const number = (value: number | null) => value === null ? "-" : String(value);
   newPage();
-  paragraph(snapshot.title, 18, navy);
   paragraph(`${snapshot.academic_year} | Revision ${snapshot.revision}`, 9, muted);
   if (snapshot.school.address) paragraph(snapshot.school.address, 9, muted);
   y -= 8;
@@ -68,24 +71,25 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
   if (snapshot.student.mother_name) paragraph(`Mother: ${snapshot.student.mother_name}`, 9, muted);
   if (snapshot.class_teacher?.name) paragraph(`Class teacher: ${snapshot.class_teacher.name}${snapshot.class_teacher.designation ? ` (${snapshot.class_teacher.designation})` : ""}`, 9, muted);
   label("Assessment");
-  const columns = [150, 172, 70, 45, INNER - 437];
+  const columns = [INNER - 260, 44, 58, 44, 44, 70];
   const tableHeader = () => {
     ensure(36);
-    page.drawRectangle({ x: MARGIN, y: y - 20, width: INNER, height: 25, color: rgb(0.91, 0.94, 0.96) });
+    page.drawRectangle({ x: MARGIN, y: y - 20, width: INNER, height: 25, color: navy });
     let x = MARGIN + 7;
-    for (const [index, title] of ["Subject", "Component marks", "Total", "Grade", "Status"].entries()) {
-      draw(title, x, y - 10, 8, navy); x += columns[index];
+    for (const [index, title] of ["Subject", "Max", "Obtained", "%", "Grade", "Result"].entries()) {
+      draw(title, x, y - 10, 8, rgb(1, 1, 1)); x += columns[index];
     }
     y -= 31;
   };
   tableHeader();
   for (const subject of snapshot.subjects) {
     const cells = [
-      `${subject.name}${subject.code ? ` (${subject.code})` : ""}${subject.contributes_to_total === false ? "\nExcluded from aggregate" : ""}`,
-      subject.components.map(component => `${component.label}: ${number(component.score)} / ${number(component.max)}`).join("\n"),
-      `${number(subject.obtained)} / ${number(subject.max)}\n${number(subject.percentage)}%`,
+      `${subject.name}${subject.code ? ` (${subject.code})` : ""}${subject.contributes_to_total === false ? "\nExcluded from aggregate" : ""}\n${subject.components.map(component => `${component.label} ${number(component.score)}/${number(component.max)}`).join(" · ")}`,
+      number(subject.max),
+      number(subject.obtained),
+      number(subject.percentage),
       subject.grade ?? "-",
-      subject.status === "absent" ? "Absent" : subject.status === "exempt" ? "Exempt" : subject.passed === false ? "Below pass criteria" : "Assessed",
+      subject.status === "absent" ? "Absent" : subject.status === "exempt" ? "Exempt" : subject.passed === false ? "Below pass" : "Pass",
     ].map((text, index) => wrapReportText(text, columns[index] - 14, value => measure(value, 8)));
     const lines = Math.max(...cells.map(cell => cell.length));
     if (y - (lines * 13 + 16) < 62) { newPage(); tableHeader(); }
