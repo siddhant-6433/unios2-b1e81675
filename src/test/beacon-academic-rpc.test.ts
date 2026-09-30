@@ -18,6 +18,7 @@ const MIGRATIONS = [
   "supabase/migrations/20260926121859_beacon_marks_entry_roles_and_open.sql",
   "supabase/migrations/20260929055340_beacon_class_teachers_assign_and_change.sql",
   "supabase/migrations/20260930153158_beacon_report_content_and_bulk_print.sql",
+  "supabase/migrations/20260930163537_beacon_aggregate_weights_and_release_overview.sql",
 ];
 const SUBJECTS_SEED = MIGRATIONS[1];
 
@@ -171,6 +172,13 @@ create table fee_ledger(id uuid primary key default gen_random_uuid(), student_i
 create table employee_profiles(id uuid primary key default gen_random_uuid(), user_id uuid, job_title text, updated_at timestamptz default now());
 create table institution_branding(id uuid primary key default gen_random_uuid(), name text, address text, applies_to text[] default '{}', is_default boolean default true, updated_at timestamptz default now());
 create table _app_config(key text primary key, value text not null);
+create function public.cbse_default_rules(_course uuid) returns jsonb language sql stable as $$
+ select jsonb_build_object(
+  'subjects', coalesce(jsonb_agg(jsonb_build_object('subject_id',s.id,'pass_percent',case when s.is_co_scholastic then null else 33 end,'contributes_to_total',not s.is_co_scholastic,'components',jsonb_build_array(jsonb_build_object('key','theory','label','Theory','max',80,'pass_percent',33),jsonb_build_object('key','internal','label','Internal assessment','max',20,'pass_percent',null))) order by s.display_order,s.name),'[]'::jsonb),
+  'grade_bands','[{"min":91,"grade":"A1"},{"min":81,"grade":"A2"},{"min":71,"grade":"B1"},{"min":61,"grade":"B2"},{"min":51,"grade":"C1"},{"min":41,"grade":"C2"},{"min":33,"grade":"D"},{"min":0,"grade":"E"}]'::jsonb,
+  'rounding',2,'absent_treatment','zero','exempt_treatment','exclude','additional_subject_treatment','all_applicable','annual_weights','[]'::jsonb,'confirmed',true,'source_url','https://cbseacademic.nic.in/curriculum_2027.html')
+ from subjects s where s.course_id=_course and s.active;
+$$;
 `);
 
   const users: [string, string][] = [
@@ -201,7 +209,7 @@ insert into courses(id, department_id, code, name) values
  ('${ID.classX}','${ID.department}','BSAV-G10','Class X'),
  ('${ID.class8}','${ID.department}','BSAV-G8','Class VIII'),
  ('${ID.class5}','${ID.department}','BSAV-G5','Class V');
-insert into admission_sessions(id, name, is_active, start_date) values('${ID.session}','2026-27',true,date '2026-04-01');
+insert into admission_sessions(id, name, is_active, start_date) values('${ID.session}','2026-27',true,date '2026-04-01'),('f0000001-0000-0000-0000-000000000001','2026-27 (production)',true,date '2026-04-01');
 insert into subjects(id, course_id, name, code, active, display_order) values
  ('${ID.math}','${ID.classX}','Mathematics','MAT',true,1),
  ('${ID.science}','${ID.classX}','Science','SCI',true,2),
@@ -225,8 +233,12 @@ insert into employee_profiles(user_id, job_title) values('${ID.principal}','Prin
 `);
 
   // Migrations run after the seed data so data-driven migrations (subjects) see it.
-  for (const sql of migrations) await db.exec(sql);
-  await db.exec("update _app_config set value='true' where key='beacon_academics_enabled'");
+  // Enable the flag right after the base migration: later migrations create data
+  // through cbse_action, which requires the feature to be enabled.
+  for (let i = 0; i < migrations.length; i++) {
+    await db.exec(migrations[i]);
+    if (i === 0) await db.exec("update _app_config set value='true' where key='beacon_academics_enabled'");
+  }
 }
 
 async function createPolicy(courseId: string, name: string, policyRules: unknown): Promise<string> {
@@ -596,6 +608,21 @@ describe("Beacon academic RPC migration", () => {
     const row = await db.query<{ class_teacher_user_id: string }>("select class_teacher_user_id from cbse_exams where id=$1", [examId]);
     expect(row.rows[0].class_teacher_user_id).toBe(ID.classTeacher);
     await rejects(() => setClassTeacher(1, ID.classTeacher), /changed in another session/i);
+  });
+
+  it("publishes combined weights and a release overview", async () => {
+    await asUser(ID.admin);
+    const weighted = await db.query<{ n: string }>(
+      "select count(*)::text as n from cbse_policies where course_id=$1 and status='approved' and jsonb_array_length(coalesce(rules->'annual_weights','[]'::jsonb))>0",
+      [ID.classX],
+    );
+    expect(Number(weighted.rows[0].n)).toBeGreaterThan(0);
+    const overview = await db.query<{ r: { exams: { category: string; status: string }[] } }>(
+      "select public.cbse_release_overview($1::uuid,$2::uuid) as r",
+      [ID.classX, ID.session],
+    );
+    expect(overview.rows[0].r.exams.length).toBeGreaterThan(0);
+    expect(overview.rows[0].r.exams.every((exam) => typeof exam.status === "string")).toBe(true);
   });
 
   it("seeds the Beacon subject master idempotently", async () => {
