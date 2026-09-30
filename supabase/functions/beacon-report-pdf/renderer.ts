@@ -105,8 +105,11 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
     y -= 11;
   }
   label("Overall performance");
-  paragraph(`${snapshot.summary.obtained} / ${snapshot.summary.max} | ${number(snapshot.summary.percentage)}% | Grade: ${snapshot.summary.grade ?? "-"}`);
-  paragraph(`School result: ${snapshot.summary.result.toUpperCase()}`, 10, navy);
+  { const bw = INNER / 4, bh = 34;
+    ensure(bh + 8);
+    const stats: [string, string][] = [["Aggregate", `${number(snapshot.summary.obtained)} / ${number(snapshot.summary.max)}`], ["Percentage", `${number(snapshot.summary.percentage)}%`], ["Grade", snapshot.summary.grade ?? "—"], ["Result", snapshot.summary.result.toUpperCase()]];
+    for (const [index, [key, value]] of stats.entries()) { const x = MARGIN + index * bw; page.drawRectangle({ x, y: y - bh, width: bw, height: bh, borderColor: rgb(0.86, 0.89, 0.91), borderWidth: 0.7, color: rgb(1, 1, 1) }); draw(key.toUpperCase(), x + 8, y - 13, 7, muted); draw(value, x + 8, y - 26, 12, navy); }
+    y -= bh + 12; }
   paragraph(`Attendance: ${snapshot.attendance.present} / ${snapshot.attendance.working_days} working days`, 10);
   label("Class teacher's remarks");
   paragraph(snapshot.remarks);
