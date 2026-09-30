@@ -2,8 +2,8 @@ import { PDFDocument, rgb, type PDFFont, type PDFPage } from "npm:pdf-lib@1.17.1
 import fontkit from "npm:@pdf-lib/fontkit@1.1.1";
 import type { ReportSnapshot } from "../../../src/lib/cbseExams.ts";
 import { wrapReportText } from "./layout.ts";
+import { decodeBase64, NOTO_SANS_TTF_B64, NOTO_DEVANAGARI_TTF_B64, BEACON_LOGO_PNG_B64 } from "./assets_embedded.ts";
 
-const ASSETS = new URL("./assets/", import.meta.url);
 const WIDTH = 595.28, HEIGHT = 841.89, MARGIN = 44, INNER = WIDTH - MARGIN * 2;
 const ink = rgb(0.12, 0.17, 0.21), muted = rgb(0.36, 0.4, 0.44), navy = rgb(0.08, 0.22, 0.31);
 /** Only immutable bundled assets are used; snapshot URLs are deliberately never fetched. */
@@ -11,11 +11,7 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
   if (snapshot.template_version !== "beacon-v1" || (snapshot.school.asset_version && snapshot.school.asset_version !== "beacon-v1")) throw new Error("Unsupported report template");
   const document = await PDFDocument.create();
   document.registerFontkit(fontkit);
-  const [latinBytes, devanagariBytes, logoBytes] = await Promise.all([
-    Deno.readFile(new URL("NotoSans-Regular.ttf", ASSETS)),
-    Deno.readFile(new URL("NotoSansDevanagari-Regular.ttf", ASSETS)),
-    Deno.readFile(new URL("beacon-v1.png", ASSETS)),
-  ]);
+  const [latinBytes, devanagariBytes, logoBytes] = [decodeBase64(NOTO_SANS_TTF_B64), decodeBase64(NOTO_DEVANAGARI_TTF_B64), decodeBase64(BEACON_LOGO_PNG_B64)];
   const latin = await document.embedFont(latinBytes, { subset: true });
   const devanagari = await document.embedFont(devanagariBytes, { subset: true });
   const logo = await document.embedPng(logoBytes);
