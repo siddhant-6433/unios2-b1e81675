@@ -81,7 +81,7 @@ describe("Exam type rules", () => {
 
   it("labels every category and status", () => {
     expect(CBSE_CATEGORY_LABELS.pre_board).toBe("Pre-Board");
-    expect(CBSE_CATEGORY_LABELS.annual).toBe("Annual Report");
+    expect(CBSE_CATEGORY_LABELS.annual).toBe("Combined / Aggregate Report");
     expect(CBSE_EXAM_STATUS_LABELS.principal_review).toBe("Academic review");
     expect(CBSE_EXAM_STATUS_LABELS.released).toBe("Released");
   });

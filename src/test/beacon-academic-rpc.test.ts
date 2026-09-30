@@ -17,6 +17,7 @@ const MIGRATIONS = [
   "supabase/migrations/20260923141819_beacon_office_marks_entry.sql",
   "supabase/migrations/20260926121859_beacon_marks_entry_roles_and_open.sql",
   "supabase/migrations/20260929055340_beacon_class_teachers_assign_and_change.sql",
+  "supabase/migrations/20260930153158_beacon_report_content_and_bulk_print.sql",
 ];
 const SUBJECTS_SEED = MIGRATIONS[1];
 
@@ -167,6 +168,7 @@ create table subject_allocations(id uuid primary key default gen_random_uuid(), 
 create table class_teachers(id uuid primary key default gen_random_uuid(), course_id uuid references courses(id), teacher_user_id uuid not null, active boolean default true, batch_id uuid, session_id uuid, section text);
 create table students(id uuid primary key, name text not null, admission_no text, class_roll_no text, course_id uuid references courses(id), session_id uuid, section text, father_name text, mother_name text, dob date, login_disabled boolean not null default false, user_id uuid, father_user_id uuid, mother_user_id uuid, guardian_user_id uuid, deleted_at timestamptz, archived_at timestamptz);
 create table fee_ledger(id uuid primary key default gen_random_uuid(), student_id uuid not null references students(id), balance numeric, due_date date, total_amount numeric default 0, concession numeric default 0, paid_amount numeric default 0, term text default 'T1', fee_code_id uuid, status text default 'due');
+create table employee_profiles(id uuid primary key default gen_random_uuid(), user_id uuid, job_title text, updated_at timestamptz default now());
 create table institution_branding(id uuid primary key default gen_random_uuid(), name text, address text, applies_to text[] default '{}', is_default boolean default true, updated_at timestamptz default now());
 create table _app_config(key text primary key, value text not null);
 `);
@@ -219,6 +221,7 @@ insert into fee_ledger(student_id, balance, due_date, term) values
  ('${ID.student1}',0,date '2026-08-01','T1'),
  ('${ID.student2}',5000,date '2026-08-01','T1');
 insert into institution_branding(name, address, applies_to, is_default, updated_at) values('NIMT Beacon School','Avantika, Ghaziabad',array['BSAV'],true,now());
+insert into employee_profiles(user_id, job_title) values('${ID.principal}','Principal'),('${ID.classTeacher}','Class Teacher');
 `);
 
   // Migrations run after the seed data so data-driven migrations (subjects) see it.
@@ -369,6 +372,8 @@ describe("Beacon academic RPC migration", () => {
     expect(student2.snapshot.summary.result).toBe("fail");
     expect(student1.snapshot.summary.result).toBe("pass");
     expect(student1.snapshot.school.name).toBe("NIMT Beacon School");
+    expect(student1.snapshot.class_teacher.name).toBe("Class Teacher");
+    expect(student1.snapshot.approval.designation).toBe("Principal");
 
     // Families see status only; an unrelated staff member is refused.
     await asUser(ID.parent1);

@@ -5,9 +5,18 @@ const id = "11111111-1111-4111-8111-111111111111";
 const grant = { report_id: id, revision: 1, eligibility_token: "released-clear", snapshot: { student: { name: "Aarav Sharma" }, title: "Half Yearly Examination" } };
 const request = (body = JSON.stringify({ report_id: id })) => new Request("https://example.test/report", { method: "POST", headers: { Authorization: "Bearer family-token", "Content-Type": "application/json" }, body });
 function setup() {
-  const dependencies = { enabled: true, authenticate: vi.fn().mockResolvedValue(true), authorize: vi.fn().mockResolvedValue(grant), render: vi.fn().mockResolvedValue(new Uint8Array([37,80,68,70])), log: vi.fn() };
+  const dependencies = {
+    enabled: true,
+    authenticate: vi.fn().mockResolvedValue(true),
+    authorize: vi.fn().mockResolvedValue(grant),
+    authorizeExam: vi.fn().mockResolvedValue({ exam_id: id, title: "Half Yearly Examination", reports: [grant] }),
+    render: vi.fn().mockResolvedValue(new Uint8Array([37,80,68,70])),
+    renderMerged: vi.fn().mockResolvedValue(new Uint8Array([37,80,68,70])),
+    log: vi.fn(),
+  };
   return { dependencies, handler: createReportHandler(dependencies) };
 }
+const examRequest = () => new Request("https://example.test/report", { method: "POST", headers: { Authorization: "Bearer family-token", "Content-Type": "application/json" }, body: JSON.stringify({ exam_id: id }) });
 describe("Beacon PDF HTTP endpoint", () => {
   it("returns private authenticated PDF bytes and checks the same caller twice", async () => {
     const { handler, dependencies } = setup();
@@ -48,6 +57,24 @@ describe("Beacon PDF HTTP endpoint", () => {
     expect(response.status).toBe(503); expect(await response.text()).not.toContain("private ledger");
     expect((await handler(request())).status).toBe(200);
   });
+  it("merges all fee-eligible reports for an exam into one PDF", async () => {
+    const { handler, dependencies } = setup();
+    const response = await handler(examRequest());
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("application/pdf");
+    expect(response.headers.get("Content-Disposition")).toContain("Half-Yearly-Examination-All-Reports-NIMT.pdf");
+    expect(dependencies.authorizeExam).toHaveBeenCalledOnce();
+    expect(dependencies.renderMerged).toHaveBeenCalledOnce();
+  });
+
+  it("returns no-reports when no fee-eligible report exists for the exam", async () => {
+    const { handler, dependencies } = setup();
+    dependencies.authorizeExam.mockResolvedValue({ exam_id: id, title: "Half Yearly", reports: [] });
+    const response = await handler(examRequest());
+    expect(response.status).toBe(404);
+    expect(dependencies.renderMerged).not.toHaveBeenCalled();
+  });
+
   it("discards bytes when the revision changes during rendering", async () => {
     const { handler, dependencies } = setup();
     dependencies.authorize.mockResolvedValueOnce(grant).mockResolvedValueOnce({...grant,revision:2});

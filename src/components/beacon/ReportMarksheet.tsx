@@ -1,5 +1,5 @@
 import beaconLogo from "@/assets/nimt-beacon-logo.png";
-import type { ReportSnapshot } from "@/lib/cbseExams";
+import { CBSE_CATEGORY_LABELS, type ReportSnapshot } from "@/lib/cbseExams";
 
 const number = (value: number | null | undefined, suffix = "") => (value === null || value === undefined ? "—" : `${value}${suffix}`);
 
@@ -38,10 +38,15 @@ export function ReportMarksheet({ snapshot }: { snapshot: ReportSnapshot }) {
       <div className="flex-1">
         <h1 className="text-lg font-bold uppercase tracking-wide">{school.name}</h1>
         {school.address && <p className="text-[11px] text-slate-500">{school.address}</p>}
-        <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-600">School Performance Report · {snapshot.academic_year}</p>
+        <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-600">School Performance Report</p>
       </div>
-      <div className="text-right text-[11px] text-slate-500"><p>{snapshot.title}</p><p>Revision {snapshot.revision}</p></div>
+      <div className="text-right text-[11px] text-slate-500"><p>Revision {snapshot.revision}</p></div>
     </header>
+
+    <div className="mt-3 rounded-md bg-slate-800 px-3 py-2 text-center text-white">
+      <p className="text-[15px] font-bold uppercase tracking-wide">{snapshot.title}</p>
+      <p className="text-[11px] text-slate-200">{CBSE_CATEGORY_LABELS[snapshot.category]} · {snapshot.academic_year} · Revision {snapshot.revision}</p>
+    </div>
 
     <section className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-[12px]">
       <p><span className="text-slate-500">Student</span> <span className="font-semibold text-slate-900">{student.name}</span></p>
@@ -51,6 +56,7 @@ export function ReportMarksheet({ snapshot }: { snapshot: ReportSnapshot }) {
       {student.father_name && <p><span className="text-slate-500">Father</span> {student.father_name}</p>}
       {student.mother_name && <p><span className="text-slate-500">Mother</span> {student.mother_name}</p>}
       {student.dob && <p><span className="text-slate-500">Date of birth</span> {student.dob}</p>}
+      <p><span className="text-slate-500">Class teacher</span> <span className="font-medium">{snapshot.class_teacher?.name ?? "—"}</span></p>
     </section>
 
     <table className="mt-4 w-full border-collapse text-[12px]">
@@ -89,8 +95,10 @@ export function ReportMarksheet({ snapshot }: { snapshot: ReportSnapshot }) {
 
     <section className="mt-4 grid grid-cols-2 gap-4 text-[12px]">
       <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Attendance</p><p className="mt-0.5 font-medium text-slate-900">{attendance.present} / {attendance.working_days} working days{attendancePct !== null ? ` (${attendancePct}%)` : ""}</p></div>
-      <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Academic approval</p><p className="mt-0.5 font-medium text-slate-900">{approval.name}</p><p className="text-[11px] text-slate-500">{approval.approved_at.slice(0, 10)}{approval.remarks ? ` · ${approval.remarks}` : ""}</p></div>
+      <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Academic approval</p><p className="mt-0.5 font-medium text-slate-900">{approval.name}</p>{approval.designation && <p className="text-[11px] font-medium text-slate-600">{approval.designation}</p>}<p className="text-[11px] text-slate-500">{approval.approved_at.slice(0, 10)}{approval.remarks ? ` · ${approval.remarks}` : ""}</p></div>
     </section>
+
+    {(snapshot.sources?.length ?? 0) > 0 && <section className="mt-3 rounded-lg border border-slate-200 px-3 py-2 text-[11px] text-slate-600"><span className="text-[10px] uppercase tracking-wide text-slate-500">Composed from</span> {snapshot.sources!.map(source => `${source.name} (${source.weight}%)`).join(" · ")}</section>}
 
     {snapshot.remarks && <section className="mt-3 rounded-lg border border-slate-200 p-3 text-[12px]"><p className="text-[10px] uppercase tracking-wide text-slate-500">Class teacher's remarks</p><p className="mt-0.5 text-slate-700">{snapshot.remarks}</p></section>}
 

@@ -20,9 +20,11 @@ export type ReportSubject = {subject_id:string;name:string;code:string;status:Ma
 export type ReportSnapshot = {
   template_version:'beacon-v1';report_id:string;exam_id:string;revision:number;title:string;category:CbseCategory;academic_year:string;
   school:{name:string;code:string;address:string|null;logo_url:string|null;asset_version?:string};
+  class_teacher?:{name:string|null;designation:string|null};
+  sources?:{exam_id:string;name:string;category:CbseCategory;sequence:number;weight:number}[];
   student:{id:string;name:string;admission_no:string|null;roll_no:string|null;section:string|null;father_name:string|null;mother_name:string|null;dob:string|null;course_name:string};
   subjects:ReportSubject[];summary:{obtained:number;max:number;percentage:number|null;grade:string|null;result:'pass'|'fail'|'absent'|'incomplete'};
-  attendance:{present:number;working_days:number};remarks:string;approval:{name:string;approved_at:string;remarks:string};
+  attendance:{present:number;working_days:number};remarks:string;approval:{name:string;designation?:string|null;approved_at:string;remarks:string};
   policy:{id:string;version:number;source_url:string};source_report_ids:string[];fee_cutoff:string;
 };
 export type CbseReport = {id:string;exam_id:string;student_id:string;revision:number;status:'approved'|'released'|'withdrawn';snapshot:ReportSnapshot;approved_at:string;released_at:string|null;withdrawn_at:string|null};
@@ -33,7 +35,7 @@ export type CbseConfiguration = {courses:{id:string;name:string;code:string;inst
 export type FamilyReport = {id:string;exam_id:string;student_id:string;title:string;academic_year:string;category:CbseCategory;revision:number;status:'awaiting_release'|'fee_hold'|'available'|'withdrawn'|'unavailable';fee_due:number|null;fee_cutoff:string;released_at:string|null};
 export type CbseDownloadPayload = {report_id:string;revision:number;eligibility_token:string;snapshot:ReportSnapshot};
 export type CbseAction = 'create_policy'|'approve_policy'|'create_exam'|'configure_roster'|'configure_exam'|'open'|'save_marks'|'lock_paper'|'student_details'|'submit_class_review'|'submit_principal_review'|'return_paper'|'approve'|'release'|'reopen'|'request_exception'|'review_exception'|'cancel';
-export const CBSE_CATEGORY_LABELS:Record<CbseCategory,string> = {unit_test:'Unit Test',half_yearly:'Half Yearly',final:'Final Examination',pre_board:'Pre-Board',annual:'Annual Report'};
+export const CBSE_CATEGORY_LABELS:Record<CbseCategory,string> = {unit_test:'Unit Test',half_yearly:'Half Yearly',final:'Final Examination',pre_board:'Pre-Board',annual:'Combined / Aggregate Report'};
 export const CBSE_EXAM_STATUS_LABELS:Record<CbseExamStatus,string> = {draft:'Draft',open:'Marks entry',class_review:'Class-teacher review',principal_review:'Academic review',approved:'Approved',released:'Released',cancelled:'Cancelled'};
 export const BEACON_PRE_PRIMARY_CODES=['NUR','LKG','UKG','TOD'];
 export function isBeaconCourseCode(code:string|null|undefined):boolean {return /^(BSA|BSAV)-(G(?:[1-9]|1[0-2])|NUR|LKG|UKG|TOD)$/i.test(code||'');}

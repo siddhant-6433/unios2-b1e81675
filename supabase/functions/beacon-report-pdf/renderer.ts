@@ -66,6 +66,7 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
   if (snapshot.student.dob) paragraph(`Date of birth: ${snapshot.student.dob}`, 9, muted);
   if (snapshot.student.father_name) paragraph(`Father: ${snapshot.student.father_name}`, 9, muted);
   if (snapshot.student.mother_name) paragraph(`Mother: ${snapshot.student.mother_name}`, 9, muted);
+  if (snapshot.class_teacher?.name) paragraph(`Class teacher: ${snapshot.class_teacher.name}${snapshot.class_teacher.designation ? ` (${snapshot.class_teacher.designation})` : ""}`, 9, muted);
   label("Assessment");
   const columns = [150, 172, 70, 45, INNER - 437];
   const tableHeader = () => {
@@ -107,7 +108,9 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
   paragraph(snapshot.remarks);
   label("Academic approval");
   paragraph(`Approved by ${snapshot.approval.name}`, 10);
+  if (snapshot.approval.designation) paragraph(snapshot.approval.designation, 9, muted);
   paragraph(`Approved on ${snapshot.approval.approved_at.slice(0, 10)} | Assessment policy version ${snapshot.policy.version}`, 9, muted);
+  if (snapshot.sources && snapshot.sources.length > 0) { label("Composed from"); paragraph(snapshot.sources.map((source) => `${source.name} (${source.weight}%)`).join(" · "), 9, muted); }
   paragraph("This report records school performance. It does not predict official Board grades or determine Board-examination eligibility.", 8, muted);
   // Approval/reopening/fee exception remarks are staff-only and are never printed.
   for (const [index, item] of document.getPages().entries()) {
