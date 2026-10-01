@@ -63,13 +63,21 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
   paragraph(`${snapshot.academic_year} | Revision ${snapshot.revision}`, 9, muted);
   if (snapshot.school.address) paragraph(snapshot.school.address, 9, muted);
   y -= 8;
-  paragraph(snapshot.student.name, 14);
-  paragraph(`${snapshot.student.course_name}${snapshot.student.section ? ` | Section ${snapshot.student.section}` : ""}`);
-  paragraph(`Admission no: ${snapshot.student.admission_no ?? "-"} | Roll no: ${snapshot.student.roll_no ?? "-"}`, 9, muted);
-  if (snapshot.student.dob) paragraph(`Date of birth: ${snapshot.student.dob}`, 9, muted);
-  if (snapshot.student.father_name) paragraph(`Father: ${snapshot.student.father_name}`, 9, muted);
-  if (snapshot.student.mother_name) paragraph(`Mother: ${snapshot.student.mother_name}`, 9, muted);
-  if (snapshot.class_teacher?.name) paragraph(`Class teacher: ${snapshot.class_teacher.name}${snapshot.class_teacher.designation ? ` (${snapshot.class_teacher.designation})` : ""}`, 9, muted);
+  { const rows: [string, string][] = [
+      ["Student", snapshot.student.name],
+      ["Class", `${snapshot.student.course_name}${snapshot.student.section ? ` · Section ${snapshot.student.section}` : ""}`],
+      ["Admission no.", snapshot.student.admission_no ?? "—"],
+      ["Roll no.", snapshot.student.roll_no ?? "—"],
+      ["Father", snapshot.student.father_name ?? "—"],
+      ["Mother", snapshot.student.mother_name ?? "—"],
+      ["Date of birth", snapshot.student.dob ?? "—"],
+      ["Class teacher", snapshot.class_teacher?.name ?? "—"],
+    ];
+    const rowH = 15, panelH = Math.ceil(rows.length / 2) * rowH + 10;
+    ensure(panelH + 8);
+    page.drawRectangle({ x: MARGIN, y: y - panelH, width: INNER, height: panelH, color: rgb(0.96, 0.97, 0.98) });
+    rows.forEach(([key, value], index) => { const column = index % 2, row = Math.floor(index / 2); const x = MARGIN + 8 + column * (INNER / 2); const atY = y - 16 - row * rowH; draw(key, x, atY, 8, muted); draw(value, x + 62, atY, 9, ink); });
+    y -= panelH + 12; }
   label("Assessment");
   const columns = [INNER - 260, 44, 58, 44, 44, 70];
   const tableHeader = () => {
