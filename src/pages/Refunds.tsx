@@ -14,7 +14,8 @@ import { CheckCircle, XCircle, IndianRupee, Building2, Wallet, Upload, Copy } fr
 
 type RefundRow = {
   id: string;
-  student_id: string;
+  student_id: string | null;
+  lead_id: string | null;
   total_amount: number;
   reason: string;
   status: "draft" | "approved" | "paid" | "rejected";
@@ -36,6 +37,7 @@ type RefundRow = {
   zoho_synced_at: string | null;
   zoho_sync_error: string | null;
   students: { name: string; admission_no: string } | null;
+  leads: { name: string; admission_no: string | null; pre_admission_no: string | null } | null;
 };
 
 const STATUS: Record<string, { label: string; color: string }> = {
@@ -93,7 +95,7 @@ export default function Refunds({ embedded = false }: { embedded?: boolean }) {
   const fetchAll = async () => {
     setLoading(true);
     const { data } = await (supabase.from as any)("fee_refunds")
-      .select("*, students(name, admission_no)")
+      .select("*, students(name, admission_no), leads(name, admission_no, pre_admission_no)")
       .order("created_at", { ascending: false });
     setRows((data as RefundRow[]) || []);
     setLoading(false);
@@ -184,7 +186,7 @@ export default function Refunds({ embedded = false }: { embedded?: boolean }) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Student</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Candidate</th>
                     <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Reason</th>
                     <th className="px-3 py-3 text-right text-xs font-semibold text-muted-foreground uppercase">Amount</th>
                     <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Status</th>
@@ -196,8 +198,8 @@ export default function Refunds({ embedded = false }: { embedded?: boolean }) {
                   {filtered.map((r) => (
                     <tr key={r.id} className="border-b border-border/40 hover:bg-muted/20">
                       <td className="px-4 py-3">
-                        <span className="block font-medium text-foreground">{r.students?.name || "—"}</span>
-                        <span className="block text-[10px] text-muted-foreground">{r.students?.admission_no || ""}</span>
+                        <span className="block font-medium text-foreground">{r.students?.name || r.leads?.name || "—"}</span>
+                        <span className="block text-[10px] text-muted-foreground">{r.students?.admission_no || r.leads?.admission_no || r.leads?.pre_admission_no || ""}</span>
                       </td>
                       <td className="px-3 py-3 max-w-[280px] truncate text-xs text-muted-foreground" title={r.reason}>{r.reason}</td>
                       <td className="px-3 py-3 text-right font-semibold">₹{Number(r.total_amount).toLocaleString("en-IN")}</td>
@@ -367,7 +369,7 @@ function RefundMarkPaidDialog({
     let proofUrl: string | null = refund.payment_proof_url;
     if (proof) {
       const ext = proof.name.split(".").pop() || "bin";
-      const path = `refunds/${refund.student_id}/payment-${refund.id}-${Date.now()}.${ext}`;
+      const path = `refunds/${refund.student_id || refund.lead_id || "leads"}/payment-${refund.id}-${Date.now()}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from("application-documents")
         .upload(path, proof, { contentType: proof.type || undefined, upsert: false });
@@ -404,8 +406,8 @@ function RefundMarkPaidDialog({
         </DialogHeader>
         <div className="space-y-3 text-sm">
           <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs">
-            <div className="font-medium text-foreground">{refund.students?.name || "Student"}</div>
-            <div className="text-muted-foreground">₹{Number(refund.total_amount).toLocaleString("en-IN")} · {refund.students?.admission_no || ""}</div>
+            <div className="font-medium text-foreground">{refund.students?.name || refund.leads?.name || "Candidate"}</div>
+            <div className="text-muted-foreground">₹{Number(refund.total_amount).toLocaleString("en-IN")} · {refund.students?.admission_no || refund.leads?.admission_no || refund.leads?.pre_admission_no || ""}</div>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>

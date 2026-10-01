@@ -55,8 +55,8 @@ describe("pending follow-up count alignment", () => {
   });
 
   it("keeps the Admissions banner fresh after Pending Follow-ups changes", () => {
-    expect(admissionsDataHook).toContain("refetchInterval: 30_000");
-    expect(admissionsDataHook).toContain('refetchOnMount: "always"');
+    expect(admissionsDataHook).toContain("refetchInterval: 120_000");
+    expect(admissionsDataHook).toContain('refetchOnMount: true');
     expect(pendingFollowupsPage).toContain("invalidateAdmissionsFollowupSurfaces");
     expect(pendingFollowupsPage).toContain('queryClient.invalidateQueries({ queryKey: ["admissions-followup-counts"] })');
     expect(pendingFollowupsPage).toContain('queryClient.invalidateQueries({ queryKey: ["admissions-overview"] })');

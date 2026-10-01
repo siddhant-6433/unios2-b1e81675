@@ -14,6 +14,7 @@ const leadListsPage = readFileSync("src/pages/LeadLists.tsx", "utf8");
 const whatsappSender = readFileSync("supabase/functions/whatsapp-campaign-send/index.ts", "utf8");
 const whatsappWebhook = readFileSync("supabase/functions/whatsapp-webhook/index.ts", "utf8");
 const emailSender = readFileSync("supabase/functions/email-campaign-send/index.ts", "utf8");
+const deliveryQueueMigration = readFileSync("supabase/migrations/20260901070029_queue_whatsapp_status_updates.sql", "utf8");
 
 describe("marketing campaign reports and list assignment", () => {
   it("adds database support for list round-robin assignment and list calling reports", () => {
@@ -40,9 +41,10 @@ describe("marketing campaign reports and list assignment", () => {
   });
 
   it("updates WhatsApp campaign recipients from provider delivery callbacks", () => {
-    expect(whatsappWebhook).toContain(".from(\"whatsapp_campaign_recipients\")");
-    expect(whatsappWebhook).toContain(".eq(\"message_id\", waMessageId)");
-    expect(whatsappWebhook).toContain("[\"sent\", \"delivered\", \"read\", \"failed\"]");
+    expect(whatsappWebhook).toContain('.from("whatsapp_status_queue")');
+    expect(whatsappWebhook).toContain("markCampaignRecipientEngagement");
+    expect(deliveryQueueMigration).toContain("UPDATE whatsapp_campaign_recipients cr");
+    expect(deliveryQueueMigration).toContain("cr.message_id = q.wa_message_id");
     expect(whatsappSender).toContain(".in(\"status\", [\"sent\", \"delivered\", \"read\"])");
   });
 

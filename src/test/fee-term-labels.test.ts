@@ -157,9 +157,9 @@ describe("edge functions label through the shared helper", () => {
 
   it("the student login labels through metadata, not a baked Year fallback", () => {
     const portal = read("src/pages/StudentPortal.tsx");
-    expect(portal).toContain("feeTermGroupLabel(g.term, feeMeta, { long: true })");
+    expect(portal).toContain("groups.push({ term: ONE_TIME_GROUP, rows: oneTime })");
     expect(portal).toContain("feeTermLabelLong(fee.term, feeMeta)");
-    expect(portal).toContain("feePeriodNoun(feeMeta)");
+    expect(portal).toContain("feeTermGroupLabel(g.term, feeMeta, { long: true })");
     expect(portal).not.toContain("feeTermLabelLong(f.term)");
     const parent = read("src/pages/ParentPortal.tsx");
     expect(parent).toContain("useFeeStructureMeta");

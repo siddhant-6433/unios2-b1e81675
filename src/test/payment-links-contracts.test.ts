@@ -62,24 +62,24 @@ describe("payment_links migration", () => {
 });
 
 describe("pay-link edge function", () => {
-  it("settles idempotently — claims active→paid before inserting any payment row", () => {
-    // The UPDATE ... eq(status,'active') guard runs first; a replayed webhook
-    // that fails to claim the row returns ok without inserting.
+  it("settles idempotently — claims the gateway payment before inserting any payment row", () => {
+    // A unique gateway_settlements insert claims the gateway transaction;
+    // replayed webhooks return already without inserting a second receipt.
     // Scope to settlePaymentLink — the module also holds order/lead-payment
     // helpers whose lead_payments writes come earlier in the file.
     const body = settlementFn.slice(settlementFn.indexOf("export async function settlePaymentLink"));
-    const claimIdx = body.indexOf('.eq("status", "active")');
+    const claimIdx = body.indexOf("claimGatewayPayment(");
     const insertIdx = body.indexOf('.from("lead_payments")');
     expect(claimIdx).toBeGreaterThan(-1);
     expect(insertIdx).toBeGreaterThan(claimIdx);
-    expect(body).toContain('.update({ status: "paid" })');
-    expect(body).toContain("if (!claimed) {");
+    expect(body).toContain("claim.error && !claim.claimed && !claim.already");
+    expect(body).toContain("finalizeLink");
     expect(body).toContain("already: true,");
   });
 
   it("always uses the DB amount — never a client-provided amount — for orders and settlement", () => {
     expect(settlementFn).toContain("const paidAmount = Number(link.amount);");
-    expect(payLinkFn).toContain("const amountPaise = Math.round(Number(link.amount) * 100);");
+    expect(payLinkFn).toContain("const amountPaise = Math.round(effectiveAmount * 100);");
     // No parsed.amount anywhere in the settlement path.
     expect(payLinkFn).not.toContain("parsed.amount");
     expect(settlementFn).not.toContain("parsed.amount");
