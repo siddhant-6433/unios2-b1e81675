@@ -1,3 +1,4 @@
+-- keep-migration-version
 -- whatsapp meta delivery block alerts
 -- Track recurring sender-wide Meta delivery blocks so the scheduled
 -- whatsapp-route-health monitor can notify admins without flooding inboxes.

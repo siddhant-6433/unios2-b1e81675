@@ -1,3 +1,4 @@
+-- keep-migration-version
 -- bind refund sync claim to auth user
 -- A caller must not be able to pass another finance user's ID to the payout
 -- lease RPC and hold a sync claim on their behalf.

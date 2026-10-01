@@ -1,3 +1,4 @@
+-- keep-migration-version
 -- Allow an AI-called applicant who has paid the token requirement to receive a PAN.
 
 -- Enforce inactive-student protection at the database boundary as well as in

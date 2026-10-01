@@ -1,3 +1,4 @@
+-- keep-migration-version
 -- Assign the real NIMT Beacon Avantika II class teachers (from the school's
 -- class-teacher list) and let a principal / super admin change the class teacher
 -- of an assessment.

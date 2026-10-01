@@ -1,3 +1,4 @@
+-- keep-migration-version
 -- lead refund sync idempotency and cent validation
 -- Keep all refund routes at currency precision. These table constraints also
 -- protect RPCs and service-role writes that do not go through the UI.

@@ -1,3 +1,4 @@
+-- keep-migration-version
 -- decouple pan an from lead stage
 -- Admission identifiers follow admissions facts, not mutable CRM call stages.
 -- Issuance requires a submitted/approved application and an approved offer for

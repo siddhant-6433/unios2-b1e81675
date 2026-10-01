@@ -1,3 +1,4 @@
+-- keep-migration-version
 -- bind admission eligibility to application id
 -- Bind number eligibility to the lead's actual application. Leads can have
 -- sibling drafts, so an unrelated latest application must not change the

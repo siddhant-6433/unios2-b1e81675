@@ -1,3 +1,4 @@
+-- keep-migration-version
 -- whatsapp meta delivery alert all day
 -- Campaigns run during the daytime window, so the WhatsApp health monitor
 -- must also check for delivery blocks during those hours.

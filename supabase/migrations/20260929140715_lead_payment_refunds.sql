@@ -1,3 +1,4 @@
+-- keep-migration-version
 -- lead payment refunds
 -- Allow the existing finance refund workflow to cover pre-admission lead
 -- payments that do not yet have a student fee-ledger allocation.
