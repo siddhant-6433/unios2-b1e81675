@@ -157,35 +157,74 @@ const ibAcademicsSubMenu: MenuItem[] = [
   { title: "IDU",                   url: "/ib/idu",       icon: GitMerge,   permission: "ib_idu:view" },
 ];
 
-const hrSubMenu: MenuItem[] = [
+type NavGroup = { label: string; items: MenuItem[] };
+
+// HR has 26 pages, so the sidebar groups them by HR function instead of one
+// flat list. The two self-service entries stay pinned at the top of the HR
+// group; everything else lives in collapsible function groups. Permissions are
+// unchanged from the previous flat list.
+const hrPinnedItems: MenuItem[] = [
   // hr:self, not hr:view — every employee sees their own record; only HR sees
   // everyone else's. For the non_teaching role this is the entire app.
-  { title: "My HR", url: "/my-hr", icon: UserCheck, permission: "hr:self" },
   { title: "HR Overview", url: "/hr", icon: Briefcase, permission: "hr:view" },
-  { title: "Job Openings", url: "/hr-job-openings", icon: Briefcase, permission: "hr:view" },
-  { title: "Job Applicants", url: "/hr-job-applicants", icon: UserPlus, permission: "hr:view" },
-  { title: "Onboarding", url: "/hr-onboarding", icon: UserPlus, permission: "hr:view" },
-  { title: "Recruitment", url: "/hr-recruitment", icon: BarChart3, permission: "hr:view" },
-  { title: "Referrals", url: "/hr-referrals", icon: Gift, permission: "hr:self" },
-  { title: "WhatsApp Inbox", url: "/whatsapp-inbox?scope=hr", icon: WhatsAppIcon, permission: "hr:view" },
-  { title: "Attendance", url: "/hr-attendance", icon: Fingerprint, permission: "hr:view" },
-  { title: "Leave Mgmt", url: "/hr-leave", icon: CalendarOff, permission: "hr:view" },
-  { title: "Directory", url: "/hr-directory", icon: Users, permission: "hr:view" },
-  { title: "Payroll", url: "/hr-payroll", icon: IndianRupee, permission: "hr:payroll_run" },
-  { title: "Expenses", url: "/hr-expenses", icon: Receipt, permission: "hr:expenses_approve" },
-  { title: "Performance", url: "/hr-performance", icon: Target, permission: "hr:performance_manage" },
-  { title: "Announcements", url: "/hr-announcements", icon: Megaphone, permission: "hr:engage_manage" },
-  { title: "Helpdesk", url: "/hr-helpdesk", icon: MessageSquare, permission: "hr:helpdesk_manage" },
-  { title: "Reports", url: "/hr-reports", icon: BarChart3, permission: "hr:view" },
-  { title: "Org Chart", url: "/hr-org", icon: GitMerge, permission: "hr:view" },
-  { title: "Assets", url: "/hr-assets", icon: FolderOpen, permission: "hr:assets_manage" },
-  { title: "Advances", url: "/hr-advances", icon: CreditCard, permission: "hr:expenses_approve" },
-  { title: "Comp Off", url: "/hr-comp-off", icon: CalendarOff, permission: "hr:attendance_edit" },
-  { title: "Encashment", url: "/hr-encashment", icon: IndianRupee, permission: "hr:leave_approve" },
-  { title: "Team Structure", url: "/hr-team", icon: Users, permission: "hr:employees_edit" },
-  { title: "Custom Fields", url: "/hr-custom-fields", icon: ListPlus, permission: "hr:employees_edit" },
-  { title: "Full & Final", url: "/hr-settlements", icon: LogOut, permission: "hr:employees_edit" },
-  { title: "Settings", url: "/hr-settings", icon: Settings, permission: "hr:employees_edit" },
+  { title: "My HR", url: "/my-hr", icon: UserCheck, permission: "hr:self" },
+];
+
+const hrNavGroups: NavGroup[] = [
+  {
+    label: "People",
+    items: [
+      { title: "Directory", url: "/hr-directory", icon: Users, permission: "hr:view" },
+      { title: "Onboarding", url: "/hr-onboarding", icon: UserPlus, permission: "hr:view" },
+      { title: "Team Structure", url: "/hr-team", icon: Users, permission: "hr:employees_edit" },
+      { title: "Org Chart", url: "/hr-org", icon: GitMerge, permission: "hr:view" },
+      { title: "Assets", url: "/hr-assets", icon: FolderOpen, permission: "hr:assets_manage" },
+    ],
+  },
+  {
+    label: "Time & Attendance",
+    items: [
+      { title: "Attendance", url: "/hr-attendance", icon: Fingerprint, permission: "hr:view" },
+      { title: "Leave Mgmt", url: "/hr-leave", icon: CalendarOff, permission: "hr:view" },
+      { title: "Comp Off", url: "/hr-comp-off", icon: CalendarOff, permission: "hr:attendance_edit" },
+      { title: "Encashment", url: "/hr-encashment", icon: IndianRupee, permission: "hr:leave_approve" },
+    ],
+  },
+  {
+    label: "Payroll & Finance",
+    items: [
+      { title: "Payroll", url: "/hr-payroll", icon: IndianRupee, permission: "hr:payroll_run" },
+      { title: "Expenses", url: "/hr-expenses", icon: Receipt, permission: "hr:expenses_approve" },
+      { title: "Advances", url: "/hr-advances", icon: CreditCard, permission: "hr:expenses_approve" },
+      { title: "Full & Final", url: "/hr-settlements", icon: LogOut, permission: "hr:employees_edit" },
+    ],
+  },
+  {
+    label: "Hiring",
+    items: [
+      { title: "Job Openings", url: "/hr-job-openings", icon: Briefcase, permission: "hr:view" },
+      { title: "Job Applicants", url: "/hr-job-applicants", icon: UserPlus, permission: "hr:view" },
+      { title: "Recruitment", url: "/hr-recruitment", icon: BarChart3, permission: "hr:view" },
+      { title: "Referrals", url: "/hr-referrals", icon: Gift, permission: "hr:self" },
+      { title: "WhatsApp Inbox", url: "/whatsapp-inbox?scope=hr", icon: WhatsAppIcon, permission: "hr:view" },
+    ],
+  },
+  {
+    label: "Performance & Engagement",
+    items: [
+      { title: "Performance", url: "/hr-performance", icon: Target, permission: "hr:performance_manage" },
+      { title: "Announcements", url: "/hr-announcements", icon: Megaphone, permission: "hr:engage_manage" },
+      { title: "Helpdesk", url: "/hr-helpdesk", icon: MessageSquare, permission: "hr:helpdesk_manage" },
+    ],
+  },
+  {
+    label: "Reports & Setup",
+    items: [
+      { title: "Reports", url: "/hr-reports", icon: BarChart3, permission: "hr:view" },
+      { title: "Custom Fields", url: "/hr-custom-fields", icon: ListPlus, permission: "hr:employees_edit" },
+      { title: "Settings", url: "/hr-settings", icon: Settings, permission: "hr:employees_edit" },
+    ],
+  },
 ];
 
 const managementMenu: MenuItem[] = [
@@ -385,14 +424,21 @@ export function AppSidebar() {
   const visibleTeaching = teachingSubMenu.filter(canSee);
   const visibleAcademics = academicsSubMenu.filter(canSee);
   const visibleIB = ibAcademicsSubMenu.filter(canSee);
-  const visibleHr = hrSubMenu.filter(canSee);
+  const visibleHrPinned = hrPinnedItems.filter(canSee);
+  const visibleHrGroups = hrNavGroups
+    .map((group) => ({ label: group.label, items: group.items.filter(canSee) }))
+    .filter((group) => group.items.length > 0);
   const visibleMgmt = managementMenu.filter(canSee);
   const isAdmissionActive = !isPartnerPortalRole && admissionSubMenu.some(item => isActive(item.url));
   const isMarketingActive = !isPartnerPortalRole && marketingSubMenu.some(item => isActive(item.url));
   const isTeachingActive = teachingSubMenu.some(item => isActive(item.url));
   const isAcademicsActive = academicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/library"));
   const isIBActive = ibAcademicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/ib/"));
-  const isHrActive = hrSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/hr"));
+  const hrGroupActive = (items: MenuItem[]) =>
+    items.some((item) => isActive(item.url) || (item.url.startsWith("/hr") && location.pathname.startsWith(item.url)));
+  const isHrActive =
+    [...hrPinnedItems, ...hrNavGroups.flatMap((g) => g.items)]
+      .some((item) => isActive(item.url) || location.pathname.startsWith("/hr"));
 
   // IB Academics only shows when Mirai campus is selected (or "all" for super_admin)
   const isMiraiContext = selectedCampusId === "all" || campuses.find(c => c.id === selectedCampusId)?.name?.toLowerCase().includes("mirai");
@@ -663,8 +709,9 @@ export function AppSidebar() {
                 </Collapsible>
               )}
 
-              {/* HR */}
-              {visibleHr.length > 0 && (
+              {/* HR — grouped by function. Nested collapsibles keep 26 pages
+                  from rendering as one flat wall of links. */}
+              {(visibleHrPinned.length > 0 || visibleHrGroups.length > 0) && (
                 <Collapsible defaultOpen={isHrActive} className="group/collapsible">
                   <SidebarMenuItem>
                     <CollapsibleTrigger asChild>
@@ -680,14 +727,46 @@ export function AppSidebar() {
                     </CollapsibleTrigger>
                     <CollapsibleContent>
                       <SidebarMenuSub>
-                        {visibleHr.map((item) => (
+                        {visibleHrPinned.map((item) => (
                           <SidebarMenuSubItem key={item.title}>
                             <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
                               <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>
                                 <item.icon className="h-3.5 w-3.5" />
-                                <span>{item.title}</span>
+                                <span className="flex-1">{item.title}</span>
                               </NavLink>
                             </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+
+                        {visibleHrGroups.map((group) => (
+                          <SidebarMenuSubItem key={group.label}>
+                            <Collapsible defaultOpen={hrGroupActive(group.items)} className="group/hrgroup">
+                              <CollapsibleTrigger asChild>
+                                <SidebarMenuSubButton
+                                  className={`${subLinkClass} justify-between`}
+                                  isActive={hrGroupActive(group.items)}
+                                >
+                                  <span className="flex-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">
+                                    {group.label}
+                                  </span>
+                                  <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]/hrgroup:rotate-180" />
+                                </SidebarMenuSubButton>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent>
+                                <SidebarMenuSub>
+                                  {group.items.map((item) => (
+                                    <SidebarMenuSubItem key={item.title}>
+                                      <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
+                                        <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>
+                                          <item.icon className="h-3.5 w-3.5" />
+                                          <span className="flex-1">{item.title}</span>
+                                        </NavLink>
+                                      </SidebarMenuSubButton>
+                                    </SidebarMenuSubItem>
+                                  ))}
+                                </SidebarMenuSub>
+                              </CollapsibleContent>
+                            </Collapsible>
                           </SidebarMenuSubItem>
                         ))}
                       </SidebarMenuSub>
