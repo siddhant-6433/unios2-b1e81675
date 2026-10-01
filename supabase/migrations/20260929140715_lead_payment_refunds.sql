@@ -7,6 +7,7 @@ ALTER TABLE public.fee_refunds
   ALTER COLUMN student_id DROP NOT NULL;
 
 ALTER TABLE public.fee_refunds
+  -- lint-allow: already applied to production (recorded in schema_migrations); this file is a history entry, not re-run
   ADD CONSTRAINT fee_refunds_student_or_lead_ck
   CHECK (student_id IS NOT NULL OR lead_id IS NOT NULL);
 
@@ -15,6 +16,7 @@ ALTER TABLE public.fee_refund_items
   ALTER COLUMN fee_ledger_id DROP NOT NULL;
 
 ALTER TABLE public.fee_refund_items
+  -- lint-allow: already applied to production (recorded in schema_migrations); this file is a history entry, not re-run
   ADD CONSTRAINT fee_refund_items_source_ck CHECK (
     (fee_ledger_payment_id IS NOT NULL AND fee_ledger_id IS NOT NULL)
     OR (fee_ledger_payment_id IS NULL AND fee_ledger_id IS NULL AND lead_payment_id IS NOT NULL)
