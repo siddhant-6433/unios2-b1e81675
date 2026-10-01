@@ -130,7 +130,12 @@ const payload = {
 beforeEach(() => {
   mocks.rpc.mockReset();
   mocks.toast.mockReset();
-  mocks.rpc.mockResolvedValue({ data: payload, error: null });
+  mocks.rpc.mockImplementation(async (fn: string) => fn === "fee_collection_vs_due_report"
+    ? { data: payload, error: null }
+    : { data: { statuses: [
+      { student_id: "s1", student_status: "active" },
+      { student_id: "s2", student_status: "active" },
+    ] }, error: null });
   vi.mocked(exportCollectionVsDuePdf).mockClear();
 });
 

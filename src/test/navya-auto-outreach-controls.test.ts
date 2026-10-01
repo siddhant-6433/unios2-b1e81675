@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const navyaVoiceAgent = readFileSync("src/pages/admin/NavyaVoiceAgent.tsx", "utf8");
-const migration = readFileSync("supabase/migrations/20260918100808_navya_auto_outreach_controls.sql", "utf8");
+const migration = readFileSync("supabase/migrations/20260918101857_navya_auto_outreach_controls.sql", "utf8");
 const leadIngest = readFileSync("supabase/functions/lead-ingest/index.ts", "utf8");
 const aiReply = readFileSync("supabase/functions/whatsapp-ai-reply/index.ts", "utf8");
 

@@ -2,10 +2,11 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { RefundDialog } from "@/components/finance/RefundDialog";
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { SelectField, FieldShell } from "@/components/ui/state-fields";
 import { Input } from "@/components/ui/input";
-import { Search, IndianRupee, Plus, Receipt, CheckCircle, Clock, AlertTriangle, Filter, Calendar } from "lucide-react";
+import { Search, IndianRupee, Plus, Receipt, CheckCircle, Clock, AlertTriangle, Filter, Calendar, Undo2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import { usePermissions } from "@/contexts/PermissionContext";
 import { useNavigate } from "react-router-dom";
 import { matchesCampus } from "@/lib/campusFilter";
 import { formatCompactINR } from "@/lib/formatCompactINR";
+import { getLeadRefundActionRows } from "@/lib/leadRefundActions";
 import {
   indiaDayEndExclusiveIso,
   indiaDayStartIso,
@@ -34,6 +36,8 @@ const gatewayLabels: Record<string, string> = {
 const gatewayLabel = (gateway?: string | null) =>
   gateway ? (gatewayLabels[gateway] || gateway) : "—";
 
+type RefundLead = { id: string | null; studentId: string | null; name: string };
+
 /** Rendered standalone at /collections and embedded as Finance → Receipts. */
 const FeeCollections = ({
   embedded = false,
@@ -52,9 +56,11 @@ const FeeCollections = ({
   const [consultantManagedIds, setConsultantManagedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
+  const [refundLead, setRefundLead] = useState<RefundLead | null>(null);
   const { selectedCampusId } = useCampus();
   const { can } = usePermissions();
   const canCreateFinance = can("finance", "create");
+  const canRefund = can("finance", "refund");
   // Embedded receipts follow the Finance header range so the two collection
   // cards cannot drift onto different days. Standalone /collections keeps its
   // own day picker.
@@ -143,6 +149,12 @@ const FeeCollections = ({
   const cashTotal = collectedRows.filter((p: any) => p.payment_mode === "cash").reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
   const onlineTotal = collectedRows.filter((p: any) => p.payment_mode !== "cash").reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
 
+  // Put one refund entry point on each lead represented in the current view.
+  // The dialog loads all refundable receipts for that lead, including receipts
+  // outside the currently selected date range.
+  // One action per candidate; the dialog then loads all their refundable receipts.
+  const refundActionRows = getLeadRefundActionRows(filtered as any[], canRefund);
+
   const isSingleDay = !!rangeFrom && rangeFrom === rangeTo;
   const isToday = isSingleDay && rangeFrom === indiaTodayDate();
   const collectionsLabel = isToday ? "Today's Collections" : isSingleDay ? "Day's Collections" : "Collections";
@@ -150,6 +162,16 @@ const FeeCollections = ({
   return (
     <>
       <ReceiptDialog data={receipt} onClose={() => setReceipt(null)} />
+      {refundLead && (
+        <RefundDialog
+          leadId={refundLead.id || undefined}
+          leadStudentId={refundLead.studentId || undefined}
+          leadName={refundLead.name}
+          open
+          onOpenChange={(open) => { if (!open) setRefundLead(null); }}
+          onDone={() => { setRefundLead(null); fetchPayments(); }}
+        />
+      )}
       <div className="space-y-6 animate-fade-in">
         <div className={`flex items-center justify-between ${embedded ? "hidden" : ""}`}>
           <div>
@@ -294,6 +316,7 @@ const FeeCollections = ({
                         {new Date(p.paid_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
                       </td>
                       <td className="px-4 py-3">
+                        <div className="flex flex-col items-start gap-1">
                         <button
                           onClick={() => setReceipt({
                             type: "student_fee",
@@ -312,6 +335,17 @@ const FeeCollections = ({
                         >
                           <Receipt className="h-3.5 w-3.5" /> PDF
                         </button>
+        {canRefund && refundActionRows.has(p.id) && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 gap-1 px-2 text-[11px]"
+                            onClick={() => setRefundLead({ id: p.lead_id || null, studentId: p.student_id || null, name: p.person_name || "Lead" })}
+                          >
+                            <Undo2 className="h-3 w-3" /> Refund lead
+                          </Button>
+                        )}
+                        </div>
                       </td>
                     </tr>
                   ))}

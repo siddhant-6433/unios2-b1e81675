@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { feeTermLabelWithMonths } from "@/lib/feeTermLabels";
 import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
-import { Receipt, ChevronDown, ChevronRight, FileImage, IndianRupee, Plus, Pencil, History, Send } from "lucide-react";
+import { Receipt, ChevronDown, ChevronRight, FileImage, IndianRupee, Plus, Pencil, History, Send, Undo2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,6 +13,8 @@ import { OfflinePaymentDialog } from "./OfflinePaymentDialog";
 import { PaymentEditDialog } from "./PaymentEditDialog";
 import { PaymentAuditDialog } from "./PaymentAuditDialog";
 import { AbvmuDepositPanel } from "./AbvmuDepositPanel";
+import { RefundDialog } from "./RefundDialog";
+import { hasEligibleLeadRefundPayment } from "@/lib/leadRefundActions";
 
 const PAY_TYPE_LABELS: Record<string, string> = {
   application_fee: "Application Fee",
@@ -92,7 +94,7 @@ const fmt = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN", { maximu
 const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
 export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: Props) {
-  const { role } = useAuth();
+  const { role, hasPermission } = useAuth();
   const [resolvedLeadId, setResolvedLeadId] = useState<string | null>(leadId ?? null);
   const [resolvedStudentId, setResolvedStudentId] = useState<string | null>(studentId ?? null);
   const [feeCourse, setFeeCourse] = useState<{ courseId: string | null; sessionId: string | null }>(
@@ -110,8 +112,10 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
   const [internalRefresh, setInternalRefresh] = useState(0);
   const [editPayment, setEditPayment] = useState<LeadPayment | null>(null);
   const [auditPayment, setAuditPayment] = useState<LeadPayment | null>(null);
+  const [refundOpen, setRefundOpen] = useState(false);
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
   const canRecordOffline = ["super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
+  const canRefund = hasPermission("finance:refund");
   const isSuperAdmin = role === "super_admin";
   const { toast } = useToast();
   const [resending, setResending] = useState<string | null>(null);
@@ -341,6 +345,11 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
             <Receipt className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-xs font-semibold text-foreground">Receipts</span>
             <span className="text-[10px] text-muted-foreground">{payments.length} payment{payments.length === 1 ? "" : "s"}</span>
+            {canRefund && hasEligibleLeadRefundPayment(payments) && (
+              <Button size="sm" variant="outline" className="ml-auto h-7 gap-1 px-2 text-[11px]" onClick={() => setRefundOpen(true)}>
+                <Undo2 className="h-3 w-3" /> Refund payments
+              </Button>
+            )}
           </div>
           {/* Horizontal scroll wrapper — the receipts table has 8 columns and
               gets clipped in narrow containers (e.g. inside the LeadDetail
@@ -697,6 +706,16 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey, onEmptyChange }: 
             receiptNo={auditPayment?.receipt_no}
           />
         </>
+      )}
+
+      {refundOpen && (
+        <RefundDialog
+          leadId={resolvedLeadId || undefined}
+          leadStudentId={resolvedStudentId || undefined}
+          open
+          onOpenChange={(open) => { if (!open) setRefundOpen(false); }}
+          onDone={() => { setRefundOpen(false); setInternalRefresh(n => n + 1); }}
+        />
       )}
     </CardContent>
     </Card>

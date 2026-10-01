@@ -11,7 +11,9 @@ describe("Easebuzz payment links", () => {
   it("shared settlePaymentLink exists and claims once", () => {
     expect(shared).toContain("export async function settlePaymentLink");
     expect(shared).toContain('context: "payment_link"');
-    expect(shared).toContain('.eq("status", "active")');
+    expect(shared).toContain("export async function claimGatewayPayment");
+    expect(shared).toContain('.from("gateway_settlements")');
+    expect(shared).toContain('error.code === "23505"');
   });
 
   it("pay-link can initiate Easebuzz checkout for a link token", () => {

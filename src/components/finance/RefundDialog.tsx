@@ -1,11 +1,10 @@
-// Student fee refund — cashier ticks the receipt(s)/heads to refund, enters a
-// reason + payee bank details + a cancelled-cheque/passbook proof, and submits
-// via create_fee_refund. Mirrors OfflinePaymentDialog's dialog/upload conventions.
+// Refund a student fee allocation or a lead payment. Both routes collect a
+// reason, payee bank details, and optional proof before creating a draft.
 
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
 import { TextAreaField } from "@/components/ui/state-fields";
@@ -30,7 +29,10 @@ type Allocation = {
 };
 
 interface Props {
-  studentId: string;
+  studentId?: string;
+  leadId?: string;
+  leadStudentId?: string;
+  leadName?: string;
   studentName?: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -41,9 +43,10 @@ const money = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 const EMPTY_BANK: BankDetails = { holderName: "", accountNumber: "", ifsc: "", bankName: "", upi: "" };
 
-export function RefundDialog({ studentId, studentName, open, onOpenChange, onDone }: Props) {
+export function RefundDialog({ studentId, leadId, leadStudentId, leadName, studentName, open, onOpenChange, onDone }: Props) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [rows, setRows] = useState<Allocation[]>([]);
   const [picked, setPicked] = useState<Record<string, number>>({});
   const [reason, setReason] = useState("");
@@ -52,10 +55,13 @@ export function RefundDialog({ studentId, studentName, open, onOpenChange, onDon
   const [verification, setVerification] = useState<BankVerification | null>(null);
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const isLeadRefund = !!leadId || !!leadStudentId;
 
   useEffect(() => {
     if (!open) return;
+    setRows([]);
     setPicked({});
+    setLoadError(null);
     setReason("");
     setNotes("");
     setBank(EMPTY_BANK);
@@ -63,12 +69,39 @@ export function RefundDialog({ studentId, studentName, open, onOpenChange, onDon
     setProofFile(null);
     (async () => {
       setLoading(true);
-      const { data, error } = await (supabase.rpc as any)("get_refundable_allocations", { _student_id: studentId });
+      const { data, error } = isLeadRefund
+        ? await (supabase.rpc as any)("get_refundable_lead_payments", { _lead_id: leadId || null, _student_id: leadStudentId || null })
+        : await (supabase.rpc as any)("get_refundable_allocations", { _student_id: studentId });
       setLoading(false);
-      if (error) { toast({ title: "Could not load refundable payments", description: error.message, variant: "destructive" }); return; }
-      setRows((data || []) as Allocation[]);
+      if (error) {
+        const description = error.code === "PGRST202" || /schema cache/i.test(error.message)
+          ? "The refund database migration has not been applied yet. Apply the pending Supabase migrations, then reload."
+          : error.message;
+        setLoadError(description);
+        toast({ title: "Could not load refundable payments", description, variant: "destructive" });
+        return;
+      }
+      if (isLeadRefund) {
+        setRows((data || []).map((row: any) => ({
+          fee_ledger_payment_id: row.lead_payment_id,
+          fee_ledger_id: "",
+          lead_payment_id: row.lead_payment_id,
+          fee_code: row.type,
+          fee_head: row.fee_head,
+          term: "Lead payment",
+          receipt_no: row.receipt_no,
+          payment_date: row.payment_date,
+          gateway: row.gateway,
+          payment_mode: row.payment_mode,
+          collected: Number(row.collected),
+          already_refunded: Number(row.already_refunded),
+          remaining: Number(row.remaining),
+        })));
+      } else {
+        setRows((data || []) as Allocation[]);
+      }
     })();
-  }, [open, studentId]);
+  }, [open, studentId, leadId, leadStudentId, isLeadRefund, toast]);
 
   const groups = useMemo(() => {
     const byReceipt = new Map<string, Allocation[]>();
@@ -101,7 +134,7 @@ export function RefundDialog({ studentId, studentName, open, onOpenChange, onDon
     let proofUrl: string | null = null;
     if (proofFile) {
       const ext = proofFile.name.split(".").pop() || "bin";
-      const path = `refunds/${studentId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const path = `refunds/${studentId || leadId || leadStudentId || "leads"}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from("application-documents")
         .upload(path, proofFile, { contentType: proofFile.type, upsert: false });
@@ -130,21 +163,33 @@ export function RefundDialog({ studentId, studentName, open, onOpenChange, onDon
       verification_status: verification?.status || "unverified",
     };
 
-    const { error } = await (supabase.rpc as any)("create_fee_refund", {
-      _student_id: studentId,
-      _reason: reason.trim(),
-      _items: items,
-      _bank: bankPayload,
-      _proof_url: proofUrl,
-      _notes: notes.trim() || null,
-    });
+    const { error } = isLeadRefund
+      ? await (supabase.rpc as any)("create_lead_refund", {
+          _lead_id: leadId || null,
+          _student_id: leadStudentId || null,
+          _items: rows
+            .filter((r) => Number(picked[r.fee_ledger_payment_id]) > 0)
+            .map((r) => ({ lead_payment_id: r.lead_payment_id, amount: Number(picked[r.fee_ledger_payment_id]) })),
+          _reason: reason.trim(),
+          _bank: bankPayload,
+          _proof_url: proofUrl,
+          _notes: notes.trim() || null,
+        })
+      : await (supabase.rpc as any)("create_fee_refund", {
+          _student_id: studentId,
+          _reason: reason.trim(),
+          _items: items,
+          _bank: bankPayload,
+          _proof_url: proofUrl,
+          _notes: notes.trim() || null,
+        });
     setSubmitting(false);
 
     if (error) {
       toast({ title: "Could not create refund", description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: "Refund created", description: `${money(total)} recorded as a draft refund for ${studentName || "this student"}.` });
+    toast({ title: "Refund created", description: `${money(total)} recorded as a draft refund for ${studentName || leadName || "this candidate"}.` });
     onOpenChange(false);
     onDone?.();
   };
@@ -155,15 +200,20 @@ export function RefundDialog({ studentId, studentName, open, onOpenChange, onDon
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IndianRupee className="h-4 w-4 text-primary" />
-            Refund Payment{studentName ? ` — ${studentName}` : ""}
+            {isLeadRefund ? "Refund Lead Payments" : "Refund Payment"}{studentName || leadName ? ` — ${studentName || leadName}` : ""}
           </DialogTitle>
         </DialogHeader>
+        <DialogDescription className="sr-only">
+          Review eligible receipts, choose refund amounts, and provide the reason and payee details.
+        </DialogDescription>
 
         <div className="min-w-0 space-y-4 py-2">
           {loading ? (
             <div className="py-8 text-center text-sm text-muted-foreground">Loading refundable payments…</div>
+          ) : loadError ? (
+            <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3 text-sm text-destructive">{loadError}</div>
           ) : groups.length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">No refundable payments found for this student.</div>
+            <div className="py-8 text-center text-sm text-muted-foreground">No refundable payments found for this candidate.</div>
           ) : (
             <div className="space-y-3">
               {groups.map(([receiptId, items]) => (

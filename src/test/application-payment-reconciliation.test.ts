@@ -13,6 +13,7 @@ const easebuzzFunction = readFileSync(
   "supabase/functions/easebuzz-payment/index.ts",
   "utf8",
 );
+const easebuzzShared = readFileSync("supabase/functions/_shared/easebuzz.ts", "utf8");
 
 describe("application payment reconciliation", () => {
   it("prefers exact lead_payments.application_id before lead-level fallback", () => {
@@ -41,8 +42,8 @@ describe("application payment reconciliation", () => {
   });
 
   it("reads amounts from both EaseBuzz retrieve API response shapes", () => {
-    expect(easebuzzFunction).toContain("function easebuzzAmount");
-    expect(easebuzzFunction).toContain("txn?.amount ?? txn?.total_debit_amount ?? txn?.net_debit_amount");
+    expect(easebuzzShared).toContain("function easebuzzAmount");
+    expect(easebuzzShared).toContain("txn?.amount ?? txn?.total_debit_amount ?? txn?.net_debit_amount");
     expect(easebuzzFunction).toContain("const got      = easebuzzAmount(match)");
     expect(easebuzzFunction).toContain("const got       = easebuzzAmount(txn)");
   });

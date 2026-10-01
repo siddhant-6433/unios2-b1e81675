@@ -53,7 +53,7 @@ describe("CUET 2026 counselling WhatsApp template routing", () => {
     expect(whatsappSend).toContain("cuet_2026_counselling_open");
     expect(whatsappSend).toContain("cuet_counselling_booking");
     expect(whatsappSend).toContain("Dynamic WhatsApp template lookup failed");
-    expect(whatsappSend).toContain("templateHasDynamicUrlButton");
+    expect(whatsappSend).toContain("dynamicUrlButtonIndexes");
     expect(whatsappSend).toContain('type: "image"');
     expect(campaignSend).toContain("cuet_2026_counselling_open");
     expect(campaignSend).toContain("cuet_counselling_booking");

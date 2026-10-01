@@ -12,6 +12,7 @@ const marketingPage = readFileSync("src/pages/Marketing.tsx", "utf8");
 const bulkTemplates = readFileSync("src/config/waBulkTemplates.ts", "utf8");
 const whatsappTemplateMeta = readFileSync("src/lib/whatsappTemplateMeta.ts", "utf8");
 const waCampaignParams = readFileSync("src/lib/waCampaignParams.ts", "utf8");
+const waSenders = readFileSync("src/lib/waSenders.ts", "utf8");
 
 describe("campaign queue controls", () => {
   it("adds database states for paused and terminated campaign queues", () => {
@@ -59,10 +60,10 @@ describe("campaign queue controls", () => {
   it("keeps the bulk WhatsApp send dialog usable on short screens", () => {
     expect(leadLists).toContain("max-h-[90vh]");
     expect(leadLists).toContain("overflow-y-auto px-6 py-4");
-    expect(leadLists).toContain("knownBulkSenderOptions");
-    expect(leadLists).toContain("919667641872");
-    expect(leadLists).toContain("917428499849");
-    expect(leadLists).toContain("919555192192");
+    expect(waSenders).toContain("knownBulkSenderOptions");
+    expect(waSenders).not.toContain("919667641872");
+    expect(waSenders).toContain("917428499849");
+    expect(waSenders).toContain("deliberately NOT a bulk");
   });
 
   it("can load enabled approved templates dynamically for bulk campaigns", () => {

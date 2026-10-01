@@ -43,7 +43,7 @@ describe("live counselling updates in the admissions context", () => {
 
   it("drops a brief older than the freshness window — stale round dates are worse than none", async () => {
     const context = await loadVerifiedAdmissionsContext(fakeAdmin([source(daysAgo(30))]) as any, null, null);
-    expect(context).not.toContain("LIVE COUNSELLING UPDATES");
+    expect(context).toContain("LIVE COUNSELLING UPDATES: unavailable right now.");
     expect(context).not.toContain("mop-up round");
   });
 });

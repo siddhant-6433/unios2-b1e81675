@@ -188,10 +188,11 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(aiReply).toContain('reason: `conversation_${stateRow.mode}`');
     expect(aiReply).toContain('state: confidence < 0.6 ? "knowledge_gap" : "answered_by_ai"');
     expect(manualReply).toContain("recordManualReplyConversationAction");
+    expect(inbox).toContain('.rpc("whatsapp_conversations_page"');
     expect(conversationActionHelper).toContain('state: "human_active"');
-    expect(inbox).toContain("conversation_mode, conversation_state");
+    expect(inbox).toContain('.rpc("whatsapp_conversations_page"');
     expect(inbox).toContain("lastError = null");
-    expect(inbox).toContain('from("whatsapp_conversation_state")');
+    expect(inbox).toContain("conversation_state");
     expect(inbox).toContain("stateLabel(selectedConv.conversation_state)");
   });
 

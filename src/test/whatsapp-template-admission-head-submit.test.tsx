@@ -29,15 +29,20 @@ describe("WhatsApp template submission as admission head", () => {
     mocks.from.mockReset();
     mocks.removeChannel.mockReset();
 
-    mocks.from.mockReturnValue({
-      select: vi.fn().mockReturnValue({
-        order: vi.fn().mockResolvedValue({ data: [], error: null }),
-      }),
-    });
+    const query: any = {
+      select: vi.fn(() => query),
+      eq: vi.fn(() => query),
+      order: vi.fn(() => query),
+      then: (resolve: (value: any) => any) => resolve({ data: [], error: null }),
+    };
+    mocks.from.mockReturnValue(query);
 
     mocks.invokeEdge.mockImplementation(async (_name: string, options?: { body?: { action?: string } }) => {
       if (options?.body?.action === "create") {
         return { data: { success: true, id: "meta-template-1", status: "PENDING" }, error: null };
+      }
+      if (options?.body?.action === "wabas") {
+        return { data: { wabas: [{ waba_id: "waba-1", label: "Admissions", is_default: true }] }, error: null };
       }
       return { data: { templates: [] }, error: null };
     });
@@ -72,6 +77,9 @@ describe("WhatsApp template submission as admission head", () => {
       target: { value: "NIMT Admissions" },
     });
 
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^submit to meta$/i })).toBeEnabled();
+    });
     fireEvent.click(screen.getByRole("button", { name: /^submit to meta$/i }));
 
     await waitFor(() => {
@@ -83,6 +91,7 @@ describe("WhatsApp template submission as admission head", () => {
           body_text: "Hi {{1}}, your counselling slot for {{2}} is confirmed.",
           body_examples: ["Riya", "B.Sc Nursing"],
           footer_text: "NIMT Admissions",
+          waba_id: "waba-1",
         },
       });
     });
