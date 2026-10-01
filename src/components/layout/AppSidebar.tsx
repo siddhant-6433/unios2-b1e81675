@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useCampus } from "@/contexts/CampusContext";
+import { BEACON_ACADEMICS_ENABLED } from "@/lib/beaconAcademicsFeature";
 
 
 type MenuItem = {
@@ -131,6 +132,7 @@ const teachingSubMenu: MenuItem[] = [
   { title: "My Classes", url: "/my-classes", icon: GraduationCap, permission: "students:view" },
   { title: "Timetable", url: "/timetable", icon: CalendarDays, permission: "timetable:view" },
   { title: "Report Cards", url: "/report-cards", icon: FileText, permission: "marks:view" },
+  ...(BEACON_ACADEMICS_ENABLED ? [{ title: "Assessments - CBSE", url: "/beacon-academics", icon: GraduationCap, permission: "marks:view" }] : []),
 ];
 
 const academicsSubMenu: MenuItem[] = [
