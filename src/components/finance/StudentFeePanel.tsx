@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Wand2, Plus, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon, Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History, Settings2, LogIn, Copy, MessageCircle, X, Pencil, Undo2 } from "lucide-react";
+import { Wand2, Plus, Check, Clock, AlertTriangle, Trash2, Link as LinkIcon, Receipt, FileText, RefreshCw, Wallet, ArrowLeftRight, History, Settings2, LogIn, Copy, MessageCircle, X, Pencil, Undo2, Bus } from "lucide-react";
 import { PaymentEditDialog } from "./PaymentEditDialog";
 import { RefundDialog } from "./RefundDialog";
 import {
@@ -35,6 +35,7 @@ import { reviseStudentReceiptPdfs } from "@/lib/reviseStudentReceipts";
 import { formatPersonName } from "@/lib/personName";
 import { buildYear1LumpSumOffer } from "@/lib/year1LumpSumWaiver";
 import { Year1LumpSumInfoBanner } from "./Year1LumpSumBanner";
+import { AssignBeaconTransportDialog } from "./AssignBeaconTransportDialog";
 
 interface StudentFeePanelProps {
   student: any;
@@ -71,6 +72,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [auditOpen, setAuditOpen] = useState(false);
   const [collectOpen, setCollectOpen] = useState(false);
   const [chargeOpen, setChargeOpen] = useState(false);
+  const [transportAssignmentOpen, setTransportAssignmentOpen] = useState(false);
   // Counter selection: which ledger rows the cashier ticked, and how much to
   // take against each (defaults to the row's balance, editable down to a part
   // payment). One receipt is then issued across every ticked row.
@@ -108,6 +110,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   // may select. The Collect button itself stays cashier-only.
   const canPick = canCollect || canSendLink;
   const courseCode = student?.courses?.code || student?.course_code || "";
+  const isBeacon = courseCode.startsWith("BSAV-");
   const isDaott = ["DAOTT-GN", "OTT-GN"].includes(courseCode);
   // How this programme names its collection periods. D.AOTT bills 5 semesters
   // but stores them as year_1..year_5 like everyone else, so the term string
@@ -673,6 +676,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
               {canProvision && (
                 <DropdownMenuItem onClick={() => handleProvision(false)} disabled={provisioning} className="gap-2">
                   <Wand2 className="h-3.5 w-3.5" /> Auto-Assign Fees
+                </DropdownMenuItem>
+              )}
+              {canProvision && isBeacon && (
+                <DropdownMenuItem onClick={() => setTransportAssignmentOpen(true)} className="gap-2">
+                  <Bus className="h-3.5 w-3.5" /> Assign Transport Fee
                 </DropdownMenuItem>
               )}
               {canProvision && fees.length > 0 && (
@@ -1285,6 +1293,15 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         studentId={student.id}
         feeMeta={feeMeta}
       />
+
+      {canProvision && isBeacon && student?.id && (
+        <AssignBeaconTransportDialog
+          open={transportAssignmentOpen}
+          onOpenChange={setTransportAssignmentOpen}
+          studentId={student.id}
+          onAssigned={() => { fetchFees(); onRefresh?.(); }}
+        />
+      )}
 
       {canRefund && student?.id && (
         <RefundDialog

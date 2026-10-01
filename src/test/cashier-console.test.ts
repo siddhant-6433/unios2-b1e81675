@@ -53,6 +53,8 @@ const removeMigration = readMigration("relax_remove_fee_charge_to_cashier");
 const searchMigration = readMigration("cashier_search_course");
 const phoneNormalizeMigration = readMigration("cashier_search_phone_normalize");
 const campusScopeMigration = readMigration("campus_scope_concession_nav_guards");
+const beaconTransportMigration = readMigration("beacon_transport_fee_assignment");
+const beaconTransport2026Migration = readMigration("beacon_transport_fee_assignment_2026_27");
 
 describe("campus filtering", () => {
   it("keeps rows whose campus could not be resolved", () => {
@@ -637,6 +639,26 @@ describe("ledger header stays a counter, not a control panel", () => {
     for (const label of ["Auto-Assign Fees", "Re-provision (clear unpaid)", "Transfer", "Reallocation History"]) {
       expect(studentFeePanel).toContain(label);
     }
+  });
+
+  it("puts Beacon transport assignment under Manage and limits its dialog to Beacon finance users", () => {
+    expect(studentFeePanel).toContain("Assign Transport Fee");
+    expect(studentFeePanel).toContain("canProvision && isBeacon");
+    expect(studentFeePanel).toContain("<AssignBeaconTransportDialog");
+  });
+
+  it("validates defaults and payment-safe replacement on the server", () => {
+    expect(beaconTransportMigration).toContain("6000::numeric");
+    expect(beaconTransportMigration).toContain("7500::numeric");
+    expect(beaconTransportMigration).toContain("10500::numeric");
+    expect(beaconTransportMigration).toContain("public.beacon_transport_fee_options(_student_id)");
+    expect(beaconTransportMigration).toContain("fl.paid_amount > 0");
+    expect(beaconTransportMigration).toContain("Transport charges have payments and cannot be replaced");
+    expect(beaconTransportMigration).toContain("DELETE FROM public.fee_ledger fl");
+    expect(beaconTransportMigration).toContain("GRANT EXECUTE ON FUNCTION public.assign_beacon_transport_fee");
+    expect(beaconTransport2026Migration).toContain("'2026-27'");
+    expect(beaconTransport2026Migration).toContain("1800::numeric");
+    expect(beaconTransport2026Migration).toContain("v_student.session_name NOT IN ('2026-27', '2027-28')");
   });
 });
 
