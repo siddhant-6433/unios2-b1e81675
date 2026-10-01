@@ -302,5 +302,10 @@ verify_jwt = false
 [functions.whatsapp-webhook-subscriptions]
 verify_jwt = false
 
+[functions.beacon-report-pdf]
+# Authentication is performed with auth.getUser inside the handler, including new JWT signing keys.
+verify_jwt = false
+static_files = ["./functions/beacon-report-pdf/assets/*"]
+
 [functions.apply-job]
 verify_jwt = false

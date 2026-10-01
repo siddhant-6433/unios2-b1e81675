@@ -1,6 +1,9 @@
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { isBeaconCourseCode } from "@/lib/cbseExams";
+import { FamilyReports } from "@/components/academics/FamilyReports";
+import { BEACON_ACADEMICS_ENABLED } from "@/lib/beaconAcademicsFeature";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { OrbLoader } from "@/components/ui/thinking-orb";
@@ -17,7 +20,7 @@ import { Year1LumpSumIncentiveCard } from "@/components/finance/Year1LumpSumBann
 import { IndianRupee, ClipboardCheck, Megaphone, AlertCircle, CheckCircle, Clock, CreditCard, FileText, // Aliased: `Receipt` is the payment-row type in this file.
   Receipt as ReceiptIcon, ChevronDown } from "lucide-react";
 
-const tabs = [
+const baseTabs = [
   { id: "fees", label: "Fees", icon: IndianRupee },
   { id: "attendance", label: "Attendance", icon: ClipboardCheck },
   { id: "notices", label: "Notices", icon: Megaphone },
@@ -33,6 +36,7 @@ interface StudentInfo {
   session_id: string | null;
   campus_id: string | null;
   course_name: string;
+  course_code: string;
   campus_name: string;
   semester: string;
   parent_phone: string;
@@ -95,6 +99,10 @@ export default function StudentPortal() {
   const [abvmuCollegeDeduction, setAbvmuCollegeDeduction] = useState(0);
   const [loading, setLoading] = useState(true);
   const [claimError, setClaimError] = useState<string | null>(null);
+
+  const tabs = BEACON_ACADEMICS_ENABLED && isBeaconCourseCode(student?.course_code)
+    ? [...baseTabs, { id: "reports", label: "Reports", icon: FileText }]
+    : baseTabs;
 
   const studentLayoutProps = student
     ? {
@@ -177,6 +185,7 @@ export default function StudentPortal() {
         session_id: studentData.session_id || null,
         campus_id: studentData.campus_id || null,
         course_name: course?.name || "",
+        course_code: course?.code || "",
         campus_name: (studentData as any).campuses?.name || "",
         semester: "",
         parent_phone: studentData.father_phone || studentData.mother_phone || studentData.guardian_phone || studentData.phone || "",
@@ -435,6 +444,8 @@ export default function StudentPortal() {
           </button>
         ))}
       </div>
+
+      {BEACON_ACADEMICS_ENABLED && activeTab === "reports" && <FamilyReports studentId={student.id} studentName={student.name} />}
 
       {/* Fees Tab — hidden-fee mode (consultant-managed): due + Pay + receipts only */}
       {activeTab === "fees" && fees.length === 0 && hiddenFee && (

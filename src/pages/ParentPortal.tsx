@@ -1,15 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { FamilyReports } from "@/components/academics/FamilyReports";
+import { BEACON_ACADEMICS_ENABLED } from "@/lib/beaconAcademicsFeature";
+import { isBeaconCourseCode } from "@/lib/cbseExams";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { OrbLoader } from "@/components/ui/thinking-orb";
 import { feeTermLabelLong } from "@/lib/feeTermLabels";
 import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
-import { IndianRupee, ClipboardCheck, Megaphone, AlertCircle, CheckCircle, Clock, ChevronRight, Receipt, CreditCard } from "lucide-react";
+import { IndianRupee, ClipboardCheck, Megaphone, AlertCircle, CheckCircle, Clock, ChevronRight, Receipt, CreditCard, FileText } from "lucide-react";
 
-const tabs = [
+const baseTabs = [
   { id: "fees", label: "Fees", icon: IndianRupee },
   { id: "attendance", label: "Attendance", icon: ClipboardCheck },
   { id: "notices", label: "Notices", icon: Megaphone },
@@ -55,6 +58,13 @@ export default function ParentPortal() {
   const [fees, setFees] = useState<FeeItem[]>([]);
   const [attendance, setAttendance] = useState<AttendanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const currentUser = useRef(user?.id);
+  currentUser.current = user?.id;
+  const [loadedUserId, setLoadedUserId] = useState<string | undefined>();
+  const [reportsStudentId, setReportsStudentId] = useState<string | null>(null);
+  const tabs = BEACON_ACADEMICS_ENABLED && reportsStudentId
+    ? [...baseTabs, { id: "reports", label: "Reports", icon: FileText }]
+    : baseTabs;
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
 
   useEffect(() => {
@@ -63,14 +73,21 @@ export default function ParentPortal() {
 
   const fetchStudentData = async () => {
     setLoading(true);
+    const actor = user?.id;
+    setStudent(null); setFees([]); setAttendance(null);
+    setReportsStudentId(null);
+    if (!user?.id) { setLoading(false); return; }
 
     // Find student linked to this parent/user
-    const { data: studentData } = await supabase
+    const { data: linkedStudents } = await supabase
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, campus_id, batch_id, course_id, session_id, campuses:campus_id(name), batches:batch_id(name), courses:course_id(name)")
+      .select("id, name, admission_no, pre_admission_no, campus_id, batch_id, course_id, session_id, campuses:campus_id(name), batches:batch_id(name), courses:course_id(name,code)")
       .or(`user_id.eq.${user?.id},father_user_id.eq.${user?.id},mother_user_id.eq.${user?.id},guardian_user_id.eq.${user?.id}`)
-      .limit(1)
-      .single();
+      ;
+    if (currentUser.current !== actor) return;
+    const studentData = linkedStudents?.[0];
+    const beaconChild = linkedStudents?.find(child => isBeaconCourseCode(child.courses?.code));
+    setReportsStudentId(beaconChild?.id ?? null);
 
     if (studentData) {
       setStudent({
@@ -91,6 +108,7 @@ export default function ParentPortal() {
         .eq("student_id", studentData.id)
         .order("due_date", { ascending: true });
 
+      if (currentUser.current !== actor) return;
       if (feeData) {
         setFees(feeData.map((f: any) => ({
           id: f.id,
@@ -111,6 +129,7 @@ export default function ParentPortal() {
         .select("status")
         .eq("student_id", studentData.id);
 
+      if (currentUser.current !== actor) return;
       if (attData) {
         const total = attData.length;
         const present = attData.filter((a: any) => a.status === "present").length;
@@ -126,13 +145,14 @@ export default function ParentPortal() {
       }
     }
 
+    setLoadedUserId(actor);
     setLoading(false);
   };
 
   const totalDue = fees.reduce((s, f) => s + f.balance, 0);
   const totalPaid = fees.reduce((s, f) => s + f.paid_amount, 0);
 
-  if (loading) {
+  if (loading || loadedUserId !== user?.id) {
     return (
       <PortalLayout>
         <div className="flex items-center justify-center py-20">
@@ -159,7 +179,7 @@ export default function ParentPortal() {
       <ReceiptDialog data={receipt} onClose={() => setReceipt(null)} />
       <PortalLayout tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
         {/* Student Info Card */}
-        <div className="rounded-2xl bg-white border border-gray-200 p-5 mb-6">
+        {activeTab !== "reports" && <div className="rounded-2xl bg-white border border-gray-200 p-5 mb-6">
           <div className="flex items-center gap-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-bold shrink-0">
               {student.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
@@ -173,6 +193,8 @@ export default function ParentPortal() {
             </div>
           </div>
         </div>
+
+        }
 
         {/* Tab nav (desktop) */}
         <div className="hidden sm:flex items-center gap-1 rounded-xl border border-gray-200 bg-white p-1 mb-6 w-fit">
@@ -191,6 +213,8 @@ export default function ParentPortal() {
             </button>
           ))}
         </div>
+
+        {BEACON_ACADEMICS_ENABLED && activeTab === "reports" && reportsStudentId && <FamilyReports studentId={reportsStudentId} selectChild />}
 
         {/* Fees Tab */}
         {activeTab === "fees" && (

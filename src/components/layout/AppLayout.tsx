@@ -43,6 +43,7 @@ const pageTitles: Record<string, string> = {
   "/missed-calls": "Missed Calls",
   "/lead-buckets": "Lead Buckets",
   "/exams": "Exams",
+  "/beacon-academics": "Assessments - CBSE",
   "/campuses": "Campuses",
   "/courses": "Courses",
   "/reports": "Reports",
