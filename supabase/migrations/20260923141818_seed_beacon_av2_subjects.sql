@@ -1,3 +1,7 @@
+-- keep-migration-version: already recorded on production schema_migrations
+-- Backfilled from production schema_migrations to align db push history.
+-- Git must keep this timestamp so `db push` matches remote history.
+--
 -- Seed the CBSE subject master for NIMT Beacon School Avantika II (BSAV-G1..G12)
 -- from the school's 2026-27 Unit Test II and Half Yearly datesheets, so
 -- assessment policies, papers, timetables and attendance can reference real

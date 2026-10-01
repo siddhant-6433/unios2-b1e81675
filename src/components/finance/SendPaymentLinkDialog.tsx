@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { FeeHeadAllocationField, type FeeAllocation } from "./FeeHeadAllocationField";
-import { LinkIcon, Copy, Check } from "lucide-react";
+import { LinkIcon, Copy, Check, MessageCircle, Mail, Share2 } from "lucide-react";
 
 type Purpose = "pre_admission_token" | "fee_due" | "custom";
 
@@ -83,6 +83,7 @@ export function SendPaymentLinkDialog({
   const [submitting, setSubmitting] = useState(false);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [createdChannel, setCreatedChannel] = useState<string | null>(null);
 
   const seeded = !!(defaultAllocations && defaultAllocations.length > 0);
   const usingBreakup = allocations.length > 0;
@@ -106,6 +107,7 @@ export function SendPaymentLinkDialog({
     setGateway("choice");
     setCreatedUrl(null);
     setCopied(false);
+    setCreatedChannel(null);
   };
 
   const handleSubmit = async () => {
@@ -145,6 +147,7 @@ export function SendPaymentLinkDialog({
     }
 
     setCreatedUrl(data.pay_url);
+    setCreatedChannel(channel);
     toast({
       title: "Payment link created",
       description: channel === "none" ? "Copy the link to share it." : "Link created and sent to the candidate.",
@@ -161,6 +164,19 @@ export function SendPaymentLinkDialog({
     } catch {
       toast({ title: "Copy failed", description: "Select and copy the link manually.", variant: "destructive" });
     }
+  };
+
+  const shareUrl = async () => {
+    if (!createdUrl) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Payment link", url: createdUrl });
+        return;
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+      }
+    }
+    await copyUrl();
   };
 
   return (
@@ -188,13 +204,33 @@ export function SendPaymentLinkDialog({
 
         {createdUrl ? (
           <div className="min-w-0 space-y-3 py-2">
-            <p className="text-sm text-muted-foreground">Payment link ready:</p>
+            <div className="flex items-start gap-2 rounded-lg border border-success/30 bg-success/5 px-3 py-2.5">
+              {createdChannel === "none" ? <Share2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" /> :
+                createdChannel === "email" ? <Mail className="mt-0.5 h-4 w-4 shrink-0 text-success" /> :
+                  <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
+              <div className="text-sm">
+                <p className="font-medium text-foreground">
+                  {createdChannel === "none" ? "Payment link created" : "Payment link created and sent"}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {createdChannel === "none"
+                    ? "Copy the link or share it from your device."
+                    : `Sent via ${createdChannel === "both" ? "WhatsApp and email" : createdChannel}. You can also copy or share the link.`}
+                </p>
+              </div>
+            </div>
             <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
               <span className="flex-1 truncate text-xs text-foreground">{createdUrl}</span>
-              <button onClick={copyUrl} className="text-muted-foreground hover:text-foreground" title="Copy">
-                {copied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
-              </button>
+              <Button size="sm" variant="outline" onClick={copyUrl} className="h-8 shrink-0 gap-1.5">
+                {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? "Copied" : "Copy link"}
+              </Button>
             </div>
+            {createdChannel === "none" && typeof navigator !== "undefined" && "share" in navigator && (
+              <Button variant="outline" onClick={shareUrl} className="w-full gap-2">
+                <Share2 className="h-4 w-4" /> Share link
+              </Button>
+            )}
           </div>
         ) : (
           <div className="min-w-0 space-y-3 py-2">

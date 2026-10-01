@@ -1,3 +1,4 @@
+-- keep-migration-version
 -- Assign the real NIMT Beacon Avantika II class teachers (from the school's
 -- class-teacher list) and let a principal / super admin change the class teacher
 -- of an assessment.
@@ -48,7 +49,6 @@ begin
     where c.id=e.course_id and c.code=r.course_code and e.session_id='f0000001-0000-0000-0000-000000000001';
   end loop;
 end $$;
-
 -- Principal / super admin can change an assessment's class teacher while it is
 -- still in a working state (reopen first once approved/released).
 create function public.cbse_set_class_teacher(_exam_id uuid,_teacher_user_id uuid,_expected_version integer,_remarks text)
@@ -84,7 +84,6 @@ begin
   values(e.id,'set_class_teacher',actor,v_remarks,jsonb_build_object('class_teacher_user_id',_teacher_user_id));
   return jsonb_build_object('id',e.id,'version',v_version);
 end $$;
-
 revoke all on function public.cbse_set_class_teacher(uuid,uuid,integer,text) from public,anon;
 grant execute on function public.cbse_set_class_teacher(uuid,uuid,integer,text) to authenticated;
 notify pgrst, 'reload schema';

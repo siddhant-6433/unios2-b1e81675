@@ -43,7 +43,7 @@ describe("CAHET registration fallback", () => {
   });
 
   it("uses applicant-entered CAHET data on the approval and offer-letter paths", () => {
-    expect(adminApplicationView).toContain("cahetRegistrationFromApplication(appRow, appRow.lead_id)");
+    expect(adminApplicationView).toContain("cahetRegistrationFromApplication(appRow, resolvedLeadId)");
     expect(adminApplicationView).toContain("cahetRow || applicationCahet");
     expect(offerLetterFunction).toContain("cahetRegistrationFromApplication(applicationRow)");
     expect(offerLetterFunction).toContain("cahetRegistrationRow || (cahetExamRow?.registration_no ? cahetExamRow : null) || cahetRegistrationFromApplication");

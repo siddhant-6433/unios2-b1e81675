@@ -131,6 +131,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── Google OAuth ──────────────────────────────────────────────────────────
   const signInWithGoogle = async (): Promise<{ error: string | null }> => {
     try {
+      // On web, navigate the CURRENT window. `openAuthSessionAsync` falls back
+      // to window.open() there, which is what sent sign-in to a new window.
+      if (Platform.OS === 'web') {
+        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          // Matches the web portal: redirect to the origin (must be in Supabase's
+          // allowed redirect URLs, like the portal's own origin is).
+          options: { redirectTo: origin, queryParams: { prompt: 'select_account' } },
+        });
+        // The browser navigates away; supabase-js completes on return.
+        return { error: error?.message ?? null };
+      }
+
       const redirectUrl = makeRedirectUri({ scheme: 'unios' });
       console.log('[Auth] Google redirect URL:', redirectUrl);
 

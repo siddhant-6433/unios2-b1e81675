@@ -6,6 +6,19 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CalendarDays, Fingerprint, Users, Palmtree, Search } from "lucide-react";
+import { MyExpensesPanel } from "@/components/hr/MyExpensesPanel";
+import { MyPerformancePanel } from "@/components/hr/MyPerformancePanel";
+import { ChangeRequestForm } from "@/components/hr/ChangeRequestForm";
+import { RegularisationRequestForm } from "@/components/hr/RegularisationRequestForm";
+import { MyEngagementPanel } from "@/components/hr/MyEngagementPanel";
+import { MyPayslipsPanel } from "@/components/hr/MyPayslipsPanel";
+import { MyAssetsPanel } from "@/components/hr/MyAssetsPanel";
+import { MyLeaveCalendarPanel } from "@/components/hr/MyLeaveCalendarPanel";
+import { MySettlementPanel } from "@/components/hr/MySettlementPanel";
+import { MyAdvancesPanel } from "@/components/hr/MyAdvancesPanel";
+import { MyCompOffPanel } from "@/components/hr/MyCompOffPanel";
+import { MyEncashmentPanel } from "@/components/hr/MyEncashmentPanel";
+import { MyCustomFieldsPanel } from "@/components/hr/MyCustomFieldsPanel";
 
 // HR self-service. This is the entire app for the non_teaching role, and the
 // "my own record" view for everyone else — hence permission hr:self, which is
@@ -45,7 +58,14 @@ const MyHr = () => {
   const load = async () => {
     setLoading(true);
     const year = new Date().getFullYear();
-    const [att, lv, bal, hol, dir] = await Promise.all([
+
+    // Resolve the employee record so leave balances can come from the real
+    // entitlements engine (plans → types), not the legacy flat balances table.
+    const { data: emp } = await supabase
+      .from("employee_profiles").select("id").eq("user_id", user!.id).maybeSingle();
+    const empId = (emp as { id?: string } | null)?.id;
+
+    const [att, lv, bal, ent, hol, dir] = await Promise.all([
       supabase.from("employee_attendance")
         .select("id, date, punch_in, punch_out")
         .eq("user_id", user!.id).order("date", { ascending: false }).limit(30),
@@ -55,6 +75,11 @@ const MyHr = () => {
       supabase.from("employee_leave_balances")
         .select("leave_type, total_days, used_days, year")
         .eq("user_id", user!.id).eq("year", year),
+      empId
+        ? supabase.from("employee_leave_entitlements")
+            .select("entitled_days, carried_forward, used_days, leave_year, leave_types(code, name)")
+            .eq("employee_profile_id", empId).eq("leave_year", year)
+        : Promise.resolve({ data: [] as unknown[] }),
       supabase.from("holidays")
         .select("id, name, holiday_date, kind")
         .gte("holiday_date", `${year}-01-01`).lte("holiday_date", `${year}-12-31`)
@@ -64,7 +89,25 @@ const MyHr = () => {
 
     setAttendance((att.data as AttendanceRow[]) || []);
     setLeave((lv.data as LeaveRow[]) || []);
-    setBalances((bal.data as BalanceRow[]) || []);
+
+    const entitlementRows = ((ent as { data?: unknown }).data || []) as Array<{
+      leave_types?: { code?: string | null; name?: string | null } | null;
+      entitled_days?: number | null;
+      carried_forward?: number | null;
+      used_days?: number | null;
+      leave_year?: number | null;
+    }>;
+    if (entitlementRows.length > 0) {
+      setBalances(entitlementRows.map((e) => ({
+        leave_type: e.leave_types?.code || e.leave_types?.name || "Leave",
+        total_days: Number(e.entitled_days || 0) + Number(e.carried_forward || 0),
+        used_days: Number(e.used_days || 0),
+        year: e.leave_year,
+      })));
+    } else {
+      setBalances((bal.data as BalanceRow[]) || []);
+    }
+
     setHolidays((hol.data as Holiday[]) || []);
     setDirectory((dir.data as DirectoryRow[]) || []);
     setLoading(false);
@@ -143,6 +186,18 @@ const MyHr = () => {
           {[
             ["attendance", "My Attendance"],
             ["leave", "My Leave"],
+            ["leave-calendar", "Leave Calendar"],
+            ["payslips", "My Payslips"],
+            ["expenses", "My Expenses"],
+            ["performance", "My Performance"],
+            ["requests", "Requests"],
+            ["comp-off", "Comp Off"],
+            ["encashment", "Encashment"],
+            ["assets", "My Assets"],
+            ["advances", "Advances"],
+            ["settlement", "Settlement"],
+            ["fields", "Other Details"],
+            ["engagement", "Announcements"],
             ["directory", "Directory"],
             ["holidays", "Holidays"],
           ].map(([v, label]) => (
@@ -260,6 +315,58 @@ const MyHr = () => {
               </table>
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="leave-calendar" className="mt-6">
+          <MyLeaveCalendarPanel />
+        </TabsContent>
+
+        <TabsContent value="payslips" className="mt-6">
+          <MyPayslipsPanel />
+        </TabsContent>
+
+        <TabsContent value="expenses" className="mt-6">
+          <MyExpensesPanel />
+        </TabsContent>
+
+        <TabsContent value="performance" className="mt-6">
+          <MyPerformancePanel />
+        </TabsContent>
+
+        <TabsContent value="requests" className="mt-6 space-y-5">
+          <p className="text-xs text-muted-foreground">
+            Changes to your own record go to HR for approval. Raise a request and track it here.
+          </p>
+          <ChangeRequestForm />
+          <RegularisationRequestForm />
+        </TabsContent>
+
+        <TabsContent value="comp-off" className="mt-6">
+          <MyCompOffPanel />
+        </TabsContent>
+
+        <TabsContent value="encashment" className="mt-6">
+          <MyEncashmentPanel />
+        </TabsContent>
+
+        <TabsContent value="assets" className="mt-6">
+          <MyAssetsPanel />
+        </TabsContent>
+
+        <TabsContent value="advances" className="mt-6">
+          <MyAdvancesPanel />
+        </TabsContent>
+
+        <TabsContent value="settlement" className="mt-6">
+          <MySettlementPanel />
+        </TabsContent>
+
+        <TabsContent value="fields" className="mt-6">
+          <MyCustomFieldsPanel />
+        </TabsContent>
+
+        <TabsContent value="engagement" className="mt-6">
+          <MyEngagementPanel />
         </TabsContent>
 
         <TabsContent value="directory" className="mt-6 space-y-3">

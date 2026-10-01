@@ -17,11 +17,13 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SelectField } from "@/components/ui/state-fields";
-import { Lock, Plus, RefreshCw, Calculator, IndianRupee, AlertTriangle, ArrowLeft, Upload } from "lucide-react";
+import { Lock, Plus, RefreshCw, Calculator, IndianRupee, AlertTriangle, ArrowLeft, Upload, Receipt } from "lucide-react";
 import {
   computePayroll, ratesFromConfig, type SalaryComponent, type StatutoryRates,
 } from "@/lib/payroll";
 import { SalaryImportDialog } from "@/components/hr/SalaryImportDialog";
+import { PayslipDialog } from "@/components/hr/PayslipDialog";
+import type { PayslipLine } from "@/lib/payslip";
 
 interface LegalEntity { id: string; name: string }
 
@@ -98,6 +100,7 @@ export default function HrPayroll() {
   const [workerType, setWorkerType] = useState("");
   const [runName, setRunName] = useState("");
   const [salaryImportOpen, setSalaryImportOpen] = useState(false);
+  const [payslipLine, setPayslipLine] = useState<Line | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -284,6 +287,48 @@ export default function HrPayroll() {
     }
   };
 
+  /**
+   * Pull approved unpaid leave (LOP days) and approved-but-unreimbursed expense
+   * claims into the lines before calculating, so the payslip reconciles with the
+   * leave and expense modules instead of being typed in by hand.
+   */
+  const applyAdjustments = async () => {
+    if (!openCycle) return;
+    setBusy("adjust");
+    const { data, error } = await supabase.rpc(
+      "apply_payroll_adjustments" as never, { _cycle_id: openCycle.id } as never,
+    );
+    setBusy(null);
+    if (error) {
+      toast({ title: "Could not apply adjustments", description: error.message, variant: "destructive" });
+      return;
+    }
+    await fetchLines(openCycle.id);
+    toast({
+      title: `Adjustments applied to ${(data as number) ?? 0} employees`,
+      description: "LOP from approved unpaid leave, plus approved expense reimbursements as other earnings.",
+    });
+  };
+
+  /** Recover open employee advances as ad-hoc deductions for this run. */
+  const recoverAdvances = async () => {
+    if (!openCycle) return;
+    setBusy("advances");
+    const { data, error } = await supabase.rpc(
+      "recover_advances_for_cycle" as never, { _cycle_id: openCycle.id } as never,
+    );
+    setBusy(null);
+    if (error) {
+      toast({ title: "Could not recover advances", description: error.message, variant: "destructive" });
+      return;
+    }
+    await fetchLines(openCycle.id);
+    toast({
+      title: `Advances applied to ${(data as number) ?? 0} employees`,
+      description: "Open advances are added as other deductions. Settle them from the Advances screen after payment.",
+    });
+  };
+
   const setStatus = async (status: Cycle["status"]) => {
     if (!openCycle) return;
     setBusy(status);
@@ -450,6 +495,14 @@ export default function HrPayroll() {
             <Button size="sm" variant="outline" onClick={populate} disabled={busy !== null}>
               <RefreshCw className="h-4 w-4 mr-1.5" /> Load employees
             </Button>
+            <Button size="sm" variant="outline" onClick={applyAdjustments} disabled={busy !== null || lines.length === 0}
+              title="Apply approved unpaid leave (LOP) and approved expense reimbursements">
+              <RefreshCw className="h-4 w-4 mr-1.5" /> Leave & expenses
+            </Button>
+            <Button size="sm" variant="outline" onClick={recoverAdvances} disabled={busy !== null || lines.length === 0}
+              title="Add open employee advances as deductions">
+              <IndianRupee className="h-4 w-4 mr-1.5" /> Advances
+            </Button>
             <Button size="sm" variant="outline" onClick={computeAll} disabled={busy !== null || lines.length === 0}>
               <Calculator className="h-4 w-4 mr-1.5" /> Calculate
             </Button>
@@ -525,12 +578,13 @@ export default function HrPayroll() {
               <th className="px-3 py-2 font-medium text-right">Earnings</th>
               <th className="px-3 py-2 font-medium text-right">Deductions</th>
               <th className="px-3 py-2 font-medium text-right">Net pay</th>
+              <th className="px-3 py-2 font-medium" />
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {lines.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">
+                <td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">
                   Nobody on this cycle yet — “Load active employees” builds the list.
                 </td>
               </tr>
@@ -548,6 +602,16 @@ export default function HrPayroll() {
                 <td className="px-3 py-2 text-right">{inr(Number(l.gross_earnings))}</td>
                 <td className="px-3 py-2 text-right">{inr(Number(l.total_deductions))}</td>
                 <td className="px-3 py-2 text-right font-medium">{inr(Number(l.net_pay))}</td>
+                <td className="px-3 py-2 text-right">
+                  <Button
+                    variant="ghost" size="sm"
+                    className="h-7 gap-1.5 text-[11px]"
+                    onClick={() => setPayslipLine(l)}
+                    title="View payslip"
+                  >
+                    <Receipt className="h-3.5 w-3.5" /> Payslip
+                  </Button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -560,6 +624,20 @@ export default function HrPayroll() {
           belong in a later cycle as arrears.
         </p>
       )}
+
+      <PayslipDialog
+        line={payslipLine
+          ? ({
+              ...payslipLine,
+              period_start: openCycle.period_start,
+              period_end: openCycle.period_end,
+              cycle_name: openCycle.name,
+              status: openCycle.status,
+            } as PayslipLine)
+          : null}
+        open={!!payslipLine}
+        onOpenChange={(o) => { if (!o) setPayslipLine(null); }}
+      />
     </div>
   );
 }

@@ -7,7 +7,8 @@ const mediaUpload = readFileSync("supabase/functions/whatsapp-template-media-upl
 
 describe("WhatsApp template media upload", () => {
   it("uses direct multipart fetch so upload failures expose the function response body", () => {
-    expect(form).toContain("async function uploadTemplateMedia(file: File)");
+    expect(form).toContain("async function uploadTemplateMedia(file: File, wabaId?: string)");
+    expect(form).toContain('if (wabaId) form.append("waba_id", wabaId)');
     expect(form).toContain('fetch(`${supabaseUrl}/functions/v1/whatsapp-template-media-upload`');
     expect(form).toContain("readErrorBody(response)");
     expect(form).not.toContain('supabase.functions.invoke("whatsapp-template-media-upload"');

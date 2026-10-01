@@ -4,6 +4,7 @@ import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
 import { exportRowsXlsx } from "@/lib/xlsxExport";
 import { exportRowsPdf } from "@/lib/pdfExport";
+import { fetchReportStudentArchiveStatuses } from "@/lib/reportStudentArchiveStatus";
 import { exportCollectionVsDuePdf } from "@/lib/feeCollectionVsDuePdf";
 import { exportCollectedReceiptsPdf } from "@/lib/feeCollectionCollectedPdf";
 import { exportOverdueFeesPdf } from "@/lib/feeCollectionOverduePdf";
@@ -98,6 +99,7 @@ export function FeeCollectionVsDueReport() {
   const [courseF, setCourseF] = useState("all");
   const [batchF, setBatchF] = useState("all");
   const [sessionF, setSessionF] = useState("all");
+  const [studentStatusF, setStudentStatusF] = useState("active");
   const [pdfPeriodKeys, setPdfPeriodKeys] = useState<string[]>([]);
   const [pdfHeadKeys, setPdfHeadKeys] = useState<string[]>([]);
 
@@ -126,7 +128,22 @@ export function FeeCollectionVsDueReport() {
       setLines([]);
     } else {
       const payload = data as { lines?: CollectionVsDueLine[] } | null;
-      setLines((payload?.lines ?? []) as CollectionVsDueLine[]);
+      const reportLines = (payload?.lines ?? []) as CollectionVsDueLine[];
+      const studentIds = [...new Set(reportLines.map((line) => line.student_id))];
+      try {
+        const statusByStudent = await fetchReportStudentArchiveStatuses(studentIds);
+        setLines(reportLines.map((line) => ({
+          ...line,
+          student_status: statusByStudent.get(line.student_id) || "unknown",
+        })));
+      } catch (statusError) {
+        toast({
+          title: "Failed to load student status",
+          description: statusError instanceof Error ? statusError.message : String(statusError),
+          variant: "destructive",
+        });
+        setLines([]);
+      }
     }
     setLoading(false);
   };
@@ -135,6 +152,7 @@ export function FeeCollectionVsDueReport() {
   const matchesSearch = (name: string | null, adm: string | null) =>
     !q || (name || "").toLowerCase().includes(q) || (adm || "").toLowerCase().includes(q);
   const matchesDims = (r: CollectionVsDueLine) =>
+    (studentStatusF === "all" || r.student_status === studentStatusF) &&
     (campusF === "all" || displayVal(r.campus_name) === campusF) &&
     (courseF === "all" || displayVal(r.course_name) === courseF) &&
     (batchF === "all" || displayVal(r.batch_name) === batchF) &&
@@ -179,7 +197,7 @@ export function FeeCollectionVsDueReport() {
   const filteredLines = useMemo(
     () => lines.filter(matchesDims).filter((l) => matchesSearch(l.name, l.admission_no)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lines, q, campusF, courseF, batchF, sessionF],
+    [lines, q, studentStatusF, campusF, courseF, batchF, sessionF],
   );
   const reportLines = useMemo(
     () => scope === "collected" ? filteredLines.filter(isCollectedReceiptLine) : filteredLines,
@@ -243,6 +261,7 @@ export function FeeCollectionVsDueReport() {
         courseF !== "all" ? courseF : null,
         batchF !== "all" ? batchF : null,
         sessionF !== "all" ? sessionF : null,
+        `Students: ${studentStatusF === "all" ? "All" : studentStatusF}`,
         hasPdfSelection ? "PDF selection applied" : null,
       ].filter(Boolean).join(" · ");
       const brand = {
@@ -338,6 +357,16 @@ export function FeeCollectionVsDueReport() {
         <FilterSelect allLabel="All Courses" value={courseF} onChange={setCourseF} options={courseOpts} />
         <FilterSelect allLabel="All Batches" value={batchF} onChange={setBatchF} options={batchOpts} />
         <FilterSelect allLabel="All Sessions" value={sessionF} onChange={setSessionF} options={sessionOpts} />
+        <select
+          aria-label="Student status"
+          value={studentStatusF}
+          onChange={(event) => setStudentStatusF(event.target.value)}
+          className="rounded-lg border border-input bg-card py-2 pl-3 pr-8 text-xs font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+        >
+          <option value="active">Active students</option>
+          <option value="archived">Archived students</option>
+          <option value="all">All students</option>
+        </select>
         <div className="relative flex-1 min-w-[180px] max-w-xs">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input

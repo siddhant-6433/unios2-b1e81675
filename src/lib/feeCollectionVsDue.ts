@@ -7,6 +7,7 @@ export type CollectionVsDueView = "summary" | "detailed" | "monthly";
 
 export type CollectionVsDueLine = {
   student_id: string;
+  student_status?: "active" | "archived" | "unknown";
   name: string | null;
   admission_no: string | null;
   campus_name: string | null;
@@ -346,6 +347,7 @@ export type HeadAmounts = {
 
 export type SummaryStudentRow = {
   student_id: string;
+  student_status: CollectionVsDueLine["student_status"];
   name: string;
   admission_no: string;
   campus_name: string;
@@ -366,6 +368,7 @@ export function pivotStudents(lines: CollectionVsDueLine[]): SummaryStudentRow[]
     if (!row) {
       row = {
         student_id: line.student_id,
+        student_status: line.student_status,
         name: displayVal(line.name),
         admission_no: displayVal(line.admission_no),
         campus_name: displayVal(line.campus_name),
@@ -464,6 +467,7 @@ export function buildSummaryExportRows(
       Batch: s.batch_name === "—" ? "" : s.batch_name,
       Session: s.session_name === "—" ? "" : s.session_name,
       Campus: s.campus_name === "—" ? "" : s.campus_name,
+      "Student Status": s.student_status || "Unknown",
     };
     for (const head of heads) {
       const label = feeHeadLabel(head, metaByCourse);
@@ -489,6 +493,7 @@ export function buildDetailedExportRows(
     Batch: l.batch_name || "",
     Session: l.session_name || "",
     Campus: l.campus_name || "",
+    "Student Status": l.student_status || "Unknown",
     "Fee Head": l.fee_name || l.fee_code || "",
     Term: feeTermLabel(l.term || "", metaByCourse[l.course_id || ""]),
     Due: Number(l.due_amount || 0),

@@ -1,3 +1,7 @@
+-- keep-migration-version: already recorded on production schema_migrations
+-- Backfilled from production schema_migrations to align db push history.
+-- Git must keep this timestamp so `db push` matches remote history.
+--
 -- Allow the office assistant (and the assigned subject teacher) to enter and lock marks.
 -- Adds public.cbse_office() for campus-scoped office staff and re-issues the affected RPCs.
 

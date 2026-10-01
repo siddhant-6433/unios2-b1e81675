@@ -16,7 +16,8 @@ const activeDocGateMigration = readFileSync("supabase/migrations/20260624151000_
 describe("application document review access", () => {
   it("keeps document approval controls read-only for non-approvers", () => {
     expect(adminApplicationView).toContain('const canApproveApplication = role === "super_admin" || role === "principal"');
-    expect(adminApplicationView).toContain("readOnly={decided || !canApproveApplication}");
+    expect(adminApplicationView).toContain("readOnly={!canApproveApplication}");
+    expect(adminApplicationView).toContain("canApproveApplication && canDecideCurrentApplication");
     expect(adminApplicationView).toContain("readOnlyReason={!canApproveApplication");
     expect(adminApplicationView).toContain("Only principals and super admins can approve or reject documents.");
     expect(docReviewPanel).toContain("readOnlyReason");
@@ -65,13 +66,14 @@ describe("application document review access", () => {
     expect(adminApplicationView).toContain("Lead created and linked from orphan application");
     expect(adminApplicationView).toContain("issueOfferOrRepairLead");
     expect(adminApplicationView).toContain("Create Lead & Issue Offer");
-    expect(docReviewPanel).toContain("Waiting for the applicant to re-upload this document");
+    expect(docReviewPanel).toContain("The applicant has been notified to re-upload this document.");
     expect(readFileSync("src/components/admissions/AdmissionLifecycleStepper.tsx", "utf8")).toContain("Create Lead & Issue Offer");
   });
 
   it("does not allow staff to verify or re-reject an already rejected document", () => {
     expect(docReviewPanel).toContain('activeStatus === "rejected"');
-    expect(docReviewPanel).toContain("Waiting for the applicant to re-upload this document");
+    expect(docReviewPanel).toContain("activeStatus === \"rejected\"");
+    expect(docReviewPanel).toContain("Review actions will appear on the replacement file.");
     expect(docReviewPanel).not.toContain("Update rejection");
   });
 

@@ -2,6 +2,8 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
+import { usePermissions } from "@/contexts/PermissionContext";
+import { useToast } from "@/hooks/use-toast";
 import {
   Search, Calendar, Loader2, Clock, CheckCircle, MapPin,
   ChevronLeft, ChevronRight, Download, Filter,
@@ -31,6 +33,9 @@ interface AttendanceRecord {
 }
 
 const HrAttendance = () => {
+  const { can } = usePermissions();
+  const { toast } = useToast();
+  const canCorrect = can("hr", "attendance_edit");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [view, setView] = useState<"daily" | "corrections">("daily");
   const [search, setSearch] = useState("");
@@ -127,6 +132,34 @@ const HrAttendance = () => {
     setDate(d.toISOString().slice(0, 10));
   };
 
+  const exportCsv = () => {
+    if (filteredRecords.length === 0) {
+      toast({ title: "Nothing to export", description: "No attendance records for this date." });
+      return;
+    }
+    const header = ["Employee", "Role", "Date", "Punch In", "Punch Out", "Hours", "Face Match %", "Liveness %", "Status"];
+    const rows = filteredRecords.map((r) => [
+      r.display_name,
+      (r.role || "").replace(/_/g, " "),
+      r.date,
+      r.punch_in ? new Date(r.punch_in).toISOString() : "",
+      r.punch_out ? new Date(r.punch_out).toISOString() : "",
+      calcHours(r.punch_in, r.punch_out),
+      r.face_match_score ?? "",
+      r.liveness_score ?? "",
+      r.punch_out ? "Complete" : "Active",
+    ]);
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = [header, ...rows].map((row) => row.map(esc).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `hr-attendance-${date}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -135,11 +168,15 @@ const HrAttendance = () => {
           <p className="text-sm text-muted-foreground mt-1">Daily punch-in/out records</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant={view === "corrections" ? "default" : "outline"} size="sm"
-            onClick={() => setView(view === "corrections" ? "daily" : "corrections")}>
-            Corrections
+          {canCorrect && (
+            <Button variant={view === "corrections" ? "default" : "outline"} size="sm"
+              onClick={() => setView(view === "corrections" ? "daily" : "corrections")}>
+              Corrections
+            </Button>
+          )}
+          <Button variant="outline" className="gap-2" onClick={exportCsv} disabled={view === "corrections"}>
+            <Download className="h-4 w-4" /> Export
           </Button>
-          <Button variant="outline" className="gap-2"><Download className="h-4 w-4" /> Export</Button>
         </div>
       </div>
 

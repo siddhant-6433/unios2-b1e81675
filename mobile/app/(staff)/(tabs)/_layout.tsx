@@ -16,11 +16,13 @@ export default function StaffTabLayout() {
         tabBarStyle: {
           backgroundColor: mode === 'dark' ? colors.card : colors.inverse,
           borderTopWidth: 0,
-          height: Platform.OS === 'ios' ? 84 : 64,
-          paddingBottom: Platform.OS === 'ios' ? 28 : 10,
-          paddingTop: 10,
+          // Web has no safe-area inset, so it needs an explicit height that fits
+          // the icon + label or the labels get clipped at the viewport edge.
+          height: Platform.OS === 'ios' ? 88 : Platform.OS === 'web' ? 80 : 64,
+          paddingBottom: Platform.OS === 'ios' ? 28 : Platform.OS === 'web' ? 18 : 10,
+          paddingTop: Platform.OS === 'ios' ? 12 : 10,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600', lineHeight: 14 },
       }}
     >
       <Tabs.Screen

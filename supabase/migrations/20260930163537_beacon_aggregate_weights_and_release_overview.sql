@@ -1,3 +1,4 @@
+-- keep-migration-version
 -- Combined/aggregate support:
 --  * publish an approved policy version per class carrying the term weights
 --    (Unit Test 1 20% / Unit Test 2 20% / Half Yearly 60%) so a combined report

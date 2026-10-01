@@ -1,3 +1,4 @@
+-- keep-migration-version
 -- Report content: show the class teacher and the approver's designation, and
 -- carry source assessment names for aggregate reports. Adds the staff bulk-print
 -- payload RPC (fee-gated like family downloads).

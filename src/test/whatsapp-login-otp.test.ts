@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const whatsappOtp = readFileSync("supabase/functions/whatsapp-otp/index.ts", "utf8");
 const whatsappWebhook = readFileSync("supabase/functions/whatsapp-webhook/index.ts", "utf8");
+const statusQueueMigration = readFileSync("supabase/migrations/20260901070029_queue_whatsapp_status_updates.sql", "utf8");
 const otpDiagnosticsMigration = readFileSync("supabase/migrations/20260703121000_whatsapp_otp_delivery_diagnostics.sql", "utf8");
 
 describe("WhatsApp login OTP edge function", () => {
@@ -77,10 +78,9 @@ describe("WhatsApp login OTP edge function", () => {
     expect(whatsappOtp).toContain('wa_status: wamid ? "accepted" : "accepted_without_message_id"');
     expect(whatsappOtp).toContain("wa_status_error: parsedWaError || { raw: waBody.slice(0, 1000) }");
 
-    const otpUpdateIndex = whatsappWebhook.indexOf('.from("whatsapp_otps")');
-    const messageIdMatchIndex = whatsappWebhook.indexOf('.eq("wa_message_id", waMessageId)', otpUpdateIndex);
-    expect(otpUpdateIndex).toBeGreaterThan(-1);
-    expect(messageIdMatchIndex).toBeGreaterThan(otpUpdateIndex);
-    expect(whatsappWebhook).toContain("wa_status_error: status.errors || null");
+    expect(whatsappWebhook).toContain('.from("whatsapp_status_queue")');
+    expect(statusQueueMigration).toContain("UPDATE whatsapp_otps wo");
+    expect(statusQueueMigration).toContain("wo.wa_message_id = q.wa_message_id");
+    expect(statusQueueMigration).toContain("wa_status_error      = q.errors");
   });
 });

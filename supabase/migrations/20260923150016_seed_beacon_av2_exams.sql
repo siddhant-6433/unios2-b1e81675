@@ -1,3 +1,7 @@
+-- keep-migration-version: already recorded on production schema_migrations
+-- Backfilled from production schema_migrations to align db push history.
+-- Git must keep this timestamp so `db push` matches remote history.
+--
 -- Bring NIMT Beacon School Avantika II (BSAV) onto the CBSE assessments module:
 --   * extend grade handling to pre-primary (grade 0),
 --   * seed pre-primary subjects,

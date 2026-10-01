@@ -1,3 +1,7 @@
+-- keep-migration-version: already recorded on production schema_migrations
+-- Backfilled from production schema_migrations to align db push history.
+-- Git must keep this timestamp so `db push` matches remote history.
+--
 -- Beacon school reports. RPC-only access; all actor identities come from auth.uid().
 -- Created with db:migration:new. Self-contained: tables, RPCs, grants and RLS.
 create table public.cbse_policies (

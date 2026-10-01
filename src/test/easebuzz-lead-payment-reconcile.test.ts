@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 
 const shared = readFileSync("supabase/functions/_shared/gateway-settlement.ts", "utf8");
 const easebuzzPayment = readFileSync("supabase/functions/easebuzz-payment/index.ts", "utf8");
+const serviceAuth = readFileSync("supabase/functions/_shared/service-auth.ts", "utf8");
 // Resolved by suffix — the pre-commit hook re-stamps migration timestamps.
 const migrationFile = readdirSync("supabase/migrations").find((f) =>
   f.endsWith("_easebuzz_lead_payment_reconcile.sql"),
@@ -37,7 +38,8 @@ describe("Easebuzz lead-payment reconcile fallback", () => {
 
   it("reconcile-lead-payments is service-key gated and amount-checked", () => {
     expect(easebuzzPayment).toContain('action === "reconcile-lead-payments"');
-    expect(easebuzzPayment).toMatch(/Authorization"\) \|\| ""\) !== `Bearer \$\{serviceKey\}`/);
+    expect(easebuzzPayment).toContain("isServiceCaller(req, adminAuth)");
+    expect(serviceAuth).toContain('req.headers.get("Authorization")');
     expect(easebuzzPayment).toContain('.like("transaction_ref", "LP%")');
     expect(easebuzzPayment).toContain('reason: "amount_mismatch"');
     expect(easebuzzPayment).toContain('reason: "settle_failed"');

@@ -64,6 +64,9 @@ const NavyaKnowledge       = lazy(() => import("./pages/admin/NavyaKnowledge"));
 const NavyaVoiceAgent      = lazy(() => import("./pages/admin/NavyaVoiceAgent"));
 const IdCardCenter         = lazy(() => import("./pages/IdCardCenter"));
 const ApplyPortal          = lazy(() => import("./pages/ApplyPortal"));
+const Careers              = lazy(() => import("./pages/Careers"));
+const CareerJob            = lazy(() => import("./pages/CareerJob"));
+const OfferAcceptance      = lazy(() => import("./pages/OfferAcceptance"));
 const Consultants          = lazy(() => import("./pages/Consultants"));
 const IncentiveApprovalPage = lazy(() => import("./pages/IncentiveApprovalPage"));
 const AcademicPartners     = lazy(() => import("./pages/AcademicPartners"));
@@ -104,6 +107,24 @@ const HrLeaveManagement    = lazy(() => import("./pages/HrLeaveManagement"));
 const HrEmployeeDirectory  = lazy(() => import("./pages/HrEmployeeDirectory"));
 const HrPayroll            = lazy(() => import("./pages/HrPayroll"));
 const HrJobApplicants      = lazy(() => import("./pages/HrJobApplicants"));
+const HrJobOpenings        = lazy(() => import("./pages/HrJobOpenings"));
+const HrOnboarding         = lazy(() => import("./pages/HrOnboarding"));
+const HrRecruitment        = lazy(() => import("./pages/HrRecruitment"));
+const HrReferrals          = lazy(() => import("./pages/HrReferrals"));
+const HrExpenses           = lazy(() => import("./pages/HrExpenses"));
+const HrPerformance        = lazy(() => import("./pages/HrPerformance"));
+const HrAnnouncements      = lazy(() => import("./pages/HrAnnouncements"));
+const HrHelpdesk           = lazy(() => import("./pages/HrHelpdesk"));
+const HrReports            = lazy(() => import("./pages/HrReports"));
+const HrOrg                = lazy(() => import("./pages/HrOrg"));
+const HrAssets             = lazy(() => import("./pages/HrAssets"));
+const HrSettlements        = lazy(() => import("./pages/HrSettlements"));
+const HrAdvances           = lazy(() => import("./pages/HrAdvances"));
+const HrCompOff            = lazy(() => import("./pages/HrCompOff"));
+const HrEncashment         = lazy(() => import("./pages/HrEncashment"));
+const HrCustomFields       = lazy(() => import("./pages/HrCustomFields"));
+const HrTeamStructure      = lazy(() => import("./pages/HrTeamStructure"));
+const HrSettings           = lazy(() => import("./pages/HrSettings"));
 const ConsultantCreditNotes = lazy(() => import("./pages/ConsultantCreditNotes"));
 const ParentPortal         = lazy(() => import("./pages/ParentPortal"));
 const StudentPortalPage    = lazy(() => import("./pages/StudentPortal"));
@@ -266,6 +287,10 @@ const App = () => (
               authentication.
             */}
             <Route path="/apply/offer/:token" element={<OfferLinkRedirect />} />
+            {/* Public careers portal + candidate offer acceptance. */}
+            <Route path="/careers" element={<Careers />} />
+            <Route path="/careers/offer/:token" element={<OfferAcceptance />} />
+            <Route path="/careers/:slug" element={<CareerJob />} />
             <Route path="/enquiry" element={<EnquiryForm />} />
             <Route path="/publisher-login" element={<PublisherLogin />} />
             <Route path="/about" element={<About />} />
@@ -366,11 +391,29 @@ const App = () => (
 
                       {/* HR — campus_admin / principal / office_admin only */}
                       <Route path="/hr" element={<RequirePermission module="hr" action="view"><HrDashboard /></RequirePermission>} />
+                      <Route path="/hr-job-openings" element={<RequirePermission module="hr" action="view"><HrJobOpenings /></RequirePermission>} />
                       <Route path="/hr-job-applicants" element={<RequirePermission module="hr" action="view"><HrJobApplicants /></RequirePermission>} />
+                      <Route path="/hr-onboarding" element={<RequirePermission module="hr" action="view"><HrOnboarding /></RequirePermission>} />
+                      <Route path="/hr-recruitment" element={<RequirePermission module="hr" action="view"><HrRecruitment /></RequirePermission>} />
+                      <Route path="/hr-referrals" element={<RequirePermission module="hr" action="self"><HrReferrals /></RequirePermission>} />
                       <Route path="/hr-attendance" element={<RequirePermission module="hr" action="view"><HrAttendance /></RequirePermission>} />
                       <Route path="/hr-leave" element={<RequirePermission module="hr" action="view"><HrLeaveManagement /></RequirePermission>} />
                       <Route path="/hr-directory" element={<RequirePermission module="hr" action="view"><HrEmployeeDirectory /></RequirePermission>} />
                       <Route path="/hr-payroll" element={<RequirePermission module="hr" action="payroll_run"><HrPayroll /></RequirePermission>} />
+                      <Route path="/hr-expenses" element={<RequirePermission module="hr" action="expenses_approve"><HrExpenses /></RequirePermission>} />
+                      <Route path="/hr-performance" element={<RequirePermission module="hr" action="performance_manage"><HrPerformance /></RequirePermission>} />
+                      <Route path="/hr-announcements" element={<RequirePermission module="hr" action="engage_manage"><HrAnnouncements /></RequirePermission>} />
+                      <Route path="/hr-helpdesk" element={<RequirePermission module="hr" action="helpdesk_manage"><HrHelpdesk /></RequirePermission>} />
+                      <Route path="/hr-reports" element={<RequirePermission module="hr" action="view"><HrReports /></RequirePermission>} />
+                      <Route path="/hr-org" element={<RequirePermission module="hr" action="view"><HrOrg /></RequirePermission>} />
+                      <Route path="/hr-assets" element={<RequirePermission module="hr" action="assets_manage"><HrAssets /></RequirePermission>} />
+                      <Route path="/hr-settlements" element={<RequirePermission module="hr" action="employees_edit"><HrSettlements /></RequirePermission>} />
+                      <Route path="/hr-advances" element={<RequirePermission module="hr" action="expenses_approve"><HrAdvances /></RequirePermission>} />
+                      <Route path="/hr-comp-off" element={<RequirePermission module="hr" action="attendance_edit"><HrCompOff /></RequirePermission>} />
+                      <Route path="/hr-encashment" element={<RequirePermission module="hr" action="leave_approve"><HrEncashment /></RequirePermission>} />
+                      <Route path="/hr-custom-fields" element={<RequirePermission module="hr" action="employees_edit"><HrCustomFields /></RequirePermission>} />
+                      <Route path="/hr-team" element={<RequirePermission module="hr" action="employees_edit"><HrTeamStructure /></RequirePermission>} />
+                      <Route path="/hr-settings" element={<RequirePermission module="hr" action="employees_edit"><HrSettings /></RequirePermission>} />
 
                       {/* Admin — user_management:view */}
                       <Route path="/admin" element={<RequirePermission module="user_management" action="view"><AdminPanel /></RequirePermission>} />

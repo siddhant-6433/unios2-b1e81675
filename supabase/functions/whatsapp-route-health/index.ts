@@ -84,8 +84,9 @@ Deno.serve(async (req) => {
     : ALERT_WINDOW_MINUTES;
 
   const alert = await evaluateAiHealthAndAlert(admin, supabaseUrl, serviceRoleKey, windowMinutes);
+  const metaDelivery = await evaluateMetaDeliveryBlocks(admin, supabaseUrl, serviceRoleKey);
 
-  return new Response(JSON.stringify({ ok: true, routes: routeRows, ai_health: alert }), {
+  return new Response(JSON.stringify({ ok: true, routes: routeRows, ai_health: alert, meta_delivery: metaDelivery }), {
     status: 200,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
@@ -102,6 +103,131 @@ Deno.serve(async (req) => {
 
 const ALERT_WINDOW_MINUTES = 30;
 const ALERT_EMAIL = "siddhant@nimt.ac.in";
+const META_BLOCK_WINDOW_MINUTES = 30;
+const META_BLOCK_MIN_FAILURES = 5;
+const META_BLOCK_REMINDER_HOURS = 6;
+const META_BLOCK_RECOVERY_QUIET_MINUTES = 60;
+
+async function evaluateMetaDeliveryBlocks(
+  admin: ReturnType<typeof createClient>,
+  supabaseUrl: string,
+  serviceRoleKey: string,
+) {
+  const { data: blocks, error } = await admin.rpc("fn_recent_whatsapp_meta_delivery_blocks", {
+    p_window_minutes: META_BLOCK_WINDOW_MINUTES,
+    p_minimum_failures: META_BLOCK_MIN_FAILURES,
+  });
+  if (error) {
+    console.error("[route-health] Meta delivery block query failed:", error.message);
+    return { checked: false, error: error.message, active_blocks: 0, emailed: 0 };
+  }
+
+  const { data: recipients, error: recipientError } = await admin.rpc("get_super_admin_emails");
+  if (recipientError) {
+    console.error("[route-health] Meta delivery alert recipient lookup failed:", recipientError.message);
+    return { checked: false, error: recipientError.message, active_blocks: blocks?.length || 0, emailed: 0 };
+  }
+  const emails = ((recipients || []) as string[]).filter(Boolean);
+  if (emails.length === 0) {
+    return { checked: true, error: "No super-admin email recipients", active_blocks: blocks?.length || 0, emailed: 0 };
+  }
+
+  let emailed = 0;
+  for (const block of (blocks || []) as Array<{
+    phone_number_id: string;
+    error_code: string;
+    error_message: string;
+    failure_count: number;
+    first_failure_at: string;
+    last_failure_at: string;
+  }>) {
+    const { data: previous } = await admin
+      .from("whatsapp_meta_delivery_alert_state")
+      .select("first_alerted_at,last_alerted_at,last_seen_at")
+      .eq("phone_number_id", block.phone_number_id)
+      .eq("error_code", block.error_code)
+      .maybeSingle();
+
+    const nowMs = Date.now();
+    const quietMs = previous?.last_seen_at ? nowMs - new Date(previous.last_seen_at).getTime() : Infinity;
+    const newIncident = !previous || quietMs > META_BLOCK_RECOVERY_QUIET_MINUTES * 60_000;
+    const reminderDue = !previous?.last_alerted_at
+      || nowMs - new Date(previous.last_alerted_at).getTime() >= META_BLOCK_REMINDER_HOURS * 60 * 60_000;
+
+    if (!newIncident && !reminderDue) {
+      await admin.from("whatsapp_meta_delivery_alert_state").update({
+        last_seen_at: block.last_failure_at,
+        last_failure_count: block.failure_count,
+      }).eq("phone_number_id", block.phone_number_id).eq("error_code", block.error_code);
+      continue;
+    }
+
+    let senderNumber: string | null = null;
+    let senderLabel = block.phone_number_id;
+    const { data: channel } = await admin
+      .from("whatsapp_channels")
+      .select("label,business_number")
+      .eq("meta_phone_number_id", block.phone_number_id)
+      .maybeSingle();
+    if (channel) {
+      senderLabel = channel.label || senderLabel;
+      senderNumber = channel.business_number || null;
+    }
+    if (!senderNumber) {
+      const { data: campaign } = await admin
+        .from("whatsapp_campaigns")
+        .select("business_phone_number")
+        .eq("business_phone_number_id", block.phone_number_id)
+        .not("business_phone_number", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      senderNumber = campaign?.business_phone_number || null;
+    }
+
+    const subject = `🔴 UniOs: Meta WhatsApp delivery blocked (${block.error_code})`;
+    const html = `<div style="font-family:Arial,sans-serif;color:#0f172a">
+      <h2 style="color:#b91c1c">Recurring Meta WhatsApp delivery block</h2>
+      <p><strong>Sender:</strong> ${escapeHtml(senderNumber || senderLabel)} (${escapeHtml(block.phone_number_id)})</p>
+      <p><strong>Meta error:</strong> ${escapeHtml(block.error_code)} — ${escapeHtml(block.error_message)}</p>
+      <p><strong>Failures:</strong> ${block.failure_count} matching sends in the last ${META_BLOCK_WINDOW_MINUTES} minutes.</p>
+      <p><strong>First / latest failure:</strong> ${escapeHtml(block.first_failure_at)} / ${escapeHtml(block.last_failure_at)}</p>
+      <p>Check this sender's WhatsApp account in Meta Business Manager. Billing/eligibility errors require account-side action; retry after Meta confirms the block is cleared.</p>
+      <p>While the issue continues, reminder emails are limited to one every ${META_BLOCK_REMINDER_HOURS} hours.</p>
+    </div>`;
+
+    let anySent = false;
+    for (const to of emails) {
+      try {
+        const res = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
+          body: JSON.stringify({ to_email: to, custom_subject: subject, custom_body: html }),
+        });
+        if (res.ok) anySent = true;
+        else console.error("[route-health] Meta delivery alert email failed:", res.status, (await res.text()).slice(0, 300));
+      } catch (sendError) {
+        console.error("[route-health] Meta delivery alert email threw:", sendError);
+      }
+    }
+
+    if (anySent) {
+      const alertedAt = new Date().toISOString();
+      const { error: stateError } = await admin.from("whatsapp_meta_delivery_alert_state").upsert({
+        phone_number_id: block.phone_number_id,
+        error_code: block.error_code,
+        first_alerted_at: newIncident ? alertedAt : (previous?.first_alerted_at || alertedAt),
+        last_alerted_at: alertedAt,
+        last_seen_at: block.last_failure_at,
+        last_failure_count: block.failure_count,
+      }, { onConflict: "phone_number_id,error_code" });
+      if (stateError) console.error("[route-health] Meta delivery alert state save failed:", stateError.message);
+      emailed++;
+    }
+  }
+
+  return { checked: true, active_blocks: blocks?.length || 0, emailed };
+}
 
 async function countEvents(
   admin: ReturnType<typeof createClient>,
