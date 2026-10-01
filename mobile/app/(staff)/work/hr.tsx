@@ -45,7 +45,7 @@ export default function HrScreen() {
             onPress={() => setTab(t)}
           >
             <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-              {t === 'time' ? 'Time' : t === 'finances' ? 'Finances' : 'Documents'}
+              {t === 'time' ? 'Time & Attendance' : t === 'finances' ? 'Payroll & Finance' : 'Documents'}
             </Text>
           </TouchableOpacity>
         ))}
@@ -303,9 +303,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: colors.border,
     paddingTop: 50, // safe area
   },
-  tab: { flex: 1, paddingVertical: 14, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tab: { flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
   tabActive: { borderBottomColor: colors.primary },
-  tabText: { fontSize: 14, fontWeight: '500', color: colors.textMuted },
+  tabText: { fontSize: 12.5, fontWeight: '500', color: colors.textMuted, textAlign: 'center' },
   tabTextActive: { color: colors.primary, fontWeight: '700' },
   section: { gap: 16 },
   sectionTitle: { fontSize: 18, fontWeight: '700', color: colors.text, marginTop: 8 },
