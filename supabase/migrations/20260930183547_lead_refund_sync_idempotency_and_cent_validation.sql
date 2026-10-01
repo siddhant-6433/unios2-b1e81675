@@ -3,6 +3,7 @@
 -- Keep all refund routes at currency precision. These table constraints also
 -- protect RPCs and service-role writes that do not go through the UI.
 ALTER TABLE public.fee_refunds
+  -- lint-allow: already applied to production (recorded in schema_migrations); this file is a history entry, not re-run
   ADD CONSTRAINT fee_refunds_total_amount_cent_precision_ck
   CHECK (
     total_amount IS NULL OR total_amount = 0 OR
@@ -10,6 +11,7 @@ ALTER TABLE public.fee_refunds
   );
 
 ALTER TABLE public.fee_refund_items
+  -- lint-allow: already applied to production (recorded in schema_migrations); this file is a history entry, not re-run
   ADD CONSTRAINT fee_refund_items_amount_cent_precision_ck
   CHECK (amount >= 0.01 AND amount = round(amount, 2));
 
