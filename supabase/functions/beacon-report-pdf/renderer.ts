@@ -9,11 +9,14 @@ const ink = rgb(0.12, 0.17, 0.21), muted = rgb(0.36, 0.4, 0.44), navy = rgb(0.08
 /** Only immutable bundled assets are used; snapshot URLs are deliberately never fetched. */
 /** Renders the report to one A4 page, scaling down uniformly only when it would otherwise overflow. */
 export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint8Array> {
-  for (const scale of [1, 0.94, 0.88, 0.82, 0.76, 0.7, 0.64]) {
+  const count = snapshot.subjects.length;
+  const base = count <= 7 ? 1 : count <= 9 ? 0.9 : count <= 11 ? 0.82 : 0.76;
+  for (const factor of [1, 0.9, 0.8]) {
+    const scale = Math.max(0.6, base * factor);
     const bytes = await renderOnce(snapshot, scale);
     if ((await PDFDocument.load(bytes)).getPageCount() === 1) return bytes;
   }
-  return renderOnce(snapshot, 0.64);
+  return renderOnce(snapshot, 0.6);
 }
 
 async function renderOnce(snapshot: ReportSnapshot, scale: number): Promise<Uint8Array> {
@@ -119,9 +122,9 @@ async function renderOnce(snapshot: ReportSnapshot, scale: number): Promise<Uint
       cells.forEach((cell, index) => { if (cell[line]) draw(cell[line], x, y, rowFont, index === 0 ? navy : ink); x += columns[index]; });
       y -= rowLine;
     }
-    y -= 3;
+    y -= 6;
     page.drawLine({ start: { x: MARGIN, y }, end: { x: WIDTH - MARGIN, y }, thickness: 0.5, color: rgb(0.83, 0.87, 0.89) });
-    y -= 7;
+    y -= 13;
   }
   label("Overall performance");
   { const bw = INNER / 4, bh = 34;
