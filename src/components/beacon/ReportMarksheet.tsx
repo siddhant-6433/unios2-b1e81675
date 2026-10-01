@@ -17,7 +17,8 @@ export function printMarksheet(filename: string): void {
   const win = window.open("", "_blank", "width=980,height=1200");
   if (!win) return;
   win.document.open();
-  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>${styles}</head><body style="margin:0;background:#fff">${element.outerHTML}</body></html>`);
+  const fit = Math.min(1, 1040 / Math.max(1, element.offsetHeight));
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>${styles}<style>#beacon-marksheet{zoom:${fit.toFixed(3)}}@page{size:A4;margin:8mm}</style></head><body style="margin:0;background:#fff">${element.outerHTML}</body></html>`);
   win.document.close();
   const run = () => { win.focus(); win.print(); };
   if (win.document.readyState === "complete") window.setTimeout(run, 400);

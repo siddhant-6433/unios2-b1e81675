@@ -40,24 +40,24 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
   };
   const newPage = () => {
     page = document.addPage([WIDTH, HEIGHT]);
-    page.drawRectangle({ x: 0, y: HEIGHT - 12, width: WIDTH, height: 12, color: navy });
-    page.drawImage(logo, { x: MARGIN, y: HEIGHT - 75, width: 47, height: 47 * logo.height / logo.width });
-    const names = wrapReportText(snapshot.school.name, INNER - 65, text => measure(text, 13));
-    let headerY = HEIGHT - 44;
-    for (const name of names) { draw(name, MARGIN + 63, headerY, 13, navy); headerY -= 18; }
-    draw("SCHOOL PERFORMANCE REPORT", MARGIN + 63, headerY, 8, muted);
-    y = Math.min(HEIGHT - 106, headerY - 30);
-    const banner = 30;
+    page.drawRectangle({ x: 0, y: HEIGHT - 8, width: WIDTH, height: 8, color: navy });
+    page.drawImage(logo, { x: MARGIN, y: HEIGHT - 56, width: 36, height: 36 * logo.height / logo.width });
+    const names = wrapReportText(snapshot.school.name, INNER - 58, text => measure(text, 12));
+    let headerY = HEIGHT - 28;
+    for (const name of names) { draw(name, MARGIN + 46, headerY, 12, navy); headerY -= 14; }
+    draw("SCHOOL PERFORMANCE REPORT", MARGIN + 46, headerY, 7, muted);
+    y = Math.min(HEIGHT - 74, headerY - 20);
+    const banner = 24;
     page.drawRectangle({ x: MARGIN, y: y - banner, width: INNER, height: banner, color: navy });
-    draw(snapshot.title, MARGIN + (INNER - measure(snapshot.title, 12)) / 2, y - 19, 12, rgb(1, 1, 1));
-    y -= banner + 10;
+    draw(snapshot.title, MARGIN + (INNER - measure(snapshot.title, 11)) / 2, y - 16, 11, rgb(1, 1, 1));
+    y -= banner + 8;
   };
-  const ensure = (height: number) => { if (y - height < 62) newPage(); };
+  const ensure = (height: number) => { if (y - height < 42) newPage(); };
   const paragraph = (text: string, size = 10, color = ink, indent = 0) => {
     const lines = wrapReportText(text || "-", INNER - indent, value => measure(value, size));
-    for (const line of lines) { ensure(size + 6); draw(line, MARGIN + indent, y, size, color); y -= size + 6; }
+    for (const line of lines) { ensure(size + 4); draw(line, MARGIN + indent, y, size, color); y -= size + 4; }
   };
-  const label = (text: string) => { ensure(40); y -= 10; paragraph(text.toUpperCase(), 9, navy); y -= 3; };
+  const label = (text: string) => { ensure(30); y -= 6; paragraph(text.toUpperCase(), 8, navy); y -= 1; };
   const number = (value: number | null) => value === null ? "-" : String(value);
   newPage();
   paragraph(`${snapshot.academic_year} | Revision ${snapshot.revision}`, 9, muted);
@@ -73,21 +73,23 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
       ["Date of birth", snapshot.student.dob ?? "—"],
       ["Class teacher", snapshot.class_teacher?.name ?? "—"],
     ];
-    const rowH = 15, panelH = Math.ceil(rows.length / 2) * rowH + 10;
-    ensure(panelH + 8);
+    const rowH = 13, panelH = Math.ceil(rows.length / 2) * rowH + 8;
+    ensure(panelH + 6);
     page.drawRectangle({ x: MARGIN, y: y - panelH, width: INNER, height: panelH, color: rgb(0.96, 0.97, 0.98) });
-    rows.forEach(([key, value], index) => { const column = index % 2, row = Math.floor(index / 2); const x = MARGIN + 8 + column * (INNER / 2); const atY = y - 16 - row * rowH; draw(key, x, atY, 8, muted); draw(value, x + 62, atY, 9, ink); });
-    y -= panelH + 12; }
+    rows.forEach(([key, value], index) => { const column = index % 2, row = Math.floor(index / 2); const x = MARGIN + 8 + column * (INNER / 2); const atY = y - 14 - row * rowH; draw(key, x, atY, 7.5, muted); draw(value, x + 62, atY, 8.5, ink); });
+    y -= panelH + 8; }
   label("Assessment");
   const columns = [INNER - 260, 44, 58, 44, 44, 70];
+  const compact = snapshot.subjects.length > 8;
+  const rowLine = compact ? 9 : 11, rowFont = compact ? 6.5 : 7.5;
   const tableHeader = () => {
     ensure(36);
-    page.drawRectangle({ x: MARGIN, y: y - 20, width: INNER, height: 25, color: navy });
+    page.drawRectangle({ x: MARGIN, y: y - 16, width: INNER, height: 20, color: navy });
     let x = MARGIN + 7;
     for (const [index, title] of ["Subject", "Max", "Obtained", "%", "Grade", "Result"].entries()) {
-      draw(title, x, y - 10, 8, rgb(1, 1, 1)); x += columns[index];
+      draw(title, x, y - 9, 7.5, rgb(1, 1, 1)); x += columns[index];
     }
-    y -= 31;
+    y -= 25;
   };
   tableHeader();
   for (const subject of snapshot.subjects) {
@@ -100,24 +102,24 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
       subject.status === "absent" ? "Absent" : subject.status === "exempt" ? "Exempt" : subject.passed === false ? "Below pass" : "Pass",
     ].map((text, index) => wrapReportText(text, columns[index] - 14, value => measure(value, 8)));
     const lines = Math.max(...cells.map(cell => cell.length));
-    if (y - (lines * 13 + 16) < 62) { newPage(); tableHeader(); }
+    if (y - (lines * rowLine + 8) < 42) { newPage(); tableHeader(); }
     // Extremely long subject/component labels continue on another page with column headings.
     for (let line = 0; line < lines; line++) {
-      if (y - 20 < 62) { newPage(); tableHeader(); }
+      if (y - (rowLine + 5) < 42) { newPage(); tableHeader(); }
       let x = MARGIN + 7;
-      cells.forEach((cell, index) => { if (cell[line]) draw(cell[line], x, y, 8, index === 0 ? navy : ink); x += columns[index]; });
-      y -= 13;
+      cells.forEach((cell, index) => { if (cell[line]) draw(cell[line], x, y, rowFont, index === 0 ? navy : ink); x += columns[index]; });
+      y -= rowLine;
     }
-    y -= 5;
+    y -= 3;
     page.drawLine({ start: { x: MARGIN, y }, end: { x: WIDTH - MARGIN, y }, thickness: 0.5, color: rgb(0.83, 0.87, 0.89) });
-    y -= 11;
+    y -= 7;
   }
   label("Overall performance");
-  { const bw = INNER / 4, bh = 34;
-    ensure(bh + 8);
+  { const bw = INNER / 4, bh = 28;
+    ensure(bh + 6);
     const stats: [string, string][] = [["Aggregate", `${number(snapshot.summary.obtained)} / ${number(snapshot.summary.max)}`], ["Percentage", `${number(snapshot.summary.percentage)}%`], ["Grade", snapshot.summary.grade ?? "—"], ["Result", snapshot.summary.result.toUpperCase()]];
     for (const [index, [key, value]] of stats.entries()) { const x = MARGIN + index * bw; page.drawRectangle({ x, y: y - bh, width: bw, height: bh, borderColor: rgb(0.86, 0.89, 0.91), borderWidth: 0.7, color: rgb(1, 1, 1) }); draw(key.toUpperCase(), x + 8, y - 13, 7, muted); draw(value, x + 8, y - 26, 12, navy); }
-    y -= bh + 12; }
+    y -= bh + 8; }
   paragraph(`Attendance: ${snapshot.attendance.present} / ${snapshot.attendance.working_days} working days`, 10);
   label("Class teacher's remarks");
   paragraph(snapshot.remarks);
