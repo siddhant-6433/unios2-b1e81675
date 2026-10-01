@@ -7,7 +7,17 @@ import { decodeBase64, NOTO_SANS_TTF_B64, NOTO_DEVANAGARI_TTF_B64, BEACON_LOGO_P
 const WIDTH = 595.28, HEIGHT = 841.89, MARGIN = 32, INNER = WIDTH - MARGIN * 2;
 const ink = rgb(0.12, 0.17, 0.21), muted = rgb(0.36, 0.4, 0.44), navy = rgb(0.08, 0.22, 0.31);
 /** Only immutable bundled assets are used; snapshot URLs are deliberately never fetched. */
+/** Renders the report to one A4 page, scaling down uniformly only when it would otherwise overflow. */
 export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint8Array> {
+  for (const scale of [1, 0.94, 0.88, 0.82, 0.76, 0.7, 0.64]) {
+    const bytes = await renderOnce(snapshot, scale);
+    if ((await PDFDocument.load(bytes)).getPageCount() === 1) return bytes;
+  }
+  return renderOnce(snapshot, 0.64);
+}
+
+async function renderOnce(snapshot: ReportSnapshot, scale: number): Promise<Uint8Array> {
+  const pageH = HEIGHT / scale;
   if (snapshot.template_version !== "beacon-v1" || (snapshot.school.asset_version && snapshot.school.asset_version !== "beacon-v1")) throw new Error("Unsupported report template");
   const document = await PDFDocument.create();
   document.registerFontkit(fontkit);
@@ -39,25 +49,25 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
     }
   };
   const newPage = () => {
-    page = document.addPage([WIDTH, HEIGHT]);
-    page.drawRectangle({ x: 0, y: HEIGHT - 8, width: WIDTH, height: 8, color: navy });
-    page.drawImage(logo, { x: MARGIN, y: HEIGHT - 56, width: 36, height: 36 * logo.height / logo.width });
-    const names = wrapReportText(snapshot.school.name, INNER - 58, text => measure(text, 12));
-    let headerY = HEIGHT - 28;
-    for (const name of names) { draw(name, MARGIN + 46, headerY, 12, navy); headerY -= 14; }
-    draw("SCHOOL PERFORMANCE REPORT", MARGIN + 46, headerY, 7, muted);
-    y = Math.min(HEIGHT - 74, headerY - 20);
-    const banner = 24;
+    page = document.addPage([WIDTH, pageH]);
+    page.drawRectangle({ x: 0, y: pageH - 10, width: WIDTH, height: 10, color: navy });
+    page.drawImage(logo, { x: MARGIN, y: pageH - 70, width: 44, height: 44 * logo.height / logo.width });
+    const names = wrapReportText(snapshot.school.name, INNER - 62, text => measure(text, 13));
+    let headerY = pageH - 40;
+    for (const name of names) { draw(name, MARGIN + 54, headerY, 13, navy); headerY -= 17; }
+    draw("SCHOOL PERFORMANCE REPORT", MARGIN + 54, headerY, 8, muted);
+    y = Math.min(pageH - 98, headerY - 26);
+    const banner = 30;
     page.drawRectangle({ x: MARGIN, y: y - banner, width: INNER, height: banner, color: navy });
-    draw(snapshot.title, MARGIN + (INNER - measure(snapshot.title, 11)) / 2, y - 16, 11, rgb(1, 1, 1));
-    y -= banner + 8;
+    draw(snapshot.title, MARGIN + (INNER - measure(snapshot.title, 12)) / 2, y - 19, 12, rgb(1, 1, 1));
+    y -= banner + 10;
   };
-  const ensure = (height: number) => { if (y - height < 42) newPage(); };
+  const ensure = (height: number) => { if (y - height < 58) newPage(); };
   const paragraph = (text: string, size = 10, color = ink, indent = 0) => {
     const lines = wrapReportText(text || "-", INNER - indent, value => measure(value, size));
-    for (const line of lines) { ensure(size + 4); draw(line, MARGIN + indent, y, size, color); y -= size + 4; }
+    for (const line of lines) { ensure(size + 6); draw(line, MARGIN + indent, y, size, color); y -= size + 6; }
   };
-  const label = (text: string) => { ensure(30); y -= 6; paragraph(text.toUpperCase(), 8, navy); y -= 1; };
+  const label = (text: string) => { ensure(40); y -= 10; paragraph(text.toUpperCase(), 9, navy); y -= 3; };
   const number = (value: number | null) => value === null ? "-" : String(value);
   newPage();
   paragraph(`${snapshot.academic_year} | Revision ${snapshot.revision}`, 9, muted);
@@ -73,23 +83,22 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
       ["Date of birth", snapshot.student.dob ?? "—"],
       ["Class teacher", snapshot.class_teacher?.name ?? "—"],
     ];
-    const rowH = 13, panelH = Math.ceil(rows.length / 2) * rowH + 8;
-    ensure(panelH + 6);
+    const rowH = 15, panelH = Math.ceil(rows.length / 2) * rowH + 10;
+    ensure(panelH + 8);
     page.drawRectangle({ x: MARGIN, y: y - panelH, width: INNER, height: panelH, color: rgb(0.96, 0.97, 0.98) });
-    rows.forEach(([key, value], index) => { const column = index % 2, row = Math.floor(index / 2); const x = MARGIN + 8 + column * (INNER / 2); const atY = y - 14 - row * rowH; draw(key, x, atY, 7.5, muted); draw(value, x + 62, atY, 8.5, ink); });
-    y -= panelH + 8; }
+    rows.forEach(([key, value], index) => { const column = index % 2, row = Math.floor(index / 2); const x = MARGIN + 8 + column * (INNER / 2); const atY = y - 16 - row * rowH; draw(key, x, atY, 8, muted); draw(value, x + 62, atY, 9, ink); });
+    y -= panelH + 12; }
   label("Assessment");
   const columns = [INNER - 260, 44, 58, 44, 44, 70];
-  const compact = snapshot.subjects.length > 8;
-  const rowLine = compact ? 9 : 11, rowFont = compact ? 6.5 : 7.5;
+  const rowLine = 12, rowFont = 8;
   const tableHeader = () => {
     ensure(36);
-    page.drawRectangle({ x: MARGIN, y: y - 16, width: INNER, height: 20, color: navy });
+    page.drawRectangle({ x: MARGIN, y: y - 20, width: INNER, height: 25, color: navy });
     let x = MARGIN + 7;
     for (const [index, title] of ["Subject", "Max", "Obtained", "%", "Grade", "Result"].entries()) {
-      draw(title, x, y - 9, 7.5, rgb(1, 1, 1)); x += columns[index];
+      draw(title, x, y - 10, 8, rgb(1, 1, 1)); x += columns[index];
     }
-    y -= 25;
+    y -= 31;
   };
   tableHeader();
   for (const subject of snapshot.subjects) {
@@ -115,11 +124,11 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
     y -= 7;
   }
   label("Overall performance");
-  { const bw = INNER / 4, bh = 28;
-    ensure(bh + 6);
+  { const bw = INNER / 4, bh = 34;
+    ensure(bh + 8);
     const stats: [string, string][] = [["Aggregate", `${number(snapshot.summary.obtained)} / ${number(snapshot.summary.max)}`], ["Percentage", `${number(snapshot.summary.percentage)}%`], ["Grade", snapshot.summary.grade ?? "—"], ["Result", snapshot.summary.result.toUpperCase()]];
     for (const [index, [key, value]] of stats.entries()) { const x = MARGIN + index * bw; page.drawRectangle({ x, y: y - bh, width: bw, height: bh, borderColor: rgb(0.86, 0.89, 0.91), borderWidth: 0.7, color: rgb(1, 1, 1) }); draw(key.toUpperCase(), x + 8, y - 13, 7, muted); draw(value, x + 8, y - 26, 12, navy); }
-    y -= bh + 8; }
+    y -= bh + 12; }
   paragraph(`Attendance: ${snapshot.attendance.present} / ${snapshot.attendance.working_days} working days`, 10);
   label("Class teacher's remarks");
   paragraph(snapshot.remarks);
@@ -138,5 +147,6 @@ export async function renderBeaconReport(snapshot: ReportSnapshot): Promise<Uint
   document.setTitle(`${snapshot.title} - ${snapshot.student.name}`);
   document.setAuthor(snapshot.school.name);
   document.setSubject("School academic performance report");
+  if (scale < 1) { for (const item of document.getPages()) { item.scaleContent(scale, scale); item.translateContent((WIDTH - WIDTH * scale) / 2, 0); item.setSize(WIDTH, HEIGHT); } }
   return document.save();
 }
