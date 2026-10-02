@@ -6,7 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { Badge } from "@/components/ui/badge";
-import { Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon, Video, Mic, Play, Pause, CheckCheck, FilePen, Download } from "lucide-react";
+import { Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon, Video, Mic, Play, Pause, CheckCheck, FilePen, Download, ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
 import { feeTermLabel } from "@/lib/feeTermLabels";
@@ -267,6 +267,7 @@ export default function Inbox() {
   const loadGenRef = useRef(0);
   const [items, setItems] = useState<InboxItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<InboxItem | null>(null);
+  const [mobileView, setMobileView] = useState<"categories" | "items" | "detail">("categories");
   const [loading, setLoading] = useState(false);
   const [countsLoaded, setCountsLoaded] = useState(false);
   const [processing, setProcessing] = useState<string | null>(null);
@@ -595,6 +596,7 @@ export default function Inbox() {
 
     if (target) {
       setSelected(target);
+      if (requestedCategory) setMobileView("items");
       return;
     }
 
@@ -1484,6 +1486,11 @@ export default function Inbox() {
 
   // ── Render helpers ────────────────────────────────────────────────────────
 
+  const openInboxItem = (item: InboxItem) => {
+    setSelectedItem(item);
+    setMobileView("detail");
+  };
+
   const renderMiddleItem = (item: InboxItem) => {
     const isSelected = selectedItem === item;
     const baseClass = cn(
@@ -1496,7 +1503,7 @@ export default function Inbox() {
     if (selected === "abvmu_deposits") {
       const c = item as AbvmuDepositItem;
       return (
-        <button key={c.id} className={baseClass} onClick={() => setSelectedItem(c)}>
+        <button key={c.id} className={baseClass} onClick={() => openInboxItem(c)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{c.lead_name}</p>
@@ -1515,7 +1522,7 @@ export default function Inbox() {
     if (selected === "offer_waivers") {
       const g = item as WaiverGroup;
       return (
-        <button key={g.id} className={baseClass} onClick={() => setSelectedItem(g)}>
+        <button key={g.id} className={baseClass} onClick={() => openInboxItem(g)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{g.lead_name}</p>
@@ -1541,7 +1548,7 @@ export default function Inbox() {
     if (selected === "offer_approvals") {
       const o = item as OfferApprovalItem;
       return (
-        <button key={o.id} className={baseClass} onClick={() => setSelectedItem(o)}>
+        <button key={o.id} className={baseClass} onClick={() => openInboxItem(o)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{o.lead_name}</p>
@@ -1557,7 +1564,7 @@ export default function Inbox() {
     if (selected === "offer_edits") {
       const r = item as OfferEditItem;
       return (
-        <button key={r.id} className={baseClass} onClick={() => setSelectedItem(r)}>
+        <button key={r.id} className={baseClass} onClick={() => openInboxItem(r)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{r.lead_name}</p>
@@ -1580,7 +1587,7 @@ export default function Inbox() {
         paid: c.fee_paid,
       });
       return (
-        <button key={c.id} className={baseClass} onClick={() => setSelectedItem(c)}>
+        <button key={c.id} className={baseClass} onClick={() => openInboxItem(c)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{c.student_name}</p>
@@ -1603,7 +1610,7 @@ export default function Inbox() {
     if (selected === "certificate_approvals") {
       const c = item as CertificateApprovalItem;
       return (
-        <button key={c.id} className={baseClass} onClick={() => setSelectedItem(c)}>
+        <button key={c.id} className={baseClass} onClick={() => openInboxItem(c)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{c.alumni_name}</p>
@@ -1621,7 +1628,7 @@ export default function Inbox() {
     if (selected === "hr_document_approvals") {
       const h = item as HrDocumentApprovalItem;
       return (
-        <button key={h.id} className={baseClass} onClick={() => setSelectedItem(h)}>
+        <button key={h.id} className={baseClass} onClick={() => openInboxItem(h)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{h.target_name || h.letter_name}</p>
@@ -1640,7 +1647,7 @@ export default function Inbox() {
       const p = item as PendingAnItem;
       const summary = pendingAnDocSummary(p.doc_status);
       return (
-        <button key={p.id} className={baseClass} onClick={() => setSelectedItem(p)}>
+        <button key={p.id} className={baseClass} onClick={() => openInboxItem(p)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
@@ -1656,7 +1663,7 @@ export default function Inbox() {
     if (selected === "contact_changes") {
       const c = item as ContactChangeItem;
       return (
-        <button key={c.id} className={baseClass} onClick={() => setSelectedItem(c)}>
+        <button key={c.id} className={baseClass} onClick={() => openInboxItem(c)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{c.student_name}</p>
@@ -1675,7 +1682,7 @@ export default function Inbox() {
         <button
           key={w.phone}
           className={cn(baseClass, isSelected && "bg-primary/5 border-l-2 border-l-primary")}
-          onClick={() => setSelectedItem(w)}
+          onClick={() => openInboxItem(w)}
         >
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
@@ -1696,7 +1703,7 @@ export default function Inbox() {
     if (selected === "video_approvals") {
       const v = item as VideoApprovalInboxItem;
       return (
-        <button key={v.id} className={baseClass} onClick={() => setSelectedItem(v)}>
+        <button key={v.id} className={baseClass} onClick={() => openInboxItem(v)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">{v.title}</p>
@@ -1715,7 +1722,7 @@ export default function Inbox() {
       const m = item as VoiceMessageItem;
       const isUnread = m.status === "unread";
       return (
-        <button key={m.id} className={cn(baseClass, isUnread && "bg-primary/5/30 dark:bg-primary/90/10")} onClick={() => setSelectedItem(m)}>
+        <button key={m.id} className={cn(baseClass, isUnread && "bg-primary/5/30 dark:bg-primary/90/10")} onClick={() => openInboxItem(m)}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex items-center gap-1.5">
               {isUnread && <span className="h-2 w-2 rounded-full bg-primary/50 shrink-0" />}
@@ -2468,10 +2475,10 @@ export default function Inbox() {
   // ── Layout ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-[hsl(var(--muted)/0.35)]">
+    <div className="flex h-full min-h-0 w-full min-w-0 overflow-hidden bg-[hsl(var(--muted)/0.35)]">
       {/* Left: Category list */}
-      <div className="w-[300px] shrink-0 border-r border-border/70 bg-background/95 flex flex-col">
-        <div className="px-5 py-5 border-b border-border/70">
+      <div className={cn("w-full min-w-0 shrink-0 border-r border-border/70 bg-background/95 flex flex-col md:w-[300px]", mobileView !== "categories" && "hidden md:flex")}>
+        <div className="px-4 py-3 border-b border-border/70 md:px-5 md:py-5">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Command center</p>
@@ -2485,7 +2492,7 @@ export default function Inbox() {
               <RefreshCw className="h-4 w-4" />
             </button>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-2">
+          <div className="mt-3 grid grid-cols-2 gap-2 md:mt-4">
             <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
               <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Open</p>
               <p className="mt-0.5 text-lg font-semibold text-foreground">
@@ -2500,7 +2507,7 @@ export default function Inbox() {
             </div>
           </div>
         </div>
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1.5">
+        <nav className="flex-1 overflow-y-auto overscroll-contain p-3 space-y-1.5 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {countsLoading && (
             <div className="flex h-24 items-center justify-center">
               <OrbLoader state="searching" />
@@ -2518,10 +2525,13 @@ export default function Inbox() {
               onClick={() => {
                 if (selected === cat.id) {
                   loadItems(cat.id);
+                  setMobileView("items");
                   return;
                 }
                 setItems([]);
                 setSelected(cat.id);
+                setSelectedItem(null);
+                setMobileView("items");
               }}
               className={cn(
                 "w-full flex items-center gap-3 rounded-xl px-3 py-3 text-[13px] font-medium transition-all text-left",
@@ -2557,9 +2567,12 @@ export default function Inbox() {
       </div>
 
       {/* Middle: Item list */}
-      <div className="w-[380px] shrink-0 border-r border-border/70 bg-background/80 flex flex-col">
-        <div className="px-5 py-4 border-b border-border/70 bg-background/95">
+      <div className={cn("w-full min-w-0 shrink-0 border-r border-border/70 bg-background/80 flex flex-col md:w-[380px]", mobileView !== "items" && "hidden md:flex")}>
+        <div className="px-4 py-3 border-b border-border/70 bg-background/95 md:px-5 md:py-4">
           <div className="flex items-center justify-between gap-3">
+            <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground md:hidden" onClick={() => setMobileView("categories")} aria-label="Back to inbox categories">
+              <ArrowLeft className="h-4 w-4" />
+            </button>
             <div className="min-w-0">
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                 {selectedCategory?.label || ""}
@@ -2595,7 +2608,7 @@ export default function Inbox() {
             )}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto bg-background/60">
+        <div className="flex-1 overflow-y-auto overscroll-contain bg-background/60 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {countsLoading || (loading && items.length === 0) ? (
             <div className="flex h-40 items-center justify-center">
               <OrbLoader state="searching" />
@@ -2613,7 +2626,16 @@ export default function Inbox() {
       </div>
 
       {/* Right: Detail pane */}
-      <div className="flex-1 overflow-y-auto bg-background">
+      <div className={cn("min-w-0 flex-1 overflow-y-auto overscroll-contain bg-background pb-[max(0.75rem,env(safe-area-inset-bottom))]", mobileView !== "detail" && "hidden md:block")}>
+        <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur md:hidden">
+          <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground" onClick={() => setMobileView("items")} aria-label="Back to inbox items">
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">{selectedCategory?.label || "Inbox"}</p>
+            <p className="text-xs text-muted-foreground">{selectedCategory ? `${items.length} item${items.length === 1 ? "" : "s"}` : ""}</p>
+          </div>
+        </div>
         {renderDetail()}
       </div>
     </div>

@@ -150,6 +150,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   // shell stops growing and <main> stops padding, so a three-column layout can
   // just use h-full instead of guessing the chrome height with calc(100vh-Npx).
   const isConsole = location.pathname === "/cloud-dialer";
+  const isInbox = location.pathname === "/inbox";
   // Dense table pages reclaim the page gutter so wide tables stop wrapping their
   // cells. Deliberately NOT isConsole: that also locks the viewport height and
   // hands scrolling to the page, which these pages don't want.
@@ -170,7 +171,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <CounsellorFilterProvider>
-    <div className={`flex flex-col ${isConsole ? "h-screen overflow-hidden" : "min-h-screen"}`}>
+    <div className={`flex flex-col ${isConsole || isInbox ? "h-dvh overflow-hidden" : "min-h-screen"}`}>
       <ImpersonationBanner />
       <SidebarProvider>
         <div className="flex-1 flex w-full min-h-0">
@@ -208,7 +209,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 partner portals never get it. */}
             {deferredShellReady && !isPortal && !(role === "counsellor" && isConsole) && <GlobalActionBar />}
             {deferredShellReady && !isPortal && <LiveCallBar />}
-            <main className={`flex-1 min-h-0 ${isConsole ? "overflow-hidden p-0" : isWideTable ? "overflow-auto px-3 py-4" : "overflow-auto p-6"}`}>
+            <main className={`flex-1 min-h-0 ${isConsole || isInbox ? "overflow-hidden p-0" : isWideTable ? "overflow-auto px-3 py-4" : "overflow-auto p-6"}`}>
               {/* Same surface the RequirePermission gate and the page's own
                   loading branch render, so the three handoffs read as one. */}
               <Suspense fallback={<PageLoader className={isConsole ? "p-6" : undefined} />}>
