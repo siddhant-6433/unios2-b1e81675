@@ -642,6 +642,7 @@ Deno.serve(async (req) => {
     // WABA the template lives in (null = default). A template can only be sent
     // from a number in its own WABA, so this pins the sender below.
     let templateWabaId: string | null = null;
+    let approvedTemplateMetadata: any | null = null;
     let templateDef = TEMPLATES[template_key];
     if (!templateDef) {
       // A template can exist in multiple languages (e.g. en + hi) — maybeSingle
@@ -666,6 +667,7 @@ Deno.serve(async (req) => {
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
+      approvedTemplateMetadata = dynamicTemplate;
       urlButtonIndexes = dynamicUrlButtonIndexes((dynamicTemplate as any).components);
       if (urlButtonIndexes.length > 0) {
         const suppliedButtons = Array.isArray(button_urls)
@@ -689,6 +691,69 @@ Deno.serve(async (req) => {
         name: (dynamicTemplate as any).name,
         params: Array.from({ length: dynCount }, (_v, i) => `param_${i + 1}`),
       };
+    }
+
+    // This template has a hardcoded parameter contract, but its approved
+    // Meta language and WABA still come from the synced template record. A
+    // literal "en" or the default admissions sender can target a translation
+    // / WABA where the approved template does not exist (Meta 132001).
+    if (template_key === "admission_payment_nudge") {
+      const { data: approvedRows, error: approvedErr } = await admin
+        .from("whatsapp_templates")
+        .select("name, status, placeholder_count, has_media, header_format, components, language, waba_id")
+        .eq("name", templateDef.name)
+        .eq("status", "APPROVED")
+        .order("language", { ascending: true })
+        .limit(1);
+      if (approvedErr) {
+        console.error("Admission payment nudge template lookup failed:", approvedErr.message);
+        return new Response(
+          JSON.stringify({ error: "Could not verify the approved admission payment nudge template. Sync WhatsApp templates and try again." }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      approvedTemplateMetadata = (approvedRows as any[] | null)?.[0] || null;
+      if (!approvedTemplateMetadata) {
+        return new Response(
+          JSON.stringify({ error: 'The admission_payment_nudge template is not synced as approved in Meta. Approve it on the intended WhatsApp account, sync templates, then retry.' }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      templateLanguage = String(approvedTemplateMetadata.language || "").trim();
+      templateWabaId = (approvedTemplateMetadata.waba_id as string | null) || null;
+      if (!templateLanguage) {
+        return new Response(
+          JSON.stringify({ error: "The approved admission payment nudge template has no synced language. Sync WhatsApp templates and try again." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // A non-default WABA must have an active Meta sender in our channel
+      // registry. Otherwise the shared adapter could fall back to a sender
+      // from another WABA and reproduce Meta 132001.
+      if (templateWabaId) {
+        const { data: matchingSenders, error: senderErr } = await admin
+          .from("whatsapp_channels")
+          .select("id")
+          .eq("provider", "meta")
+          .eq("is_active", true)
+          .eq("waba_id", templateWabaId)
+          .limit(1);
+        if (senderErr) {
+          console.error("Admission payment nudge sender lookup failed:", senderErr.message);
+          return new Response(
+            JSON.stringify({ error: "Could not verify a WhatsApp sender for the approved template account. Check WhatsApp channel configuration and retry." }),
+            { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        if (!matchingSenders?.length) {
+          return new Response(
+            JSON.stringify({ error: "No active WhatsApp sender is configured for the account where admission_payment_nudge is approved. Add or activate a sender on that account, then retry." }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+      }
     }
 
     const phoneRoute = getRouteForTemplate(template_key);
@@ -724,7 +789,9 @@ Deno.serve(async (req) => {
     // a warning, not a rejection. Runs after the repair shims above so padded
     // params are counted as sent.
     const suppliedParamCount = Array.isArray(params) ? params.length : 0;
-    const { data: metaRows } = await admin
+    const { data: metaRows } = approvedTemplateMetadata
+      ? { data: [approvedTemplateMetadata] }
+      : await admin
       .from("whatsapp_templates")
       .select("placeholder_count, has_media, header_format")
       .eq("name", templateDef.name)

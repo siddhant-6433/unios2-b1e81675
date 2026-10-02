@@ -187,6 +187,37 @@ describe("campaign template map reconciliation", () => {
   });
 });
 
+describe("admission payment nudge Meta routing", () => {
+  it("uses the approved template language and WABA from the synced row", () => {
+    const nudgeResolution = whatsappSend.slice(
+      whatsappSend.indexOf('if (template_key === "admission_payment_nudge")'),
+      whatsappSend.indexOf("const phoneRoute = getRouteForTemplate(template_key)"),
+    );
+    expect(nudgeResolution).toContain('.eq("name", templateDef.name)');
+    expect(nudgeResolution).toContain('.eq("status", "APPROVED")');
+    expect(nudgeResolution).toContain('templateLanguage = String(approvedTemplateMetadata.language');
+    expect(nudgeResolution).toContain('templateWabaId = (approvedTemplateMetadata.waba_id');
+    expect(whatsappSend).toContain("wabaId: templateWabaId");
+  });
+
+  it("rejects missing approval or a missing active sender before Meta send", () => {
+    const nudgeResolution = whatsappSend.slice(
+      whatsappSend.indexOf('if (template_key === "admission_payment_nudge")'),
+      whatsappSend.indexOf("const phoneRoute = getRouteForTemplate(template_key)"),
+    );
+    const sendIndex = whatsappSend.indexOf("sendWhatsAppTemplate(admin as any", whatsappSend.indexOf("const phoneRoute = getRouteForTemplate(template_key)"));
+    expect(nudgeResolution).toContain("not synced as approved in Meta");
+    expect(nudgeResolution).toContain('.eq("waba_id", templateWabaId)');
+    expect(nudgeResolution).toContain("No active WhatsApp sender is configured");
+    expect(whatsappSend.indexOf("No active WhatsApp sender is configured")).toBeLessThan(sendIndex);
+  });
+
+  it("keeps the existing five parameter contract", () => {
+    expect(whatsappSend).toContain('admission_payment_nudge: {\n    name: "admission_payment_nudge",\n    params: ["student_name", "course_name", "an_amount", "year1_amount", "due_date"],');
+    expect(whatsappSend).toContain('const expected = (metaTemplate as any).placeholder_count as number;');
+  });
+});
+
 describe("AI outage visibility", () => {
   it("writes a failed message row when a dispatch fails", () => {
     // A failed AI send used to write nothing at all, so the Aug 2026 Gemini
