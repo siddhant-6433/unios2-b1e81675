@@ -9,7 +9,7 @@ describe("lead list archive + roll-forward", () => {
     expect(leadLists).toContain('.is("archived_at", null)');
     expect(leadLists).toContain('.not("archived_at", "is", null)');
     // The query changes with the segment, so the effect has to refetch.
-    expect(leadLists).toContain("[role, showArchived]");
+    expect(leadLists).toContain("[role, showArchived, searchParams]");
     expect(leadLists).toContain('useState<"all" | "calling" | "mine" | "archived">("calling")');
   });
 

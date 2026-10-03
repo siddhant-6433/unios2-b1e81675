@@ -1,3 +1,4 @@
+import { CreateCommunicationListButton } from '@/components/leads/CreateCommunicationListButton';
 import { PageLoader } from "@/components/ui/page-loader";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useEffect, useMemo, useState } from "react";
@@ -808,7 +809,7 @@ export default function AcademicPartners() {
           <h1 className="text-2xl font-bold text-foreground">Academic Partners</h1>
           <p className="mt-1 text-sm text-muted-foreground">Manage batch ownership, admissions access, and partner payouts</p>
         </div>
-        <Button onClick={openCreate} className="gap-2"><Plus className="h-4 w-4" /> Add Partner</Button>
+        <div className="flex flex-wrap gap-2"><CreateCommunicationListButton audience="academic_partners" /><Button onClick={openCreate} className="gap-2"><Plus className="h-4 w-4" /> Add Partner</Button></div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

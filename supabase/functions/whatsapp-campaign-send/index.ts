@@ -1,3 +1,4 @@
+import { directoryCampaignAccess, directoryRecipientAllowed, directoryRecipientSnapshot } from '../_shared/directory-campaign.ts';
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendWhatsAppTemplate } from "../_shared/whatsapp-channel.ts";
 import { expectedReplyTypeForTemplate } from "../_shared/whatsapp-outbound-context.ts";
@@ -575,7 +576,7 @@ Deno.serve(async (req) => {
     // eligible_at defaults to now() for legacy campaigns.
     const nowIso = new Date().toISOString();
     const recipientSelect =
-      "id, campaign_id, lead_id, phone, status, eligible_at, retry_count, contact_id, business_phone_number_id, business_number, marketing_contacts(name, phone, email, city, opted_out), leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))";
+      "id, campaign_id, lead_id, phone, status, eligible_at, retry_count, contact_id, consultant_id, academic_partner_id, recipient_name, recipient_phone, recipient_email, business_phone_number_id, business_number, marketing_contacts(name, phone, email, city, opted_out), leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))";
     let recipients: any[] | null = null;
     {
       const paced = await adminClient
@@ -591,7 +592,7 @@ Deno.serve(async (req) => {
         // Pre-migration fallback
         const legacy = await adminClient
           .from("whatsapp_campaign_recipients")
-          .select("id, campaign_id, lead_id, phone, status, contact_id, marketing_contacts(name, phone, email, city, opted_out), leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))")
+          .select("id, campaign_id, lead_id, phone, status, contact_id, consultant_id, academic_partner_id, recipient_name, recipient_phone, recipient_email, marketing_contacts(name, phone, email, city, opted_out), leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))")
           .eq("campaign_id", campaign_id)
           .eq("status", "pending")
           .limit(batchSize);
@@ -625,7 +626,10 @@ Deno.serve(async (req) => {
     // `shared_with_nimt` MUST stay null, not false: false means "academic-partner
     // private" and is a hard skip at the guard below, which silently dropped every
     // contact-backed recipient. Mirrors campaignMemberToLead in src/lib/campaignEligibility.ts.
+    const directoryAccess = (recipients || []).some((r: any) => r.consultant_id || r.academic_partner_id) ? await directoryCampaignAccess(adminClient, campaign.created_by) : { consultants: false, academic_partners: false };
     for (const r of (recipients || []) as any[]) {
+      const snapshot = directoryRecipientSnapshot(r);
+      if (snapshot) r.leads = snapshot;
       if (!r.leads && r.marketing_contacts) {
         r.leads = {
           name: r.marketing_contacts.name,
@@ -864,6 +868,10 @@ Deno.serve(async (req) => {
     };
 
     const processRecipient = async (recipient: any) => {
+      if (!directoryRecipientAllowed(recipient, directoryAccess)) {
+        await adminClient.from('whatsapp_campaign_recipients').update({ status: 'skipped', error_message: 'Directory audience access denied' }).eq('id', recipient.id);
+        failedCount++; return;
+      }
       const lead = (recipient as any).leads || {};
       const latestApplication = latestApplicationByLeadId.get((recipient as any).lead_id);
       const leadName = resolveLeadDisplayName(lead, latestApplication);
