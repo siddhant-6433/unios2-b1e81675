@@ -8895,6 +8895,12 @@ export type Database = {
       }
       email_campaign_recipients: {
         Row: {
+          consultant_id: string | null
+          academic_partner_id: string | null
+          recipient_phone: string | null
+          recipient_email: string | null
+          recipient_name: string | null
+          contact_id: string | null
           call_disposition: string | null
           call_log_id: string | null
           call_notes: string | null
@@ -8908,7 +8914,7 @@ export type Database = {
           created_at: string | null
           error_message: string | null
           id: string
-          lead_id: string
+          lead_id: string | null
           provider_id: string | null
           responded_at: string | null
           sent_at: string | null
@@ -8916,6 +8922,12 @@ export type Database = {
           to_email: string
         }
         Insert: {
+          consultant_id?: string | null
+          academic_partner_id?: string | null
+          recipient_phone?: string | null
+          recipient_email?: string | null
+          recipient_name?: string | null
+          contact_id?: string | null
           call_disposition?: string | null
           call_log_id?: string | null
           call_notes?: string | null
@@ -8929,7 +8941,7 @@ export type Database = {
           created_at?: string | null
           error_message?: string | null
           id?: string
-          lead_id: string
+          lead_id?: string | null
           provider_id?: string | null
           responded_at?: string | null
           sent_at?: string | null
@@ -8937,6 +8949,12 @@ export type Database = {
           to_email: string
         }
         Update: {
+          consultant_id?: string | null
+          academic_partner_id?: string | null
+          recipient_phone?: string | null
+          recipient_email?: string | null
+          recipient_name?: string | null
+          contact_id?: string | null
           call_disposition?: string | null
           call_log_id?: string | null
           call_notes?: string | null
@@ -8950,7 +8968,7 @@ export type Database = {
           created_at?: string | null
           error_message?: string | null
           id?: string
-          lead_id?: string
+          lead_id?: string | null
           provider_id?: string | null
           responded_at?: string | null
           sent_at?: string | null
@@ -18140,6 +18158,7 @@ export type Database = {
       }
       lead_lists: {
         Row: {
+          audience_type: string
           created_at: string
           created_by: string | null
           description: string | null
@@ -18159,6 +18178,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          audience_type?: string
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -18178,6 +18198,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          audience_type?: string
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -29924,6 +29945,12 @@ export type Database = {
       }
       whatsapp_campaign_recipients: {
         Row: {
+          consultant_id: string | null
+          academic_partner_id: string | null
+          recipient_phone: string | null
+          recipient_email: string | null
+          recipient_name: string | null
+          contact_id: string | null
           call_disposition: string | null
           call_log_id: string | null
           call_notes: string | null
@@ -29941,7 +29968,7 @@ export type Database = {
           failed_at: string | null
           id: string
           last_error_code: string | null
-          lead_id: string
+          lead_id: string | null
           message_id: string | null
           phone: string
           read_at: string | null
@@ -29952,6 +29979,12 @@ export type Database = {
           status: string | null
         }
         Insert: {
+          consultant_id?: string | null
+          academic_partner_id?: string | null
+          recipient_phone?: string | null
+          recipient_email?: string | null
+          recipient_name?: string | null
+          contact_id?: string | null
           call_disposition?: string | null
           call_log_id?: string | null
           call_notes?: string | null
@@ -29969,7 +30002,7 @@ export type Database = {
           failed_at?: string | null
           id?: string
           last_error_code?: string | null
-          lead_id: string
+          lead_id?: string | null
           message_id?: string | null
           phone: string
           read_at?: string | null
@@ -29980,6 +30013,12 @@ export type Database = {
           status?: string | null
         }
         Update: {
+          consultant_id?: string | null
+          academic_partner_id?: string | null
+          recipient_phone?: string | null
+          recipient_email?: string | null
+          recipient_name?: string | null
+          contact_id?: string | null
           call_disposition?: string | null
           call_log_id?: string | null
           call_notes?: string | null
@@ -29997,7 +30036,7 @@ export type Database = {
           failed_at?: string | null
           id?: string
           last_error_code?: string | null
-          lead_id?: string
+          lead_id?: string | null
           message_id?: string | null
           phone?: string
           read_at?: string | null
@@ -35321,6 +35360,10 @@ export type Database = {
       }
     }
     Functions: {
+      ensure_directory_communication_list: { Args: { _audience: string }; Returns: string }
+      can_access_directory_audience: { Args: { _audience: string; _user_id?: string }; Returns: boolean }
+      directory_list_members_page: { Args: { _list_id: string; _limit?: number; _offset?: number }; Returns: { member_id: string; kind: string; target_id: string; name: string | null; phone: string | null; email: string | null; stage: string | null; total_count: number }[] }
+
       academic_partner_fee_receipts: {
         Args: { _partner_id?: string }
         Returns: {
