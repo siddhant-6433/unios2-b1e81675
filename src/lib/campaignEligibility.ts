@@ -1,3 +1,5 @@
+import type { DirectoryListRow } from "./directoryCommunicationLists";
+
 /**
  * WhatsApp (and email) campaign recipient eligibility.
  * DNC is always hard-excluded — stage "dnc" means stop all further outreach.
@@ -6,6 +8,8 @@
 
 export type CampaignLeadLike = {
   id: string;
+  name?: string | null;
+  directoryKind?: string;
   phone?: string | null;
   email?: string | null;
   stage?: string | null;
@@ -35,7 +39,8 @@ export type CampaignSkipReason =
   | "no_email"
   | "cold"
   | "recent_contact"
-  | "excluded_stage";
+  | "excluded_stage"
+  | "duplicate";
 
 export type CampaignEligibilityResult<T extends CampaignLeadLike> = {
   eligible: T[];
@@ -49,6 +54,7 @@ export type CampaignEligibilityResult<T extends CampaignLeadLike> = {
     cold: number;
     recentContact: number;
     excludedStage: number;
+    duplicate: number;
   };
   /** One-line UI summary. */
   preview: string;
@@ -67,10 +73,12 @@ function normalizeStage(stage: string | null | undefined): string {
 }
 
 function hasPhone(lead: CampaignLeadLike): boolean {
+  if (lead.directoryKind) return /^\+?[\d\s().-]+$/.test(String(lead.phone || "")) && /^[1-9]\d{7,14}$/.test(String(lead.phone || "").replace(/\D/g, ""));
   return Boolean(lead.phone && String(lead.phone).replace(/\D/g, "").length >= 8);
 }
 
 function hasEmail(lead: CampaignLeadLike): boolean {
+  if (lead.directoryKind) return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(lead.email || "").trim());
   const email = String(lead.email || "").trim();
   return email.includes("@") && email.length > 3;
 }
@@ -85,6 +93,7 @@ function lastContactMap(
 
 /** A polymorphic `lead_list_members` row with its embeds. */
 export type CampaignListMember = {
+  directory_recipient?: DirectoryListRow;
   lead_id?: string | null;
   contact_id?: string | null;
   leads?: (CampaignLeadLike & Record<string, unknown>) | null;
@@ -117,6 +126,10 @@ export function campaignMemberToLead(
   member: CampaignListMember,
   channel: "whatsapp" | "email",
 ): CampaignRecipientLead | null {
+  if (member.directory_recipient) {
+    const row = member.directory_recipient;
+    return { id: row.target_id, name: row.name, phone: row.phone, email: row.email, directoryKind: row.kind, stage: null, shared_with_nimt: null };
+  }
   if (member?.leads?.id) return member.leads;
 
   const contact = member?.marketing_contacts;
@@ -158,8 +171,10 @@ export function filterCampaignRecipients<T extends CampaignLeadLike>(
   let cold = 0;
   let recentContact = 0;
   let excludedStage = 0;
+  let duplicate = 0;
+  const directoryDestinations = new Set<string>();
 
-  for (const lead of leads) {
+  for (let lead of leads) {
     if (!lead || !lead.id) continue;
     const stage = normalizeStage(lead.stage);
 
@@ -211,6 +226,14 @@ export function filterCampaignRecipients<T extends CampaignLeadLike>(
       }
     }
 
+    if (lead.directoryKind) {
+      const destination = opts.channel === 'email' ? String(lead.email).trim().toLowerCase() : String(lead.phone).replace(/\D/g, '');
+      const normalized = opts.channel === 'whatsapp' && destination.length === 10 ? '91' + destination : destination;
+      if (directoryDestinations.has(normalized)) { skipped.push({ lead, reason: 'duplicate' }); duplicate++; continue; }
+      directoryDestinations.add(normalized);
+      if (opts.channel === 'email') lead = { ...lead, email: normalized };
+      else lead = { ...lead, phone: normalized };
+    }
     eligible.push(lead);
   }
 
@@ -224,6 +247,7 @@ export function filterCampaignRecipients<T extends CampaignLeadLike>(
     cold,
     recentContact,
     excludedStage,
+    duplicate,
   };
 
   const parts: string[] = [
@@ -232,6 +256,7 @@ export function filterCampaignRecipients<T extends CampaignLeadLike>(
   if (dnc) parts.push(`${dnc} DNC excluded`);
   if (notShared) parts.push(`${notShared} not shared with NIMT`);
   if (noContact) parts.push(`${noContact} missing ${opts.channel === "email" ? "email" : "phone"}`);
+  if (duplicate) parts.push(`${duplicate} duplicate destinations`);
   if (cold) parts.push(`${cold} cold`);
   if (recentContact) parts.push(`${recentContact} recent contact (<${quietDays}d)`);
   if (excludedStage) parts.push(`${excludedStage} other stage`);

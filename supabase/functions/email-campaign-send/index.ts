@@ -1,3 +1,4 @@
+import { directoryCampaignAccess, directoryRecipientAllowed, directoryRecipientSnapshot } from '../_shared/directory-campaign.ts';
 // Bulk email campaign sender.
 //
 // Mirrors whatsapp-campaign-send. Iterates email_campaign_recipients for a
@@ -189,7 +190,7 @@ Deno.serve(async (req) => {
 
     const { data: recipients, error: recError } = await admin
       .from("email_campaign_recipients")
-      .select("id, campaign_id, lead_id, contact_id, to_email, status, marketing_contacts(name, phone, email, opted_out), leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, courses(name), campuses(name), lead_notes(content, created_at))")
+      .select("id, campaign_id, lead_id, contact_id, consultant_id, academic_partner_id, recipient_name, recipient_phone, recipient_email, to_email, status, marketing_contacts(name, phone, email, opted_out), leads(name, phone, email, source, stage, shared_with_nimt, guardian_name, guardian_phone, courses(name), campuses(name), lead_notes(content, created_at))")
       .eq("campaign_id", campaign_id)
       .eq("status", "pending")
       .limit(batchSize);
@@ -212,6 +213,7 @@ Deno.serve(async (req) => {
       });
     }
 
+    const directoryAccess = recipients.some((r: any) => r.consultant_id || r.academic_partner_id) ? await directoryCampaignAccess(admin, (campaign as any).created_by) : { consultants: false, academic_partners: false };
     const fromEmail = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
     const trackingBaseUrl = `${supabaseUrl}/functions/v1/track-engagement`;
 
@@ -272,6 +274,10 @@ Deno.serve(async (req) => {
         );
       }
 
+      if (!directoryRecipientAllowed(r, directoryAccess)) {
+        await admin.from('email_campaign_recipients').update({ status: 'skipped', error_message: 'Directory audience access denied' }).eq('id', r.id);
+        skipped++; continue;
+      }
       // Recipients are polymorphic (lead or bulk-imported marketing contact).
       // Shape the contact into the lead object so every downstream var/template
       // path is identical. `shared_with_nimt` stays null, never false — false
@@ -284,7 +290,7 @@ Deno.serve(async (req) => {
         skipped++;
         continue;
       }
-      const lead = (r as any).leads
+      const lead = directoryRecipientSnapshot(r) || (r as any).leads
         || (contact
           ? { name: contact.name, phone: contact.phone, email: contact.email, source: "import", stage: null, shared_with_nimt: null }
           : {});
