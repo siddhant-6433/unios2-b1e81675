@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2.1] - 2026-10-04
+
+### Added
+
+- Send the approved Hindi and English DPharma 2026–28 last-chance admission notice to JEECUP candidates from the WhatsApp template picker, with college code 1268 and admission contact numbers.
+
 ## [0.2.1.0] - 2026-10-04
 
 ### Fixed
