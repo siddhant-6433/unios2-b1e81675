@@ -1,6 +1,6 @@
 # Mirai Uni rollout
 
-The existing Uni deployment serves `uni.miraischool.in` with Mirai's existing logo and green theme. `/apply` opens Mirai admissions. Accounts, role redirects, campus access, document ownership, database and authentication providers are shared; browser sessions remain separate per hostname. NIMT/Beacon keep their existing routes and sender configuration.
+This release prepares the existing Uni deployment to serve `uni.miraischool.in` with Mirai's existing logo and green theme after activation. `/apply` will open Mirai admissions. Accounts, role redirects, campus access, document ownership, database and authentication providers are shared; browser sessions remain separate per hostname. NIMT/Beacon keep their existing routes and sender configuration.
 
 ## Live preparation status (updated 4 October 2026)
 
