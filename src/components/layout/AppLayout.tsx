@@ -1,3 +1,4 @@
+import { useSiteBrand } from "@/contexts/SiteBrandContext";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { PageLoader } from "@/components/ui/page-loader";
 import { AppSidebar } from "@/components/layout/AppSidebar";
@@ -139,7 +140,8 @@ const WIDE_TABLE_ROUTES = new Set(["/marketing", "/applications", "/admissions"]
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const title = pageTitles[location.pathname] || "NIMT UniOs";
+  const brand = useSiteBrand();
+  const title = pageTitles[location.pathname] || brand.title;
   const { profile, role } = useAuth();
   const [deferredShellReady, setDeferredShellReady] = useState(false);
   const showWalkInBtn = role === "counsellor" || role === "admission_head" || role === "super_admin" || role === "campus_admin" || role === "principal";

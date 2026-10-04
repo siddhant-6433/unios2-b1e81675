@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import uniosLogo from "@/assets/unios-logo.png";
+import { useSiteBrand } from "@/contexts/SiteBrandContext";
 
 const WhatsAppIcon = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor">
@@ -255,6 +255,7 @@ const managementMenu: MenuItem[] = [
 ];
 
 export function AppSidebar() {
+  const brand = useSiteBrand();
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
@@ -466,10 +467,10 @@ export function AppSidebar() {
               ? "justify-center"
               : "gap-3 bg-gradient-to-r from-primary/5 to-transparent px-3"
           }`}>
-            <img src={uniosLogo} alt="UniOs" className={`shrink-0 object-contain ${collapsed ? "h-7 w-7" : "h-8 w-8"}`} />
+            <img src={brand.logo} alt={brand.logoAlt} className={`shrink-0 object-contain ${collapsed ? "h-7 w-7" : brand.isMirai ? "h-8 w-20" : "h-8 w-8"}`} />
             {!collapsed && (
               <div className="flex flex-col">
-                <span className="text-sm font-bold text-foreground tracking-tight">NIMT UniOs</span>
+                <span className="text-sm font-bold text-foreground tracking-tight">{brand.title}</span>
               </div>
             )}
           </div>

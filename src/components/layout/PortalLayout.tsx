@@ -1,6 +1,7 @@
 import { ReactNode, useState } from "react";
 import { Bell, LogOut, Menu, X } from "lucide-react";
 import uniosLogo from "@/assets/unios-logo.png";
+import { useSiteBrand } from "@/contexts/SiteBrandContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 
@@ -31,6 +32,10 @@ export function PortalLayout({
   onTabChange,
   showNotifications = true,
 }: PortalLayoutProps) {
+  const brand = useSiteBrand();
+  const shellName = brand.isMirai ? brand.institutionName : institutionName;
+  const shellLogo = brand.isMirai ? brand.logo : institutionLogo;
+  const shellLogoAlt = brand.isMirai ? brand.logoAlt : institutionLogoAlt || institutionName;
   const { signOut } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -46,8 +51,8 @@ export function PortalLayout({
       <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src={institutionLogo} alt={institutionLogoAlt || institutionName} className="h-8 max-w-[150px] object-contain" />
-            <span className="text-sm font-semibold text-gray-900 truncate">{institutionName}</span>
+            <img src={shellLogo} alt={shellLogoAlt} className="h-8 max-w-[150px] object-contain" />
+            <span className="text-sm font-semibold text-gray-900 truncate">{shellName}</span>
           </div>
           <div className="flex items-center gap-2">
             {showNotifications && (
