@@ -1,7 +1,7 @@
 /**
- * Preview, submit, or verify the Mirai catalogue through the existing admin API.
+ * Preview, submit, resubmit rejected templates, or verify the Mirai catalogue through the existing admin API.
  * No messages are sent and this tool never enables rollout.
- * deno run --allow-env --allow-net scripts/mirai-templates.ts preview|submit|check
+ * deno run --allow-env --allow-net scripts/mirai-templates.ts preview|submit|resubmit|check
  */
 import { uniqueMiraiTemplates, validateMiraiTemplate } from "../supabase/functions/_shared/mirai-templates.ts";
 import { MIRAI_PHONE_NUMBER_ID } from "../supabase/functions/_shared/mirai-brand.ts";
@@ -32,7 +32,7 @@ if (action === "preview") {
   console.log(JSON.stringify(definitions, null, 2));
   Deno.exit(0);
 }
-if (!["check", "submit"].includes(action)) throw new Error("Use preview, submit, or check");
+if (!["check", "submit", "resubmit"].includes(action)) throw new Error("Use preview, submit, resubmit, or check");
 const base = Deno.env.get("SUPABASE_URL");
 const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 if (!base || !key) throw new Error("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY");
@@ -53,17 +53,24 @@ const senders = await api(`/rest/v1/whatsapp_channels?select=waba_id,meta_phone_
 if (senders.length !== 1 || !senders[0].waba_id) throw new Error("Configure exactly one active Mirai sender with its verified WABA");
 const wabaId = senders[0].waba_id;
 await api("/functions/v1/whatsapp-templates", { action: "sync", waba_id: wabaId });
-const rows = await api(`/rest/v1/whatsapp_templates?select=name,status,reject_reason,language,waba_id,placeholder_count,components&waba_id=eq.${wabaId}&name=like.mirai_*`);
+const rows = await api(`/rest/v1/whatsapp_templates?select=name,status,category,reject_reason,language,waba_id,placeholder_count,components&waba_id=eq.${wabaId}&name=like.mirai_*`);
 if (action === "check") {
   let failures = 0;
   for (const template of templates) {
     const row = rows.find((r: any) => r.name === template.name && r.language === template.language);
     const issue = validateMiraiTemplate(template, row, wabaId);
-    console.log(`${template.name}: ${issue ? `${row?.status || "MISSING"}: ${row?.reject_reason || issue}` : "APPROVED, matching contract and Mirai WABA"}`);
+    console.log(`${template.name}: ${issue ? `${row?.status || "MISSING"}: ${row?.status === "REJECTED" && row?.reject_reason && row.reject_reason !== "NONE" ? row.reject_reason : issue}` : "APPROVED, matching contract and Mirai WABA"}`);
     if (issue) failures++;
   }
   console.log(`Mirai sender verified: ${MIRAI_PHONE_NUMBER_ID}. ${templates.length - failures}/${templates.length} templates ready. Rollout remains unchanged.`);
   Deno.exit(failures ? 1 : 0);
+}
+if (action === "resubmit") {
+  for (const name of ["mirai_apply_portal_login_v1", "mirai_student_admitted_welcome_v1", "mirai_student_portal_invite_v1"]) {
+    const result = await api("/functions/v1/whatsapp-templates", {action:"resubmit", waba_id:wabaId, name});
+    console.log(`${name}: ${result.already_reviewed ? "already matches reviewed copy; skipped" : "revised utility copy resubmitted"}; ${result.status}`);
+  }
+  Deno.exit(0);
 }
 // Meta needs an uploaded sample-document handle for document templates.
 const headerHandle = Deno.env.get("MIRAI_TEMPLATE_DOCUMENT_HANDLE");

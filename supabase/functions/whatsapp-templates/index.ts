@@ -10,6 +10,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { resubmitMiraiTemplate } from "../_shared/mirai-template-resubmit.ts";
 import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
@@ -316,7 +317,7 @@ function toTemplateRow(t: any, wabaId: string | null) {
     language: t.language || "en",
     category: t.category || null,
     status: normalizeTemplateStatus(t.status),
-    reject_reason: t.rejected_reason || null,
+    reject_reason: normalizeTemplateStatus(t.status) === "REJECTED" ? t.rejected_reason || null : null,
     header_format: ["TEXT", "IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat) ? headerFormat : "NONE",
     has_media: ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat),
     placeholder_count: placeholderCount,
@@ -417,8 +418,8 @@ Deno.serve(async (req) => {
     }
 
     const isServiceAutomation = await isServiceCaller(req, adminClient);
-    if (isServiceAutomation && !["sync", "create"].includes(action)) {
-      return new Response(JSON.stringify({ error: "Service automation may only sync or create templates" }), {
+    if (isServiceAutomation && !["sync", "create", "resubmit"].includes(action)) {
+      return new Response(JSON.stringify({ error: "Service automation may only sync, create or resubmit Mirai templates" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -448,6 +449,14 @@ Deno.serve(async (req) => {
     const user = { id: userId };
 
     console.log("Action:", action, "User:", user.id ?? "cron", "Role:", role);
+
+    if (action === "resubmit") {
+      try {
+        return json(await resubmitMiraiTemplate(adminClient, body, name => Deno.env.get(name)));
+      } catch (error) {
+        return json({error: error instanceof Error ? error.message : "Mirai resubmission failed"}, 400);
+      }
+    }
 
     // ── LIST: List all templates, across every WABA we can read ──
     if (action === "list") {

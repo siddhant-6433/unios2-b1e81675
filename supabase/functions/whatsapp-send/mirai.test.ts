@@ -42,7 +42,7 @@ Deno.test("Mirai lifecycle preflight and exact-account delivery", async (t) => {
       data = hasSender ? [sender] : [];
       const accept = init?.headers ? new Headers(init.headers).get("Accept") : request?.headers.get("Accept");
       if (accept?.includes("vnd.pgrst.object")) data = hasSender ? sender : null;
-    } else if (table === "whatsapp_templates") data = approved ? [{name:template.name,status:"APPROVED",language:"en",waba_id:"mirai-waba",placeholder_count:template.params.length,header_format:template.header || "NONE",
+    } else if (table === "whatsapp_templates") data = approved ? [{name:template.name,status:"APPROVED",category:"UTILITY",language:"en",waba_id:"mirai-waba",placeholder_count:template.params.length,header_format:template.header || "NONE",
       components:[...(template.header ? [{type:"HEADER",format:template.header}] : []),{type:"BODY",text:template.body},...(template.button ? [{type:"BUTTONS",buttons:[{type:"URL",...template.button}]}] : [])]}] : [];
     else if (table === "whatsapp_template_settings") data = {media_url:"https://samples.test/approval-only.pdf"};
     else if (table === "whatsapp_messages") data = {id:"fake-row"};

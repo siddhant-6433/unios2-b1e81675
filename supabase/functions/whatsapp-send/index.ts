@@ -699,7 +699,7 @@ Deno.serve(async (req) => {
       // A template can exist in multiple languages (e.g. en + hi) — maybeSingle
       // would error on >1 row and read as "Unknown template". Take one, English first.
       let dynamicQuery = admin.from("whatsapp_templates")
-        .select("name, status, placeholder_count, has_media, header_format, components, language, waba_id")
+        .select("name, status, category, placeholder_count, has_media, header_format, components, language, waba_id")
         .eq("name", template_key).eq("status", "APPROVED");
       if (miraiSender) dynamicQuery = dynamicQuery.eq("waba_id", miraiSender.waba_id).eq("language", "en");
       const { data: dynamicRows, error: dynamicErr } = await dynamicQuery
@@ -756,7 +756,7 @@ Deno.serve(async (req) => {
     if (template_key === "admission_payment_nudge") {
       const { data: approvedRows, error: approvedErr } = await admin
         .from("whatsapp_templates")
-        .select("name, status, placeholder_count, has_media, header_format, components, language, waba_id")
+        .select("name, status, category, placeholder_count, has_media, header_format, components, language, waba_id")
         .eq("name", templateDef.name)
         .eq("status", "APPROVED")
         .order("language", { ascending: true })

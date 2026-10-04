@@ -38,12 +38,12 @@ describe("strict Mirai sender", () => {
 describe("Mirai template contracts", () => {
   const template = MIRAI_TEMPLATES.apply_portal_login;
   const approved = {
-    name: template.name, status: "APPROVED", language: "en", waba_id: "mirai-waba", placeholder_count: 2,
+    name: template.name, status: "APPROVED", category: "UTILITY", language: "en", waba_id: "mirai-waba", placeholder_count: 2,
     components: [{ type: "BODY", text: template.body }, { type: "BUTTONS", buttons: [{ type: "URL", ...template.button }] }],
   };
   it("requires approval on the exact account and reviewed copy/button contract", () => {
     expect(validateMiraiTemplate(template, approved, "mirai-waba")).toBeNull();
-    for (const change of [{ status: "PENDING" }, { waba_id: "nimt-waba" }, { language: "hi" }, { placeholder_count: 3 },
+    for (const change of [{ status: "PENDING" }, { category: "MARKETING" }, { waba_id: "nimt-waba" }, { language: "hi" }, { placeholder_count: 3 },
       { components: [{ type: "BODY", text: "Unexpected copy" }] }]) {
       expect(validateMiraiTemplate(template, { ...approved, ...change }, "mirai-waba")).not.toBeNull();
     }
@@ -64,7 +64,7 @@ describe("Mirai template contracts", () => {
     }
   });
   it.each(uniqueMiraiTemplates())("validates every $name body, media and button contract", entry => {
-    const row = { name: entry.name, status: "APPROVED", language: "en", waba_id: "mirai-waba",
+    const row = { name: entry.name, status: "APPROVED", category: "UTILITY", language: "en", waba_id: "mirai-waba",
       placeholder_count: entry.params.length,
       components: [
         ...(entry.header ? [{ type: "HEADER", format: entry.header }] : []),
@@ -78,6 +78,14 @@ describe("Mirai template contracts", () => {
     expect(validateMiraiTemplate(entry, { ...row, waba_id: "nimt-waba" }, "mirai-waba")).not.toBeNull();
     if (entry.header) expect(validateMiraiTemplate(entry, { ...row, components: row.components.slice(1) }, "mirai-waba")).not.toBeNull();
     if (entry.button) expect(validateMiraiTemplate(entry, { ...row, components: row.components.slice(0, -1) }, "mirai-waba")).not.toBeNull();
+  });
+  it("accepts Meta's canonical root slash without accepting another portal URL", () => {
+    const entry = MIRAI_TEMPLATES.student_admitted_welcome;
+    const row = {status:"APPROVED",category:"UTILITY",language:"en",waba_id:"mirai-waba",placeholder_count:3,
+      components:[{type:"BODY",text:entry.body},{type:"BUTTONS",buttons:[{type:"URL",...entry.button,url:entry.button!.url+"/"}]}]};
+    expect(validateMiraiTemplate(entry,row,"mirai-waba")).toBeNull();
+    row.components[1].buttons[0].url = "https://uni.nimt.ac.in/";
+    expect(validateMiraiTemplate(entry,row,"mirai-waba")).not.toBeNull();
   });
   it("converts old complete URLs to token suffixes and rejects unrelated hosts", () => {
     expect(miraiButtonValues(MIRAI_TEMPLATES.student_portal_invite, ["https://uni.nimt.ac.in/student?token=claim-token"])).toEqual(["claim-token"]);

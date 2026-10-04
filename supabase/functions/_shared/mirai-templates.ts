@@ -18,7 +18,7 @@ const staticApplyButton = { text: "Open Application", url: `${MIRAI_APP_BASE}/ap
 
 // Keys are the existing internal event contracts. Aliases share one definition.
 export const MIRAI_TEMPLATES: Record<string, MiraiTemplate> = {
-  apply_portal_login: define("apply_portal_login", "Hi {{1}}, your secure Mirai School application login link is ready. Open your application or pay your fees using the button below. This link is valid until {{2}}.\n\nMirai School Admissions", ["student_name", "expiry"], { button: applyButton }),
+  apply_portal_login: define("apply_portal_login", "Hi {{1}}, this is the access link for your existing Mirai School application. Use it to view your application details, uploaded documents and payment records. Link expiry: {{2}}.\n\nMirai School Admissions", ["student_name", "expiry"], { button: applyButton }),
   applicant_welcome: define("applicant_welcome", "Hi {{1}}, your application at Mirai School has been started.\nApplication ID: {{2}}\nGrade / programme: {{3}}\n\nOpen the portal to complete your application.\nMirai School Admissions", ["name", "application_id", "course"], { button: staticApplyButton }),
   application_completion_reminder: define("application_completion_reminder", "Hi {{1}}, your Mirai School application {{2}} is awaiting completion. Please open the application portal to review and complete the remaining details.\n\nMirai School Admissions", ["student_name", "application_id"], { button: staticApplyButton }),
   application_submitted: define("application_submitted", "Hi {{1}}, Mirai School has received your application {{2}}. A copy is attached. Our admissions team will review it and update you.\n\nMirai School Admissions", ["student_name", "application_id"], { header: "DOCUMENT" }),
@@ -36,8 +36,8 @@ export const MIRAI_TEMPLATES: Record<string, MiraiTemplate> = {
   document_request: define("document_request", "Hi {{1}}, please upload the following documents for your Mirai School application: {{2}}. Open the application portal to upload them.\n\nMirai School Admissions", ["student_name", "documents"], { button: staticApplyButton }),
   doc_rejected: define("doc_rejected", "Hi {{1}}, your Mirai School application document {{2}} needs an update.\nReason: {{3}}\n\nPlease upload the corrected document in the application portal.\nMirai School Admissions", ["student_name", "doc_name", "reason"], { button: staticApplyButton }),
   student_welcome: define("student_welcome", "Hi {{1}}, welcome to Mirai School.\nAdmission number: {{2}}\nGrade / programme: {{3}}\nCampus: {{4}}\n\nYou can now sign in to your school portal.", ["name", "admission_no", "course", "campus"], { button: { text: "Open School Portal", url: MIRAI_APP_BASE } }),
-  student_admitted_welcome: define("student_admitted_welcome", "Hi {{1}}, welcome to Mirai School. Your admission number is {{2}} for {{3}}. You can now sign in to your school portal.", ["student_name", "admission_no", "course_name"], { button: { text: "Open School Portal", url: MIRAI_APP_BASE } }),
-  student_portal_invite: define("student_portal_invite", "Hi {{1}}, your Mirai School student portal is ready.\nAdmission number: {{2}}\n\nUse your secure access link below to set up your school account.", ["student_name", "admission_no"], { button: { text: "Access School Portal", url: `${MIRAI_APP_BASE}/student?token={{1}}` } }),
+  student_admitted_welcome: define("student_admitted_welcome", "Hi {{1}}, your admission at Mirai School has been confirmed.\nAdmission number: {{2}}\nGrade / programme: {{3}}\n\nYour admission record is available in the school portal.\nMirai School Admissions", ["student_name", "admission_no", "course_name"], { button: { text: "Open School Portal", url: MIRAI_APP_BASE } }),
+  student_portal_invite: define("student_portal_invite", "Hi {{1}}, a student portal account has been created for your confirmed Mirai School admission.\nAdmission number: {{2}}\n\nUse the link below to complete account setup and access your school records.\nMirai School", ["student_name", "admission_no"], { button: { text: "Access School Portal", url: `${MIRAI_APP_BASE}/student?token={{1}}` } }),
 };
 MIRAI_TEMPLATES.application_received = MIRAI_TEMPLATES.application_submitted;
 MIRAI_TEMPLATES.app_fee_receipt_pdf = MIRAI_TEMPLATES.app_fee_receipt;
@@ -60,8 +60,14 @@ export function miraiButtonValues(template: MiraiTemplate, values: string[] = []
   });
 }
 
+function normalizedButtonUrl(value: unknown): string | null {
+  try { return typeof value === "string" ? new URL(value).href : null; }
+  catch { return null; }
+}
+
 export function validateMiraiTemplate(template: MiraiTemplate, row: any, wabaId: string): string | null {
   if (!row || row.status !== "APPROVED") return `Mirai template ${template.name} is not approved. Sync templates and retry.`;
+  if (row.category !== "UTILITY") return "Mirai lifecycle template is not approved in the utility category";
   if (row.waba_id !== wabaId || row.language !== template.language) return "Mirai template belongs to a different account or language";
   if (row.placeholder_count !== template.params.length) return "Mirai template parameter contract has changed";
   const components = Array.isArray(row.components) ? row.components : [];
@@ -71,7 +77,7 @@ export function validateMiraiTemplate(template: MiraiTemplate, row: any, wabaId:
   if (body?.text !== template.body) return "Mirai template copy does not match the reviewed version";
   const buttons = components.find((c: any) => c.type === "BUTTONS")?.buttons || [];
   if (template.button) {
-    if (buttons.length !== 1 || buttons[0].type !== "URL" || buttons[0].url !== template.button.url) return "Mirai template portal button does not match the reviewed version";
+    if (buttons.length !== 1 || buttons[0].type !== "URL" || normalizedButtonUrl(buttons[0].url) !== normalizedButtonUrl(template.button.url)) return "Mirai template portal button does not match the reviewed version";
   } else if (buttons.length) return "Mirai template has unexpected buttons";
   return null;
 }
