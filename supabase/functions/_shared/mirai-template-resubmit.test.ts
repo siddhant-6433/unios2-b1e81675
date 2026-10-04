@@ -53,9 +53,9 @@ Deno.test("Mirai utility resubmission preserves contracts and cannot edit other 
     belongs=false;await assertRejects(()=>run());assertEquals(calls.length,1);belongs=true;
     status="APPROVED";await assertRejects(()=>run());assertEquals(calls.length,1);
   });
-  await t.step("only the approved marketing reminder can be revised for utility review",async()=>{
+  await t.step("approved marketing templates cannot change category in place",async()=>{
     template=MIRAI_TEMPLATES.application_completion_reminder;status="APPROVED";category="MARKETING";
-    assertEquals((await run()).status,"PENDING");assertEquals(calls.length,2);
+    await assertRejects(()=>run());assertEquals(calls.length,1);
     template=MIRAI_TEMPLATES.student_portal_invite;
     await assertRejects(()=>run());assertEquals(calls.length,1);
     category="UTILITY";

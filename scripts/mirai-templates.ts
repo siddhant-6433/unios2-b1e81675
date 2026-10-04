@@ -37,11 +37,12 @@ const base = Deno.env.get("SUPABASE_URL");
 const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 if (!base || !key) throw new Error("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY");
 async function api(path: string, body?: unknown) {
+  const isResubmission = (body as { action?: string } | undefined)?.action === "resubmit";
   const requestKey = path.startsWith("/functions/") ? Deno.env.get("SUPABASE_AUTOMATION_KEY") || key! : key!;
   const res = await fetch(`${base}${path}`, {
     method: body ? "POST" : "GET",
     headers: { apikey: requestKey, Authorization: `Bearer ${requestKey}`, "Content-Type": "application/json",
-      ...(Deno.env.get("CRON_SECRET") ? { "x-cron-secret": Deno.env.get("CRON_SECRET")! } : {}),
+      ...(!isResubmission && Deno.env.get("CRON_SECRET") ? { "x-cron-secret": Deno.env.get("CRON_SECRET")! } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
@@ -66,7 +67,7 @@ if (action === "check") {
   Deno.exit(failures ? 1 : 0);
 }
 if (action === "resubmit") {
-  for (const name of ["mirai_apply_portal_login_v1", "mirai_student_admitted_welcome_v1", "mirai_student_portal_invite_v1", "mirai_application_completion_reminder_v1"]) {
+  for (const name of ["mirai_apply_portal_login_v1", "mirai_student_admitted_welcome_v1", "mirai_student_portal_invite_v1", "mirai_application_completion_reminder_v2"]) {
     const result = await api("/functions/v1/whatsapp-templates", {action:"resubmit", waba_id:wabaId, name});
     console.log(`${name}: ${result.already_reviewed ? "already matches reviewed copy; skipped" : "revised utility copy resubmitted"}; ${result.status}`);
   }

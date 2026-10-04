@@ -163,7 +163,7 @@ async function registerApprovedTemplateVisibilityRows(adminClient: any, template
     display_name: displayNameForTemplate(template.name),
     description: "Approved Meta template. Configure parameters before enabling if it uses variables.",
     category: String(template.category || "general").toLowerCase(),
-    visibility: ["mirai_application_completion_reminder_v1", "mirai_document_request_v1"].includes(template.name) ? 'all' : 'hidden',
+    visibility: ["mirai_application_completion_reminder_v2", "mirai_document_request_v1"].includes(template.name) ? 'all' : 'hidden',
   }));
 
   if (rows.length > 0) {

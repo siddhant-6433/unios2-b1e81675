@@ -39,6 +39,10 @@ export const MIRAI_TEMPLATES: Record<string, MiraiTemplate> = {
   student_admitted_welcome: define("student_admitted_welcome", "Hi {{1}}, your admission at Mirai School has been confirmed.\nAdmission number: {{2}}\nGrade / programme: {{3}}\n\nYour admission record is available in the school portal.\nMirai School Admissions", ["student_name", "admission_no", "course_name"], { button: { text: "Open School Portal", url: MIRAI_APP_BASE } }),
   student_portal_invite: define("student_portal_invite", "Hi {{1}}, a student portal account has been created for your confirmed Mirai School admission.\nAdmission number: {{2}}\n\nUse the link below to complete account setup and access your school records.\nMirai School", ["student_name", "admission_no"], { button: { text: "Access School Portal", url: `${MIRAI_APP_BASE}/student?token={{1}}` } }),
 };
+// Meta cannot change an approved Marketing template's category. Replace only
+// this event with a v2 Utility submission; keep v1 as a safe routing alias.
+MIRAI_TEMPLATES.application_completion_reminder.name = "mirai_application_completion_reminder_v2";
+MIRAI_TEMPLATES.mirai_application_completion_reminder_v1 = MIRAI_TEMPLATES.application_completion_reminder;
 MIRAI_TEMPLATES.application_received = MIRAI_TEMPLATES.application_submitted;
 MIRAI_TEMPLATES.app_fee_receipt_pdf = MIRAI_TEMPLATES.app_fee_receipt;
 

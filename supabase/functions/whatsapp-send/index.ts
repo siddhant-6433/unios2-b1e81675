@@ -637,9 +637,9 @@ Deno.serve(async (req) => {
     }
 
     const requestedMiraiTemplate = miraiTemplateForKey(template_key);
-    const isInformationReminder = requestedMiraiTemplate?.name === "mirai_application_completion_reminder_v1";
+    const isInformationReminder = requestedMiraiTemplate?.name === "mirai_application_completion_reminder_v2";
     const ownerApplicationId = requestBody.application_id || (isInformationReminder ? params?.[1] : undefined);
-    const explicitMiraiTemplate = requestedMiraiTemplate?.name === template_key;
+    const explicitMiraiTemplate = Boolean(requestedMiraiTemplate && template_key.startsWith("mirai_"));
     let miraiTemplate: ReturnType<typeof miraiTemplateForKey>;
     let miraiSender: { waba_id: string; meta_phone_number_id: string } | null = null;
     const rejectMiraiSend = async (error: string, status = 503) => {

@@ -58,7 +58,7 @@ describe("Mirai template contracts", () => {
     const templates = uniqueMiraiTemplates();
     expect(new Set(templates.map(t => t.name)).size).toBe(templates.length);
     for (const entry of templates) {
-      expect(entry.name).toMatch(/^mirai_.+_v1$/);
+      expect(entry.name).toMatch(/^mirai_.+_v[12]$/);
       expect(entry.body).not.toMatch(/NIMT|college/i);
       if (entry.button) expect(entry.button.url).toMatch(/^https:\/\/uni\.miraischool\.in(?:\/|$)/);
     }

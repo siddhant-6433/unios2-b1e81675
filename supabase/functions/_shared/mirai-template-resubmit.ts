@@ -37,9 +37,7 @@ export async function resubmitMiraiTemplate(db: any, body: any,
     { type: "BUTTONS", buttons: [{ type: "URL", ...template.button,
       ...(template.button!.url.includes("{{1}}") ? { example: [template.button!.url.replace("{{1}}", "sample-token")] } : {}) }] }];
   const matches = remote.category === "UTILITY" && remote.components?.find((c: any) => c.type === "BODY")?.text === template.body;
-  const recategorizedReminder = template === MIRAI_TEMPLATES.application_completion_reminder
-    && remote.status === "APPROVED" && remote.category === "MARKETING";
-  if (remote.status !== "REJECTED" && !recategorizedReminder) {
+  if (remote.status !== "REJECTED") {
     if (matches && ["PENDING", "APPROVED"].includes(remote.status)) {
       return { success: true, already_reviewed: true, status: remote.status };
     }

@@ -88,6 +88,7 @@ const TEMPLATE_PARAM_NAMES: Record<string, string[]> = {
   course_info_generic: ["student_name"],
   apply_portal_login: ["student_name", "apply_url"],
   mirai_application_completion_reminder_v1: ["student_name", "application_id"],
+  mirai_application_completion_reminder_v2: ["student_name", "application_id"],
   mirai_document_request_v1: ["student_name", "documents"],
   cnet_not_qualified_bpt_bmrit: ["student_name", "course_name"],
   counsellor_visit_confirmation: ["student_name", "visit_date", "campus_name"],
