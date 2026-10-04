@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -23,6 +23,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { exportRowsCsv } from "@/lib/xlsxExport";
 import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 import { formatPersonName } from "@/lib/personName";
+import { fetchAllStudentRows, type StudentsReadClient } from "@/lib/studentsRead";
 
 interface StudentRow {
   id: string;
@@ -66,6 +67,18 @@ interface StudentRow {
   batch_section?: string | null;
   session_name?: string | null;
 }
+
+interface StudentRosterRow extends StudentRow {
+  courses?: { name: string; code: string | null; type: string | null } | null;
+  campuses?: { name: string } | null;
+  batches?: { name: string; section: string | null } | null;
+  admission_sessions?: { name: string } | null;
+}
+
+// The projection below supplies this shape. Keep the narrow reader interface
+// at this boundary rather than expanding the entire generated database schema
+// through the pagination helper's recursive query type.
+const studentReadClient = supabase as unknown as StudentsReadClient<StudentRosterRow>;
 
 type SegregationMode = "class" | "program";
 
@@ -278,10 +291,14 @@ const Students = () => {
   // ponytail: same roles that can see StudentFeePanel's Auto-Assign
   const canAssignFees = ["super_admin", "campus_admin", "principal", "accountant", "admission_head"].includes(role || "");
   const [assigning, setAssigning] = useState(false);
+  const rosterRequest = useRef(0);
 
   const fetchStudents = useCallback(async () => {
+    const request = ++rosterRequest.current;
+    const isCurrent = () => rosterRequest.current === request;
     setLoading(true);
     setLoadError(null);
+    setStudents([]);
     // Contact columns are requested only when the viewer may see them. The list
     // renders none of them, so a subject teacher has no reason to receive them —
     // and not fetching beats fetching-then-hiding.
@@ -290,34 +307,17 @@ const Students = () => {
     const joinFields = "courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)";
     const selectFields = [rosterFields, canSeeContact ? contactFields : null, joinFields]
       .filter(Boolean).join(", ");
-    const fallbackSelectFields = selectFields.replace("section, semester,", "section,");
-    const noRefundedSelectFields = selectFields.replace("archived_at, refunded_at,", "archived_at,");
-
-    const runQuery = (fields: string) => {
-      let query = supabase
-        .from("students")
-        .select(fields)
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false })
-        .limit(500);
-      if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
-      return query;
-    };
-
-    let { data, error } = await runQuery(selectFields);
-    if (error && /refunded_at/i.test(error.message || "")) {
-      const fallback = await runQuery(noRefundedSelectFields);
-      data = fallback.data;
-      error = fallback.error;
+    let data: StudentRosterRow[] | null = null;
+    let error: { message?: string } | null = null;
+    try {
+      data = await fetchAllStudentRows(studentReadClient, selectFields, selectedCampusId, isCurrent);
+    } catch (cause) {
+      error = cause as { message?: string };
     }
-    if (error && /semester/i.test(error.message || "")) {
-      const fallback = await runQuery(fallbackSelectFields);
-      data = fallback.data;
-      error = fallback.error;
-    }
+    if (!isCurrent()) return;
 
     if (data) {
-      const mappedStudents = data.map((s: any) => ({
+      const mappedStudents = data.map((s) => ({
         ...s,
         course_name: s.courses?.name || "—",
         course_code: s.courses?.code || null,
@@ -334,7 +334,7 @@ const Students = () => {
         .map((student) => student.lead_id as string);
       if (missingPhotoLeadIds.length > 0) {
         getApplicationPhotoUrlsByLeadId(missingPhotoLeadIds).then((photoByLead) => {
-          if (photoByLead.size === 0) return;
+          if (!isCurrent() || photoByLead.size === 0) return;
           setStudents((current) => current.map((student) => (
             !student.photo_url && student.lead_id && photoByLead.has(student.lead_id)
               ? { ...student, photo_url: photoByLead.get(student.lead_id) || student.photo_url }
@@ -351,7 +351,11 @@ const Students = () => {
     setLoading(false);
   }, [selectedCampusId, canSeeContact]);
 
-  useEffect(() => { fetchStudents(); }, [fetchStudents]);
+  useEffect(() => {
+    const requestState = rosterRequest;
+    fetchStudents();
+    return () => { ++requestState.current; };
+  }, [fetchStudents]);
 
   const classOptions = useMemo(
     () => sortLabels(students.filter(isSchoolStudent).map(getClassLabel)),
@@ -436,7 +440,7 @@ const Students = () => {
 
       return matchesSearch && matchesGroup && matchesBatch && matchesTerm && matchesArchiveView(s);
     });
-  }, [students, search, segregationMode, classFilters, programFilters, batchFilters, termFilters, matchesArchiveView]);
+  }, [students, search, segregationMode, classFilters, programFilters, batchFilters, termFilters, matchesArchiveView, canSeeContact]);
 
   // Inactive mode holding search hits gets both signals: a tint you notice
   // without reading, and the count.

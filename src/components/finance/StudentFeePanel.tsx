@@ -1,6 +1,6 @@
 import { PageLoader } from "@/components/ui/page-loader";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
-import { useState, useEffect, useMemo, Fragment } from "react";
+import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -55,12 +55,23 @@ const PAYMENT_TYPE_LABEL: Record<string, string> = {
   other: "Other",
 };
 
-export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
+export function StudentFeePanel(props: StudentFeePanelProps) {
+  // All financial data, selections and dialogs belong to one identity. Remount
+  // on navigation so late responses from a previous student cannot leak into it.
+  return <StudentFeePanelForStudent key={`${props.student?.id}:${props.student?.lead_id}`} {...props} />;
+}
+
+function StudentFeePanelForStudent({ student, onRefresh }: StudentFeePanelProps) {
   const { role, session, hasPermission } = useAuth();
   const { toast } = useToast();
   const [fees, setFees] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [feeError, setFeeError] = useState<string | null>(null);
+  const [paymentsLoading, setPaymentsLoading] = useState(true);
+  const [paymentsError, setPaymentsError] = useState<string | null>(null);
+  const feeRequest = useRef(0);
+  const paymentRequest = useRef(0);
   const [provisioning, setProvisioning] = useState(false);
   const [migratingStetho, setMigratingStetho] = useState(false);
   const [revisingReceipts, setRevisingReceipts] = useState(false);
@@ -183,28 +194,52 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   };
 
   const fetchFees = async () => {
+    const request = ++feeRequest.current;
     setLoading(true);
-    const { data } = await supabase
-      .from("fee_ledger")
-      .select("*, fee_codes:fee_code_id(code, name, category)")
-      .eq("student_id", student.id)
-      .order("due_date").order("term");
-    if (data) setFees(data);
-    setLoading(false);
+    setFeeError(null);
+    setFees([]);
+    try {
+      const { data, error } = await supabase
+        .from("fee_ledger")
+        .select("*, fee_codes:fee_code_id(code, name, category)")
+        .eq("student_id", student.id)
+        .order("due_date").order("term");
+      if (error) throw error;
+      if (request === feeRequest.current) setFees(data ?? []);
+    } catch (error) {
+      if (request === feeRequest.current) {
+        setFeeError((error as { message?: string })?.message || "Please try again.");
+      }
+    } finally {
+      if (request === feeRequest.current) setLoading(false);
+    }
   };
 
   const fetchPayments = async () => {
     if (!student?.id) return;
+    const request = ++paymentRequest.current;
+    setPaymentsLoading(true);
+    setPaymentsError(null);
+    setPayments([]);
     // Lead-based receipts key on lead_id; a lead-less (school) student's
     // receipts key on student_id — both live in lead_payments.
-    const q = supabase
-      .from("lead_payments")
-      .select("id, type, amount, payment_mode, transaction_ref, receipt_no, receipt_url, receipt_course_id, status, payment_date, created_at, concession_amount, lead_id, student_id, notes")
-      .order("created_at", { ascending: false });
-    const { data } = student.lead_id
-      ? await q.eq("lead_id", student.lead_id)
-      : await q.eq("student_id", student.id);
-    if (data) setPayments(data);
+    try {
+      const q = supabase
+        .from("lead_payments")
+        .select("id, type, amount, payment_mode, transaction_ref, receipt_no, receipt_url, receipt_course_id, status, payment_date, created_at, concession_amount, lead_id, student_id, notes")
+        .order("created_at", { ascending: false });
+      const { data, error } = student.lead_id
+        ? await q.eq("lead_id", student.lead_id)
+        : await q.eq("student_id", student.id);
+      if (error) throw error;
+      if (request === paymentRequest.current) setPayments(data ?? []);
+    } catch (error) {
+      if (request === paymentRequest.current) {
+        setPaymentsError((error as { message?: string })?.message || "Please try again.");
+      }
+    } finally {
+      if (request === paymentRequest.current) setPaymentsLoading(false);
+    }
   };
 
   const fetchCourseChanges = async () => {
@@ -575,6 +610,15 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
 
   if (loading) {
     return <PageLoader />;
+  }
+  if (feeError) {
+    return (
+      <div role="alert" className="rounded-xl border border-destructive/30 bg-card p-6 space-y-3">
+        <p className="font-medium">Could not load fee ledger</p>
+        <p className="text-sm text-muted-foreground">{feeError}</p>
+        <Button variant="outline" onClick={fetchFees}>Retry fee ledger</Button>
+      </div>
+    );
   }
 
   return (
@@ -1064,10 +1108,18 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                 <Receipt className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-semibold text-foreground">Receipts</span>
                 <span className="text-xs text-muted-foreground">
-                  {confirmed.length === 0 ? "no confirmed payments" : `${confirmed.length} receipt${confirmed.length === 1 ? "" : "s"}`}
+                  {paymentsLoading ? "Loading receipts…" : paymentsError ? "Unavailable" : confirmed.length === 0 ? "no confirmed payments" : `${confirmed.length} receipt${confirmed.length === 1 ? "" : "s"}`}
                 </span>
               </div>
-              {confirmed.length === 0 ? (
+              {paymentsLoading ? (
+                <div className="px-4 py-8 text-center text-sm text-muted-foreground">Loading receipts…</div>
+              ) : paymentsError ? (
+                <div role="alert" className="px-4 py-6 space-y-3">
+                  <p className="font-medium">Could not load receipts</p>
+                  <p className="text-sm text-muted-foreground">{paymentsError}</p>
+                  <Button variant="outline" onClick={fetchPayments}>Retry receipts</Button>
+                </div>
+              ) : confirmed.length === 0 ? (
                 <div className="px-4 py-8 text-center text-xs text-muted-foreground">
                   No confirmed payments yet.
                 </div>

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 const campusContext = readFileSync("src/contexts/CampusContext.tsx", "utf8");
 const appSidebar = readFileSync("src/components/layout/AppSidebar.tsx", "utf8");
 const studentsPage = readFileSync("src/pages/Students.tsx", "utf8");
+const studentsRead = readFileSync("src/lib/studentsRead.ts", "utf8");
 
 describe("campus assignment scoping", () => {
   it("only lets org-wide roles select all campuses", () => {
@@ -26,6 +27,7 @@ describe("campus assignment scoping", () => {
   });
 
   it("keeps the students query scoped by the selected campus", () => {
-    expect(studentsPage).toContain('if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);');
+    expect(studentsPage).toContain("fetchAllStudentRows(studentReadClient, selectFields, selectedCampusId, isCurrent)");
+    expect(studentsRead).toContain('if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);');
   });
 });
