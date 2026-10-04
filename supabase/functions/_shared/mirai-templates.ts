@@ -20,7 +20,7 @@ const staticApplyButton = { text: "Open Application", url: `${MIRAI_APP_BASE}/ap
 export const MIRAI_TEMPLATES: Record<string, MiraiTemplate> = {
   apply_portal_login: define("apply_portal_login", "Hi {{1}}, this is the access link for your existing Mirai School application. Use it to view your application details, uploaded documents and payment records. Link expiry: {{2}}.\n\nMirai School Admissions", ["student_name", "expiry"], { button: applyButton }),
   applicant_welcome: define("applicant_welcome", "Hi {{1}}, your application at Mirai School has been started.\nApplication ID: {{2}}\nGrade / programme: {{3}}\n\nOpen the portal to complete your application.\nMirai School Admissions", ["name", "application_id", "course"], { button: staticApplyButton }),
-  application_completion_reminder: define("application_completion_reminder", "Hi {{1}}, your Mirai School application {{2}} is awaiting completion. Please open the application portal to review and complete the remaining details.\n\nMirai School Admissions", ["student_name", "application_id"], { button: staticApplyButton }),
+  application_completion_reminder: define("application_completion_reminder", "Hi {{1}}, required applicant information is outstanding in your Mirai School application {{2}}. Our admissions team needs this information to process the application. Please review the required fields in your application record and provide the missing details using the button below.\n\nMirai School Admissions", ["student_name", "application_id"], { button: staticApplyButton }),
   application_submitted: define("application_submitted", "Hi {{1}}, Mirai School has received your application {{2}}. A copy is attached. Our admissions team will review it and update you.\n\nMirai School Admissions", ["student_name", "application_id"], { header: "DOCUMENT" }),
   application_approved: define("application_approved", "Hi {{1}}, your Mirai School application {{2}} for {{3}} has been approved. Open the portal to review your next steps.\n\nMirai School Admissions", ["student_name", "application_id", "course_name"], { button: applyButton }),
   application_rejected: define("application_rejected", "Hi {{1}}, we have an update on your Mirai School application {{2}}. We are unable to proceed for this reason: {{3}}. Please reply if you need clarification.\n\nMirai School Admissions", ["student_name", "application_id", "reason"]),
@@ -58,6 +58,14 @@ export function miraiButtonValues(template: MiraiTemplate, values: string[] = []
     if (!["uni.nimt.ac.in", "apply.nimt.ac.in", "uni.miraischool.in"].includes(url.hostname)) throw new Error("Unexpected portal button URL");
     return url.searchParams.get("token") || url.pathname.split("/").filter(Boolean).pop() || "";
   });
+}
+
+/** A utility information request is allowed only for an actual incomplete record. */
+export function hasMissingMiraiApplicantInformation(application: {
+  status?: string; full_name?: string | null; dob?: string | null; gender?: string | null;
+} | null): boolean {
+  return application?.status === "draft" && [application.full_name, application.dob, application.gender]
+    .some(value => !value?.trim());
 }
 
 function normalizedButtonUrl(value: unknown): string | null {

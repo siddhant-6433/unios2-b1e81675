@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { MIRAI_PHONE_NUMBER_ID, miraiRolloutEnabled, resolveStoredPortal } from "../_shared/mirai-brand.ts";
-import { miraiTemplateForKey, miraiButtonValues, validateMiraiTemplate } from "../_shared/mirai-templates.ts";
+import { miraiTemplateForKey, miraiButtonValues, validateMiraiTemplate, hasMissingMiraiApplicantInformation } from "../_shared/mirai-templates.ts";
 import { sendWhatsAppTemplate, type WhatsAppChannelRoute } from "../_shared/whatsapp-channel.ts";
 import {
   expectedReplyTypeForTemplate,
@@ -637,6 +637,8 @@ Deno.serve(async (req) => {
     }
 
     const requestedMiraiTemplate = miraiTemplateForKey(template_key);
+    const isInformationReminder = requestedMiraiTemplate?.name === "mirai_application_completion_reminder_v1";
+    const ownerApplicationId = requestBody.application_id || (isInformationReminder ? params?.[1] : undefined);
     const explicitMiraiTemplate = requestedMiraiTemplate?.name === template_key;
     let miraiTemplate: ReturnType<typeof miraiTemplateForKey>;
     let miraiSender: { waba_id: string; meta_phone_number_id: string } | null = null;
@@ -659,13 +661,23 @@ Deno.serve(async (req) => {
       let ownerPortal: string;
       try {
         ownerPortal = await resolveStoredPortal(admin, {
-          leadId: lead_id, studentId: requestBody.student_id, applicationId: requestBody.application_id,
+          leadId: lead_id, studentId: requestBody.student_id, applicationId: ownerApplicationId,
         });
       } catch (error) {
         return await rejectMiraiSend(error instanceof Error ? error.message : "Could not verify institution ownership");
       }
       if (explicitMiraiTemplate && ownerPortal !== "mirai") return await rejectMiraiSend("This saved application or student does not belong to Mirai", 400);
       if (ownerPortal === "mirai") {
+        if (isInformationReminder) {
+          if (!lead_id || typeof ownerApplicationId !== "string" || params?.[1] !== ownerApplicationId) {
+            return await rejectMiraiSend("An information request requires its saved application reference", 400);
+          }
+          const {data: application, error: applicationError} = await admin.from("applications")
+            .select("status,full_name,dob,gender").eq("application_id", ownerApplicationId).eq("lead_id", lead_id).maybeSingle();
+          if (applicationError || !hasMissingMiraiApplicantInformation(application)) {
+            return await rejectMiraiSend("Use this utility template only for a draft missing required applicant information", 400);
+          }
+        }
         miraiTemplate = requestedMiraiTemplate;
         const { data: sender, error: senderError } = await admin.from("whatsapp_channels")
           .select("waba_id, meta_phone_number_id").eq("provider", "meta")

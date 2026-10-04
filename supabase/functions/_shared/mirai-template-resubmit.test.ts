@@ -4,6 +4,7 @@ import { MIRAI_TEMPLATES } from "./mirai-templates.ts";
 
 Deno.test("Mirai utility resubmission preserves contracts and cannot edit other accounts", async t => {
   const waba = "mirai-waba";
+  let category = "UTILITY";
   let status = "REJECTED", belongs = true, hasToken = true, correctSender = true, matches = false;
   let calls: {url:string; init?:RequestInit}[] = [];
   let updates: any[] = [];
@@ -22,7 +23,7 @@ Deno.test("Mirai utility resubmission preserves contracts and cannot edit other 
     const url=String(input);calls.push({url,init});
     assertEquals(new Headers(init?.headers).get("Authorization"),"Bearer test-token");
     if(init?.method === "POST") return new Response(JSON.stringify({success:true}));
-    return new Response(JSON.stringify({data:belongs?[{id:"12345",name:template.name,language:"en",status,category:"UTILITY",
+    return new Response(JSON.stringify({data:belongs?[{id:"12345",name:template.name,language:"en",status,category,
       components:[{type:"BODY",text:matches?template.body:"Previous rejected copy"}]}]:[]}));
   }) as typeof fetch;
   const run = (extra:any={}) => {
@@ -51,6 +52,13 @@ Deno.test("Mirai utility resubmission preserves contracts and cannot edit other 
   await t.step("unrelated ID and approved old copy cannot be edited",async()=>{
     belongs=false;await assertRejects(()=>run());assertEquals(calls.length,1);belongs=true;
     status="APPROVED";await assertRejects(()=>run());assertEquals(calls.length,1);
+  });
+  await t.step("only the approved marketing reminder can be revised for utility review",async()=>{
+    template=MIRAI_TEMPLATES.application_completion_reminder;status="APPROVED";category="MARKETING";
+    assertEquals((await run()).status,"PENDING");assertEquals(calls.length,2);
+    template=MIRAI_TEMPLATES.student_portal_invite;
+    await assertRejects(()=>run());assertEquals(calls.length,1);
+    category="UTILITY";
   });
   await t.step("matching pending/approved copy is idempotent",async()=>{
     matches=true;

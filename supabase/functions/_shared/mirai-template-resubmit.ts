@@ -1,13 +1,13 @@
 import { MIRAI_TEMPLATES } from "./mirai-templates.ts";
 import { MIRAI_PHONE_NUMBER_ID } from "./mirai-brand.ts";
 
-const keys = ["apply_portal_login", "student_admitted_welcome", "student_portal_invite"];
+const keys = ["apply_portal_login", "student_admitted_welcome", "student_portal_invite", "application_completion_reminder"];
 
-/** Edit only the three rejected Mirai templates, retaining IDs and contracts. */
+/** Edit the allowlisted Mirai templates after rejection or reminder recategorization, retaining IDs and contracts. */
 export async function resubmitMiraiTemplate(db: any, body: any,
   secret: (name: string) => string | undefined, request: typeof fetch = fetch) {
   const template = keys.map(key => MIRAI_TEMPLATES[key]).find(t => t.name === body.name);
-  if (!template || !body.waba_id) throw new Error("Only the three named Mirai utility templates may be resubmitted");
+  if (!template || !body.waba_id) throw new Error("Only the allowlisted Mirai utility templates may be resubmitted");
   const { data: channels, error: senderError } = await db.from("whatsapp_channels")
     .select("waba_id,secret_token_name").eq("provider", "meta").eq("is_active", true)
     .eq("meta_phone_number_id", MIRAI_PHONE_NUMBER_ID);
@@ -31,13 +31,15 @@ export async function resubmitMiraiTemplate(db: any, body: any,
   const remote = listing.data?.find((t: any) => String(t.id) === row.meta_template_id && t.name === template.name && t.language === "en");
   if (!remote) throw new Error("Template does not belong to Mirai's WABA");
   const samples: Record<string, string> = { student_name: "Sample Parent", expiry: "15 Oct 2026, 6:00 PM IST",
-    admission_no: "MIRAI-2026-0001", course_name: "Grade 3" };
+    admission_no: "MIRAI-2026-0001", course_name: "Grade 3", application_id: "APP-MIRAI-2026-0001" };
   const components = [{ type: "BODY", text: template.body,
     example: { body_text: [template.params.map(p => samples[p])] } },
     { type: "BUTTONS", buttons: [{ type: "URL", ...template.button,
       ...(template.button!.url.includes("{{1}}") ? { example: [template.button!.url.replace("{{1}}", "sample-token")] } : {}) }] }];
   const matches = remote.category === "UTILITY" && remote.components?.find((c: any) => c.type === "BODY")?.text === template.body;
-  if (remote.status !== "REJECTED") {
+  const recategorizedReminder = template === MIRAI_TEMPLATES.application_completion_reminder
+    && remote.status === "APPROVED" && remote.category === "MARKETING";
+  if (remote.status !== "REJECTED" && !recategorizedReminder) {
     if (matches && ["PENDING", "APPROVED"].includes(remote.status)) {
       return { success: true, already_reviewed: true, status: remote.status };
     }

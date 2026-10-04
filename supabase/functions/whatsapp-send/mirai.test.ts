@@ -17,6 +17,7 @@ Deno.test("Mirai lifecycle preflight and exact-account delivery", async (t) => {
   const realFetch = globalThis.fetch;
   let approved = true, hasSender = true, miraiOwner = true, blocked = false;
   let graphFailure = false;
+  let application:any = {status:"draft",full_name:"Sample",dob:null,gender:null};
   let calls: {url: URL; body: any}[] = [];
   let template = MIRAI_TEMPLATES.apply_portal_login;
   const sender = { id: "mirai", provider: "meta", route: "reply", is_active: true, waba_id: "mirai-waba",
@@ -37,6 +38,7 @@ Deno.test("Mirai lifecycle preflight and exact-account delivery", async (t) => {
     }
     assertEquals(url.hostname,"backend.test");
     if (table === "phone_comms_suppressed") data = blocked;
+    else if (table === "applications") data = select.startsWith("status,") ? application : [{flags:[miraiOwner?"portal:mirai":"portal:nimt"]}];
     else if (table === "leads") data = select === "stage" ? {stage:"new"} : {portal_brand:miraiOwner ? "mirai" : "nimt"};
     else if (table === "whatsapp_channels") {
       data = hasSender ? [sender] : [];
@@ -85,6 +87,18 @@ Deno.test("Mirai lifecycle preflight and exact-account delivery", async (t) => {
       assertEquals(graphCalls().length,1);
       assertEquals(graphCalls()[0].body.template.components.find((c:any) => c.type === "header").parameters[0],{type:"document",document:{link:"https://files.test/receipt.pdf",filename:"Receipt.pdf"}});
       template = MIRAI_TEMPLATES.apply_portal_login;
+    });
+    await t.step("information reminders require an actual draft with missing information", async () => {
+      template=MIRAI_TEMPLATES.application_completion_reminder;
+      const payload={template_key:"application_completion_reminder",params:["Sample","APP-1"],button_urls:[]};
+      assertEquals((await send(payload)).status,200);assertEquals(graphCalls().length,1);
+      application={status:"draft",full_name:"Sample",dob:"2018-01-01",gender:"female"};
+      assertEquals((await send(payload)).status,400);assertEquals(graphCalls().length,0);
+      application={status:"submitted",full_name:"Sample",dob:null,gender:null};
+      assertEquals((await send(payload)).status,400);assertEquals(graphCalls().length,0);
+      application={status:"draft",full_name:"Sample",dob:null,gender:null};
+      assertEquals((await send({...payload,application_id:"APP-other"})).status,400);assertEquals(graphCalls().length,0);
+      template=MIRAI_TEMPLATES.apply_portal_login;
     });
     await t.step("explicit Mirai template cannot be sent for a saved NIMT owner", async () => {
       miraiOwner=false;

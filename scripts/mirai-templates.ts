@@ -66,7 +66,7 @@ if (action === "check") {
   Deno.exit(failures ? 1 : 0);
 }
 if (action === "resubmit") {
-  for (const name of ["mirai_apply_portal_login_v1", "mirai_student_admitted_welcome_v1", "mirai_student_portal_invite_v1"]) {
+  for (const name of ["mirai_apply_portal_login_v1", "mirai_student_admitted_welcome_v1", "mirai_student_portal_invite_v1", "mirai_application_completion_reminder_v1"]) {
     const result = await api("/functions/v1/whatsapp-templates", {action:"resubmit", waba_id:wabaId, name});
     console.log(`${name}: ${result.already_reviewed ? "already matches reviewed copy; skipped" : "revised utility copy resubmitted"}; ${result.status}`);
   }
