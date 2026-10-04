@@ -72,6 +72,29 @@ const DOCUMENT_HEADER_HANDLE_PLACEHOLDER = "__DOCUMENT_HEADER_HANDLE__";
 
 const TEMPLATES = [
   {
+    name: "dpharma_last_chance_2026_28",
+    category: "MARKETING",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: `*Last Chance for DPharma Admission | Session 2026–28*
+
+Candidates who have appeared in *JEECUP* can contact *NIMT Institute of Medical and Paramedical Sciences*, Pari Chowk, Greater Noida, for DPharma admission.
+
+*College Code: 1268*
+For admission assistance, call *9599689503* or *9953595350*.
+
+*DPharma प्रवेश का अंतिम अवसर | सत्र 2026–28*
+
+*JEECUP में शामिल हुए अभ्यर्थी* DPharma प्रवेश के लिए *NIMT Institute of Medical and Paramedical Sciences*, परी चौक, ग्रेटर नोएडा से संपर्क करें।
+
+*कॉलेज कोड: 1268*
+प्रवेश संबंधी सहायता के लिए कॉल करें: *9599689503* या *9953595350*।`,
+      },
+    ],
+  },
+  {
     name: "student_portal_invite",
     category: "UTILITY",
     language: "en",
