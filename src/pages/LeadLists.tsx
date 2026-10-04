@@ -1,3 +1,5 @@
+import { CreateCommunicationListButton } from '@/components/leads/CreateCommunicationListButton';
+import { fetchCampaignListMembers, fetchLastWhatsAppMarketingAtByRecipients, campaignTarget, withLiveDirectoryCounts, isDirectoryList, audienceLabel, canAccessDirectoryAudience } from '@/lib/directoryCommunicationLists';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -68,7 +70,6 @@ import {
   DEFAULT_QUIET_DAYS,
   filterCampaignRecipients,
 } from "@/lib/campaignEligibility";
-import { fetchLastWhatsAppMarketingAtByLeadIds, fetchListMembers } from "@/lib/campaignEligibilityFetch";
 import { evaluateTemplateQualityForBulk } from "@/lib/campaignTemplateQuality";
 import { callingReportByCounsellor, callingReportCalledCount, callingReportLastCallAt, callingReportLatestPerLead } from "@/lib/callingReportStats";
 import { fetchListAssignmentOwners, fetchListReportAssignees, type ListAssignee, type ListAssignmentOwners } from "@/lib/listAssignmentOwners";
@@ -77,6 +78,7 @@ const BulkLeadImportDialog = lazy(() =>
   import("@/components/admissions/BulkLeadImportDialog").then((m) => ({ default: m.BulkLeadImportDialog })));
 
 interface LeadList {
+  audience_type?: string;
   id: string;
   name: string;
   description: string | null;
@@ -292,6 +294,7 @@ export default function LeadLists() {
   const [creatorNames, setCreatorNames] = useState<Record<string, string>>({});
   const [listAssignees, setListAssignees] = useState<Record<string, ListAssignee[]>>({});
   const [loading, setLoading] = useState(true);
+  const [dynamicOpen, setDynamicOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [campaignQueue, setCampaignQueue] = useState<CampaignQueueItem[]>([]);
   const [queueLoading, setQueueLoading] = useState(true);
@@ -395,7 +398,7 @@ export default function LeadLists() {
   // A list member is now polymorphic: either a real lead or a bulk-imported
   // marketing contact that hasn't engaged yet. lead_list_members_page returns
   // both shapes in one paged result.
-  const [previewMembers, setPreviewMembers] = useState<Array<{ member_id: string; kind: "lead" | "contact"; target_id: string; name: string | null; phone: string | null; email: string | null; stage: string | null; promoted: boolean | null }>>([]);
+  const [previewMembers, setPreviewMembers] = useState<Array<{ member_id: string; kind: "lead" | "contact" | "consultant" | "academic_partner"; target_id: string; name: string | null; phone: string | null; email: string | null; stage: string | null; promoted: boolean | null }>>([]);
   const [promotingId, setPromotingId] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -547,7 +550,8 @@ export default function LeadLists() {
       all.push(...page);
       if (page.length < PAGE) break;
     }
-    setLists(all);
+    try { setLists(await withLiveDirectoryCounts(supabase, all)); }
+    catch (error) { toast({ title: 'Could not load directory counts', description: (error as Error).message, variant: 'destructive' }); setLists(all); }
     const creatorIds = [...new Set(all.map((l) => l.created_by).filter((id): id is string => Boolean(id)))];
     const names: Record<string, string> = {};
     for (let i = 0; i < creatorIds.length; i += 100) {
@@ -624,7 +628,7 @@ export default function LeadLists() {
   useEffect(() => {
     if (isAcademicPartnerPortalRole(role)) return;
     fetchLists();
-  }, [role, showArchived]);
+  }, [role, showArchived, searchParams]);
 
   useEffect(() => {
     const ids = [...new Set([
@@ -812,15 +816,28 @@ export default function LeadLists() {
     setPreviewList(list);
     setPreviewOpen(true);
     setPreviewLoading(true);
-    const { data, error } = await supabase.rpc("lead_list_members_page" as any, {
-      _list_id: list.id,
-      _limit: 100,
-      _offset: 0,
-    });
-    if (error) console.error("Preview fetch failed:", error);
-    setPreviewMembers(((data as any) || []) as typeof previewMembers);
+    try {
+      if (isDirectoryList(list)) {
+        const members = await fetchCampaignListMembers(supabase, list.id, '');
+        setPreviewMembers(members.map(m => ({ ...m.directory_recipient, promoted: false })));
+        setPreviewList({ ...list, member_count: members.length });
+      } else {
+        const { data, error } = await supabase.rpc('lead_list_members_page' as any, { _list_id: list.id, _limit: 100, _offset: 0 });
+        if (error) throw error;
+        setPreviewMembers(((data as any) || []) as typeof previewMembers);
+      }
+    } catch (error) {
+      setPreviewMembers([]);
+      toast({ title: 'Could not load members', description: (error as Error).message, variant: 'destructive' });
+    }
     setPreviewLoading(false);
   };
+
+  useEffect(() => {
+    const id = searchParams.get('listId');
+    const list = lists.find(item => item.id === id);
+    if (list) { setDynamicOpen(false); void openPreview(list); }
+  }, [searchParams, lists]);
 
   const loadAssignableCounsellors = async () => {
     if (role === "counsellor" && profile?.id) {
@@ -1211,7 +1228,7 @@ export default function LeadLists() {
     // — a marketing list is mostly marketing_contacts, not leads.
     let members: any[];
     try {
-      members = await fetchListMembers(
+      members = await fetchCampaignListMembers(
         supabase as any,
         waList.id,
         "lead_id, contact_id, leads(id, phone, stage, shared_with_nimt), marketing_contacts(id, phone, opted_out, promoted_lead_id)",
@@ -1229,12 +1246,14 @@ export default function LeadLists() {
 
     const quietDays = waQuietDaysEnabled ? Math.max(0, Number(waQuietDays) || DEFAULT_QUIET_DAYS) : 0;
     let lastMarketingAtByLeadId = new Map<string, string>();
-    if (quietDays > 0 && rawLeads.length > 0) {
-      lastMarketingAtByLeadId = await fetchLastWhatsAppMarketingAtByLeadIds(
-        supabase as any,
-        rawLeads.map((l: any) => l.id),
-        Math.max(quietDays, 30),
-      );
+    try {
+      if (quietDays > 0 && rawLeads.length > 0) {
+        lastMarketingAtByLeadId = await fetchLastWhatsAppMarketingAtByRecipients(supabase, rawLeads, Math.max(quietDays, 30));
+      }
+    } catch (error) {
+      toast({ title: 'Could not check recent communications', description: (error as Error).message, variant: 'destructive' });
+      setWaSending(false);
+      return;
     }
 
     const eligibility = filterCampaignRecipients(rawLeads, {
@@ -1247,7 +1266,7 @@ export default function LeadLists() {
 
     if (!valid.length) {
       toast({
-        title: "No reachable leads",
+        title: "No reachable recipients",
         description: eligibility.preview || "All members were excluded (DNC, cold, recent contact, or missing phone).",
         variant: "destructive",
       });
@@ -1314,8 +1333,7 @@ export default function LeadLists() {
     const rows = valid.map((l: any, index: number) => ({
       campaign_id: campaignId,
       // Exactly one target — whatsapp_campaign_recipients_one_target enforces it.
-      lead_id: l.isContact ? null : l.id,
-      contact_id: l.isContact ? l.id : null,
+      ...campaignTarget(l),
       phone: l.phone,
       eligible_at: pacePlan.eligibleAtByIndex[index] || schedule.nextAttemptAt,
     }));
@@ -1344,7 +1362,7 @@ export default function LeadLists() {
       ? ` Paced: ${pacePlan.waveCount} wave(s), max ${pacePlan.dailyUniqueCap}/day.`
       : "";
     const skipNote = eligibility.counts.total > valid.length
-      ? ` Excluded ${eligibility.counts.total - valid.length} (DNC ${eligibility.counts.dnc}, cold ${eligibility.counts.cold}, recent ${eligibility.counts.recentContact}, no phone ${eligibility.counts.noContact}).`
+      ? ` Excluded ${eligibility.counts.total - valid.length} (DNC ${eligibility.counts.dnc}, cold ${eligibility.counts.cold}, recent ${eligibility.counts.recentContact}, no phone ${eligibility.counts.noContact}, duplicates ${eligibility.counts.duplicate}).`
       : "";
     toast({
       title: schedule.scheduled
@@ -1387,7 +1405,7 @@ export default function LeadLists() {
     // Paginated + polymorphic, same as the WhatsApp path above.
     let members: any[];
     try {
-      members = await fetchListMembers(
+      members = await fetchCampaignListMembers(
         supabase as any,
         emailList.id,
         "lead_id, contact_id, leads(id, email, stage, shared_with_nimt), marketing_contacts(id, email, opted_out, promoted_lead_id)",
@@ -1399,11 +1417,10 @@ export default function LeadLists() {
       return;
     }
 
-    const valid = members
-      .map((m: any) => campaignMemberToLead(m, "email"))
-      .filter((l: any) => l && l.email && l.stage !== "dnc");
+    const emailEligibility = filterCampaignRecipients(members.map((m: any) => campaignMemberToLead(m, "email")).filter(Boolean), { channel: "email", excludeCold: false });
+    const valid = emailEligibility.eligible;
     if (!valid.length) {
-      toast({ title: "No reachable leads", description: "All members are DNC or missing an email.", variant: "destructive" });
+      toast({ title: "No reachable recipients", description: emailEligibility.preview, variant: "destructive" });
       setEmailSending(false);
       return;
     }
@@ -1435,8 +1452,7 @@ export default function LeadLists() {
     const rows = valid.map((l: any) => ({
       campaign_id: campaignId,
       // Exactly one target — email_campaign_recipients_one_target enforces it.
-      lead_id: l.isContact ? null : l.id,
-      contact_id: l.isContact ? l.id : null,
+      ...campaignTarget(l),
       to_email: l.email,
     }));
     for (let i = 0; i < rows.length; i += 500) {
@@ -1460,7 +1476,7 @@ export default function LeadLists() {
       title: schedule.scheduled ? "Email campaign scheduled" : "Email campaign queued",
       description: schedule.scheduled
         ? `${valid.length} recipients scheduled for ${new Date(schedule.nextAttemptAt).toLocaleString()}.`
-        : `${valid.length} recipients queued. You can close this screen; progress is tracked in Marketing.`,
+        : `${valid.length} recipients queued. ${emailEligibility.preview}`,
     });
     if (!schedule.scheduled) {
       supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
@@ -1582,10 +1598,16 @@ export default function LeadLists() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Lead Lists</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage reusable lead lists, counsellor assignment, and list-level calling reports.
+            Manage reusable communication audiences, lead lists, and counsellor assignment.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 shrink-0 self-start">
+          {(['consultants', 'academic_partners'] as const).some(a => canAccessDirectoryAudience(a, role, permissions)) && <Button variant="outline" onClick={() => setDynamicOpen(true)}>Create Dynamic List</Button>}
+          <Dialog open={dynamicOpen} onOpenChange={setDynamicOpen}><DialogContent><DialogHeader><DialogTitle>Create Dynamic List</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">These audiences include every status and update before each campaign.</p>
+            <div className="flex flex-wrap gap-2"><CreateCommunicationListButton audience="consultants" label="All Consultants" onCreated={id => { setDynamicOpen(false); if (searchParams.get("listId") === id) void fetchLists(); }} /><CreateCommunicationListButton audience="academic_partners" label="All Academic Partners" onCreated={id => { setDynamicOpen(false); if (searchParams.get("listId") === id) void fetchLists(); }} /></div>
+          </DialogContent></Dialog>
+
           <Button asChild variant="outline" className="gap-2">
             <Link to="/marketing">
               <Megaphone className="h-4 w-4" />
@@ -1718,6 +1740,7 @@ export default function LeadLists() {
                       >
                         {list.name}
                       </button>
+                      {isDirectoryList(list) && <Badge variant="outline" className="ml-2">{audienceLabel(list.audience_type)}</Badge>}
                       {/* Static vs dynamic at a glance — a dynamic list keeps
                           absorbing new matches, so the distinction changes what
                           the assigner can expect from it. */}
@@ -1738,9 +1761,9 @@ export default function LeadLists() {
                             {list.list_type === "dynamic" ? (
                               <>
                                 <p className="font-medium">Auto-updating list</p>
-                                <p className="text-xs">{describeFilterDefinition(list.filter_definition)}</p>
+                                <p className="text-xs">{isDirectoryList(list) ? `All ${audienceLabel(list.audience_type).toLowerCase()}, across all statuses` : describeFilterDefinition(list.filter_definition)}</p>
                                 <p className="mt-1 text-xs text-muted-foreground">
-                                  New matching leads are added every 15 min
+                                  {isDirectoryList(list) ? "Directory read live before each campaign" : "New matching leads are added every 15 min"}
                                   {list.last_refreshed_at && ` · last refreshed ${new Date(list.last_refreshed_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`}
                                 </p>
                               </>
@@ -1820,7 +1843,7 @@ export default function LeadLists() {
                         <Button size="sm" variant="outline" className="h-8 w-8 p-0" title="Members" onClick={() => openPreview(list)}>
                           <Users className="h-3.5 w-3.5" />
                         </Button>
-                        {canSelfAssign && (
+                        {canSelfAssign && !isDirectoryList(list) && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -1840,15 +1863,15 @@ export default function LeadLists() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onSelect={() => openAssignmentReport(list)}>
+                            {!isDirectoryList(list) && <DropdownMenuItem onSelect={() => openAssignmentReport(list)}>
                               <Phone className="mr-2 h-4 w-4" /> Calling Report
-                            </DropdownMenuItem>
+                            </DropdownMenuItem>}
                             <DropdownMenuItem asChild>
                               <Link to={`/marketing?listId=${list.id}`}>
                                 <Megaphone className="mr-2 h-4 w-4" /> New Campaign
                               </Link>
                             </DropdownMenuItem>
-                            {list.list_type === "dynamic" && canAssignLists && (
+                            {list.list_type === "dynamic" && !isDirectoryList(list) && canAssignLists && (
                               <DropdownMenuItem
                                 onSelect={(e) => { e.preventDefault(); refreshDynamicList(list); }}
                                 disabled={refreshingListId === list.id}
@@ -2366,7 +2389,11 @@ export default function LeadLists() {
               <OrbLoader state="searching" />
             </div>
           ) : (
-            <div className="rounded-xl border border-border overflow-hidden">
+            <div className="space-y-3">
+              {previewList && isDirectoryList(previewList) && <p className="text-sm text-muted-foreground">
+                {(['whatsapp', 'email'] as const).map(channel => `${channel === 'whatsapp' ? 'WhatsApp' : 'Email'}: ${filterCampaignRecipients(previewMembers.map(m => ({ id: m.target_id, name: m.name, phone: m.phone, email: m.email, directoryKind: m.kind })), { channel, excludeCold: false }).preview}`).join(' · ')}
+              </p>}
+              <div className="rounded-xl border border-border overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/40">
@@ -2389,7 +2416,7 @@ export default function LeadLists() {
                             {m.stage}
                           </Badge>
                         ) : (
-                          <Badge variant="secondary" className="text-[10px]">Marketing contact</Badge>
+                          <Badge variant="secondary" className="text-[10px]">{m.kind === "consultant" ? "Consultant" : m.kind === "academic_partner" ? "Academic partner" : "Marketing contact"}</Badge>
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">
@@ -2414,6 +2441,7 @@ export default function LeadLists() {
                   Showing first {previewMembers.length} of {previewList.member_count} members.
                 </div>
               )}
+              </div>
             </div>
           )}
         </DialogContent>

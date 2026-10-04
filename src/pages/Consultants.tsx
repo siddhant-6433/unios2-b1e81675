@@ -1,3 +1,4 @@
+import { CreateCommunicationListButton } from '@/components/leads/CreateCommunicationListButton';
 import { PageLoader } from "@/components/ui/page-loader";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect } from "react";
@@ -574,7 +575,7 @@ const Consultants = () => {
           <h1 className="text-2xl font-bold text-foreground">Consultants</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage admission consultants & referral agents</p>
         </div>
-        <Button onClick={() => setShowForm(true)} className="gap-2"><Plus className="h-4 w-4" />Add Consultant</Button>
+        <div className="flex flex-wrap gap-2"><CreateCommunicationListButton audience="consultants" /><Button onClick={() => setShowForm(true)} className="gap-2"><Plus className="h-4 w-4" />Add Consultant</Button></div>
       </div>
 
       {canSeeRequests && (

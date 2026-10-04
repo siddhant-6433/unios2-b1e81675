@@ -1,3 +1,4 @@
+import { fetchCampaignListMembers, fetchFailedCampaignRecipients, fetchLastWhatsAppMarketingAtByRecipients, campaignTarget, withLiveDirectoryCounts, audienceLabel } from '@/lib/directoryCommunicationLists';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -38,7 +39,6 @@ import {
   DEFAULT_QUIET_DAYS,
   filterCampaignRecipients,
 } from "@/lib/campaignEligibility";
-import { fetchLastWhatsAppMarketingAtByLeadIds, fetchListMembers } from "@/lib/campaignEligibilityFetch";
 import { campaignHealth, campaignProgressPct, countdownTo, isCampaignTerminal } from "@/lib/campaignHealth";
 import {
   campaignEngagedInboxPath,
@@ -140,6 +140,7 @@ type FunnelRow = {
 };
 
 interface LeadList {
+  audience_type?: string;
   id: string;
   name: string;
   member_count: number;
@@ -1169,7 +1170,7 @@ export default function Marketing() {
         for (let from = 0; ; from += PAGE) {
           const { data, error } = await supabase
             .from("lead_lists" as any)
-            .select("id,name,member_count")
+            .select("id,name,member_count,audience_type")
             .order("created_at", { ascending: false })
             .range(from, from + PAGE - 1);
           if (error) { console.error("Fetch lead lists failed:", error); break; }
@@ -1177,7 +1178,7 @@ export default function Marketing() {
           all.push(...page);
           if (page.length < PAGE) break;
         }
-        return all;
+        return withLiveDirectoryCounts(supabase, all);
       };
       const [nextLists, templatesRes] = await Promise.all([
         fetchAllLists(),
@@ -1331,7 +1332,7 @@ export default function Marketing() {
    * away today, plus the suppression figure.
    */
   const resolveWhatsAppAudience = useCallback(async (listId: string) => {
-    const members = await fetchListMembers(
+    const members = await fetchCampaignListMembers(
       supabase as any,
       listId,
       "lead_id, contact_id, leads(id, phone, stage, shared_with_nimt), marketing_contacts(id, phone, opted_out, promoted_lead_id)",
@@ -1365,9 +1366,9 @@ export default function Marketing() {
     const quietDays = waQuietDaysEnabled ? Math.max(0, Number(waQuietDays) || DEFAULT_QUIET_DAYS) : 0;
     let lastMarketingAtByLeadId = new Map<string, string>();
     if (quietDays > 0 && rawLeads.length > 0) {
-      lastMarketingAtByLeadId = await fetchLastWhatsAppMarketingAtByLeadIds(
+      lastMarketingAtByLeadId = await fetchLastWhatsAppMarketingAtByRecipients(
         supabase as any,
-        rawLeads.map((lead) => lead.id),
+        rawLeads,
         Math.max(quietDays, 30),
       );
     }
@@ -1387,13 +1388,19 @@ export default function Marketing() {
   const [previewing, setPreviewing] = useState(false);
 
   // Reset whenever anything that changes the audience changes.
-  useEffect(() => { setAudiencePreview(null); }, [selectedListId, waExcludeCold, waQuietDaysEnabled, waQuietDays]);
+  useEffect(() => { setAudiencePreview(null); }, [selectedListId, campaignChannel, waExcludeCold, waQuietDaysEnabled, waQuietDays]);
 
   const previewAudience = useCallback(async () => {
     if (!selectedList) return;
     setPreviewing(true);
     try {
-      const { eligibility, suppressedCount, memberCount } = await resolveWhatsAppAudience(selectedList.id);
+      const { eligibility, suppressedCount, memberCount } = campaignChannel === "email"
+        ? await (async () => {
+            const members = await fetchCampaignListMembers(supabase, selectedList.id, "lead_id, contact_id, leads(id, email, stage, shared_with_nimt), marketing_contacts(id, email, opted_out, promoted_lead_id)");
+            const recipients = members.map(member => campaignMemberToLead(member, "email")).filter(Boolean);
+            return { eligibility: filterCampaignRecipients(recipients, { channel: "email", excludeCold: false }), suppressedCount: 0, memberCount: members.length };
+          })()
+        : await resolveWhatsAppAudience(selectedList.id);
       setAudiencePreview({
         eligible: eligibility.counts.eligible,
         memberCount,
@@ -1409,7 +1416,7 @@ export default function Marketing() {
     } finally {
       setPreviewing(false);
     }
-  }, [selectedList, resolveWhatsAppAudience, toast]);
+  }, [selectedList, campaignChannel, resolveWhatsAppAudience, toast]);
 
   // Tier-aware pacing: the selected number's Meta rolling-24h unique-recipient
   // cap. A campaign whose audience exceeds it must be split across days, or Meta
@@ -1491,9 +1498,9 @@ export default function Marketing() {
       ? `scheduled for ${campaignScheduledAt}`
       : "now";
     const ok = window.confirm(
-      `Queue ${channelLabel} campaign to "${selectedList.name}" (~${selectedList.member_count} leads) ` +
+      `Queue ${channelLabel} campaign to "${selectedList.name}" (~${selectedList.member_count} recipients) ` +
       `using template "${templateLabel}", sending ${whenLabel}?\n\n` +
-      `Eligible leads (after DNC / quiet-day / scope filters) will receive this message. This cannot be undone.`,
+      `Eligible recipients (after destination and communication filters) will receive this message. This cannot be undone.`,
     );
     if (!ok) return;
     setLaunching(true);
@@ -1599,8 +1606,7 @@ export default function Marketing() {
             campaign_id: (campaign as any).id,
             // Exactly one of these is set — whatsapp_campaign_recipients_one_target
             // enforces it at the DB level.
-            lead_id: (lead as any).isContact ? null : lead.id,
-            contact_id: (lead as any).isContact ? lead.id : null,
+            ...campaignTarget(lead),
             phone: lead.phone,
             eligible_at: pacePlan.eligibleAtByIndex[index] || nextAttemptAt,
             ...(rotSender ? {
@@ -1619,7 +1625,7 @@ export default function Marketing() {
           throw new Error("Subject and body are required for custom email.");
         }
 
-        const members = await fetchListMembers(
+        const members = await fetchCampaignListMembers(
           supabase as any,
           selectedList.id,
           "lead_id, contact_id, leads(id, email, stage, shared_with_nimt), marketing_contacts(id, email, opted_out, promoted_lead_id)",
@@ -1663,8 +1669,7 @@ export default function Marketing() {
         const rows = valid.map((lead) => ({
           campaign_id: (campaign as any).id,
           // Exactly one target — email_campaign_recipients_one_target enforces it.
-          lead_id: (lead as any).isContact ? null : lead.id,
-          contact_id: (lead as any).isContact ? lead.id : null,
+          ...campaignTarget(lead),
           to_email: lead.email,
         }));
         for (let i = 0; i < rows.length; i += 500) {
@@ -1868,12 +1873,7 @@ export default function Marketing() {
         .single();
       if (origErr || !originalCampaign) throw origErr || new Error("Could not load original campaign.");
 
-      const { data: failedRows, error: failErr } = await supabase
-        .from(recipientTable as any)
-        .select(`lead_id,${destinationCol}`)
-        .eq("campaign_id", resendCampaign.id)
-        .eq("status", "failed");
-      if (failErr) throw failErr;
+      const failedRows = await fetchFailedCampaignRecipients(supabase, recipientTable, resendCampaign.id, destinationCol);
       if (!failedRows?.length) throw new Error("No failed recipients to resend.");
 
       const orig = originalCampaign as any;
@@ -1907,6 +1907,12 @@ export default function Marketing() {
       const recipientRows = (failedRows as any[]).map((row) => ({
         campaign_id: (newCampaign as any).id,
         lead_id: row.lead_id,
+        contact_id: row.contact_id,
+        consultant_id: row.consultant_id,
+        academic_partner_id: row.academic_partner_id,
+        recipient_name: row.recipient_name,
+        recipient_phone: row.recipient_phone,
+        recipient_email: row.recipient_email,
         [destinationCol]: row[destinationCol],
       }));
       for (let i = 0; i < recipientRows.length; i += 500) {
@@ -2128,7 +2134,7 @@ export default function Marketing() {
                             }}
                           >
                             <Check className={`mr-2 h-4 w-4 ${list.id === selectedListId ? "opacity-100" : "opacity-0"}`} />
-                            <span className="truncate">{list.name} ({list.member_count})</span>
+                            <span className="truncate">{list.name} {list.audience_type && list.audience_type !== "leads" ? `(${audienceLabel(list.audience_type)})` : ""} ({list.member_count})</span>
                           </CommandItem>
                         ))}
                       </CommandList>
@@ -2723,7 +2729,7 @@ export default function Marketing() {
             </div>
           )}
 
-          {campaignChannel === "whatsapp" && selectedList && (
+          {selectedList && (
             <div className="rounded-lg border border-border bg-muted/30 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs font-semibold uppercase text-muted-foreground">Audience</p>
@@ -2734,7 +2740,7 @@ export default function Marketing() {
               {!audiencePreview ? (
                 <p className="mt-2 text-xs text-muted-foreground">
                   {selectedList.member_count.toLocaleString("en-IN")} on this list. Check to see how many will
-                  actually receive it after DNC, opt-outs, quiet days and Meta suppression.
+                  qualify after destination validation and communication filters.
                 </p>
               ) : (
                 <div className="mt-2 space-y-1">
@@ -2747,10 +2753,11 @@ export default function Marketing() {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {[
+                      audiencePreview.counts.duplicate ? `${audiencePreview.counts.duplicate} duplicate destinations` : null,
                       audiencePreview.counts.dnc ? `${audiencePreview.counts.dnc} DNC` : null,
                       audiencePreview.suppressed ? `${audiencePreview.suppressed} suppressed (Meta cap)` : null,
                       audiencePreview.counts.recentContact ? `${audiencePreview.counts.recentContact} recently messaged` : null,
-                      audiencePreview.counts.noContact ? `${audiencePreview.counts.noContact} no phone` : null,
+                      audiencePreview.counts.noContact ? `${audiencePreview.counts.noContact} missing or invalid ${campaignChannel === "email" ? "email" : "phone"}` : null,
                       audiencePreview.counts.cold ? `${audiencePreview.counts.cold} cold` : null,
                       audiencePreview.counts.notShared ? `${audiencePreview.counts.notShared} not shared` : null,
                     ].filter(Boolean).join(" · ") || "No exclusions."}
