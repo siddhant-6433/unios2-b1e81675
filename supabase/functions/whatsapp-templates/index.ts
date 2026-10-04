@@ -10,6 +10,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -161,7 +162,7 @@ async function registerApprovedTemplateVisibilityRows(adminClient: any, template
     display_name: displayNameForTemplate(template.name),
     description: "Approved Meta template. Configure parameters before enabling if it uses variables.",
     category: String(template.category || "general").toLowerCase(),
-    visibility: 'hidden',
+    visibility: ["mirai_application_completion_reminder_v1", "mirai_document_request_v1"].includes(template.name) ? 'all' : 'hidden',
   }));
 
   if (rows.length > 0) {
@@ -315,6 +316,7 @@ function toTemplateRow(t: any, wabaId: string | null) {
     language: t.language || "en",
     category: t.category || null,
     status: normalizeTemplateStatus(t.status),
+    reject_reason: t.rejected_reason || null,
     header_format: ["TEXT", "IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat) ? headerFormat : "NONE",
     has_media: ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat),
     placeholder_count: placeholderCount,
@@ -414,10 +416,17 @@ Deno.serve(async (req) => {
       });
     }
 
+    const isServiceAutomation = await isServiceCaller(req, adminClient);
+    if (isServiceAutomation && !["sync", "create"].includes(action)) {
+      return new Response(JSON.stringify({ error: "Service automation may only sync or create templates" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     let userId: string | null = null;
     let role: unknown = "cron";
 
-    if (!isCron) {
+    if (!isCron && !isServiceAutomation) {
       const jwt = (authHeader || "").replace(/^Bearer\s+/i, "");
       const { data: authData, error: authError } = await adminClient.auth.getUser(jwt);
       userId = authData.user?.id || null;
@@ -672,7 +681,7 @@ Deno.serve(async (req) => {
       }
 
       const { rows, perWaba, skipped } = await collectRowsAcrossWabas(
-        targets, "id,name,status,category,language,components,quality_score",
+        targets, "id,name,status,category,language,components,quality_score,rejected_reason",
       );
 
       // Only bail when EVERY account failed. One dead token (e.g. a channel whose

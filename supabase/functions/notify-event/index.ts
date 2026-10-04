@@ -19,6 +19,8 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { applicationBase, miraiRolloutEnabled, resolveStoredPortal, MIRAI_APP_BASE } from "../_shared/mirai-brand.ts";
+import { buildApplyPortalUrl } from "../generate-apply-link/portal.ts";
 import { isServiceCaller } from "../_shared/service-auth.ts";
 
 const corsHeaders = {
@@ -99,6 +101,26 @@ Deno.serve(async (req) => {
     .eq("id", body.lead_id)
     .maybeSingle();
   if (leadErr || !lead) return json({ error: "lead not found" }, 404);
+
+  const miraiEnabled = miraiRolloutEnabled();
+  let ownershipApplicationId = typeof body.context?.application_id === "string" ? body.context.application_id : null;
+  if (miraiEnabled && !ownershipApplicationId && body.context?.payment_id) {
+    const { data: paymentOwner } = await db.from("lead_payments")
+      .select("application_id").eq("id", body.context.payment_id).eq("lead_id", lead.id).maybeSingle();
+    ownershipApplicationId = paymentOwner?.application_id || null;
+  }
+  let eventPortal: "nimt" | "beacon" | "mirai" | null = null;
+  if (miraiEnabled) {
+    try { eventPortal = await resolveStoredPortal(db, { leadId: lead.id, applicationId: ownershipApplicationId }); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : "Could not resolve notification ownership";
+      await db.from("lead_activities").insert({ lead_id: lead.id, type: "system", description: `Notification not sent: ${message}` });
+      return json({ error: message }, 503);
+    }
+  }
+  const applicantBase = eventPortal === "mirai" ? MIRAI_APP_BASE : CRM_BASE;
+  const applyBase = applicationBase(eventPortal || "nimt", APPLY_PORTAL_BASE, miraiEnabled,
+    Deno.env.get("MIRAI_APPLY_PORTAL_BASE") || undefined);
 
   // Once admission_no is issued the candidate is a student — counsellor /
   // team-leader involvement ends, only finance + super-admin (+ student
@@ -183,6 +205,7 @@ Deno.serve(async (req) => {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
         body: JSON.stringify({
           template_key, phone, lead_id: lead.id, params,
+          ...(ownershipApplicationId ? { application_id: ownershipApplicationId } : {}),
           ...(button_urls?.length ? { button_urls } : {}),
           ...(options?.header_document_url ? { header_document_url: options.header_document_url } : {}),
           ...(options?.header_document_filename ? { header_document_filename: options.header_document_filename } : {}),
@@ -191,6 +214,8 @@ Deno.serve(async (req) => {
       if (!res.ok) {
         const errBody = await res.text().catch(() => "");
         console.error(`[notify-event] whatsapp ${template_key}→${phone} failed ${res.status}:`, errBody.slice(0, 1000));
+        await db.from("lead_activities").insert({ lead_id: lead.id, type: "system",
+          description: `WhatsApp notification not delivered (${template_key}): ${errBody.slice(0, 500)}` });
         return false;
       }
       return true;
@@ -327,7 +352,9 @@ Deno.serve(async (req) => {
       expires_at: expires,
     }).select("token").single();
     const token = String(data?.token ?? "");
-    return { token, url: `${APPLY_PORTAL_BASE}?token=${token}` };
+    return { token, url: eventPortal === "mirai"
+      ? buildApplyPortalUrl(applyBase, "mirai", token)
+      : `${APPLY_PORTAL_BASE}?token=${token}` };
   };
 
   const courseName = (lead.courses as any)?.name || "your programme";
@@ -719,7 +746,7 @@ Deno.serve(async (req) => {
       // Best-effort student-portal-claim link so the welcome email links
       // to the right place (the existing trg_send_student_claim_link
       // posts the WhatsApp; we just want the URL for the email body).
-      let portalUrl = `${CRM_BASE}/student-portal`;
+      let portalUrl = `${applicantBase}/student`;
       try {
         const { data: tok } = await db
           .from("student_magic_tokens")
@@ -728,7 +755,7 @@ Deno.serve(async (req) => {
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
-        if (tok?.token) portalUrl = `${CRM_BASE}/student-portal?token=${tok.token}`;
+        if (tok?.token) portalUrl = `${applicantBase}/student?token=${tok.token}`;
       } catch { /* fallback to plain portal URL */ }
 
       // WhatsApp to student — the existing trg_send_student_claim_link

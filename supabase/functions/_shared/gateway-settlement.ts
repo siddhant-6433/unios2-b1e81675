@@ -458,7 +458,7 @@ export async function sendStudentReceipt(
   supabaseUrl: string,
   serviceKey: string,
   paymentId: string,
-  student: { phone: string | null; name: string | null; amount: number },
+  student: { id?: string; phone: string | null; name: string | null; amount: number },
 ) {
   const phone = student.phone;
   if (!phone) return;
@@ -484,7 +484,7 @@ export async function sendStudentReceipt(
       const res = await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-        body: JSON.stringify({ template_key, phone, params, ...(options || {}) }),
+        body: JSON.stringify({ template_key, phone, params, ...(student.id ? { student_id: student.id } : {}), ...(options || {}) }),
       });
       return res.ok;
     };
@@ -749,7 +749,7 @@ export async function settlePaymentLink(
     // lead-anchored and is the ONLY sender of the receipt-PDF on WhatsApp. Without
     // this, ~66% of fee-notify payers (lead_id=null) get a receipt minted but never
     // delivered. When present, we generate + WhatsApp the receipt directly here.
-    studentDirect?: { phone: string | null; name: string | null; amount: number } | null,
+    studentDirect?: { id?: string; phone: string | null; name: string | null; amount: number } | null,
   ) => {
     if (leadId) {
       // Lead path: notify-event handles the WhatsApp/email receipt relay.
@@ -849,7 +849,8 @@ export async function settlePaymentLink(
     const { data: linkRow } = await admin
       .from("payment_links").select("sent_to_phone").eq("id", link.id).maybeSingle();
     const receiptPhone = resolveReceiptPhone(linkRow?.sent_to_phone, student);
-    const studentDirect = { phone: receiptPhone, name: student?.name ?? null, amount: paidAmount };
+    const studentDirect = {
+      id: link.student_id, phone: receiptPhone, name: student?.name ?? null, amount: paidAmount };
 
     const { data: lp, error } = await admin
       .from("lead_payments")

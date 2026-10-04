@@ -10,6 +10,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildApplyPortalUrl, resolveApplyPortal } from "./portal.ts";
+import { applicationBase, miraiRolloutEnabled } from "../_shared/mirai-brand.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -154,7 +155,8 @@ Deno.serve(async (req) => {
     }
 
     const portal = resolveApplyPortal(lead, applications || [], { isMiraiInstitution });
-    const url = buildApplyPortalUrl(PORTAL_BASE, portal, tokenRow.token);
+    const base = applicationBase(portal, PORTAL_BASE, miraiRolloutEnabled(), Deno.env.get("MIRAI_APPLY_PORTAL_BASE") || undefined);
+    const url = buildApplyPortalUrl(base, portal, tokenRow.token);
     return json({ url, token: tokenRow.token, expires_at: tokenRow.expires_at, portal });
   } catch (err: any) {
     console.error("[generate-apply-link]", err);

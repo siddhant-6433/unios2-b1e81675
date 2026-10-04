@@ -1,4 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { MIRAI_PHONE_NUMBER_ID, miraiRolloutEnabled, resolveStoredPortal } from "../_shared/mirai-brand.ts";
+import { miraiTemplateForKey, miraiButtonValues, validateMiraiTemplate } from "../_shared/mirai-templates.ts";
 import { sendWhatsAppTemplate, type WhatsAppChannelRoute } from "../_shared/whatsapp-channel.ts";
 import {
   expectedReplyTypeForTemplate,
@@ -634,6 +636,55 @@ Deno.serve(async (req) => {
       );
     }
 
+    const requestedMiraiTemplate = miraiTemplateForKey(template_key);
+    const explicitMiraiTemplate = requestedMiraiTemplate?.name === template_key;
+    let miraiTemplate: ReturnType<typeof miraiTemplateForKey>;
+    let miraiSender: { waba_id: string; meta_phone_number_id: string } | null = null;
+    const rejectMiraiSend = async (error: string, status = 503) => {
+      await recordOutboundConversationAction(admin, {
+        kind: "templateSend", phone, leadId: lead_id || null,
+        content: `Mirai WhatsApp not sent (${template_key}): ${error}`,
+        messageType: "template", templateKey: template_key, status: "failed", userId: user.id,
+        sendResult: { ok: false, provider: "meta", messageId: null, status,
+          businessPhoneNumberId: MIRAI_PHONE_NUMBER_ID, businessNumber: null, raw: { error: { message: error } }, error },
+        statusError: { http_status: status, error: { message: error }, stage: "mirai_preflight" },
+        outboundKind: "template", expectedReplyType: expectedReplyTypeForTemplate(template_key),
+        responsePolicy: responsePolicyForTemplate(template_key),
+        activityDescription: lead_id ? `Mirai WhatsApp not sent (${template_key}): ${error}` : null,
+      });
+      return new Response(JSON.stringify({ error }), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    };
+    if (explicitMiraiTemplate && !miraiRolloutEnabled()) return await rejectMiraiSend("Mirai rollout is not enabled; template approval and launch checks are pending");
+    if (requestedMiraiTemplate && miraiRolloutEnabled()) {
+      let ownerPortal: string;
+      try {
+        ownerPortal = await resolveStoredPortal(admin, {
+          leadId: lead_id, studentId: requestBody.student_id, applicationId: requestBody.application_id,
+        });
+      } catch (error) {
+        return await rejectMiraiSend(error instanceof Error ? error.message : "Could not verify institution ownership");
+      }
+      if (explicitMiraiTemplate && ownerPortal !== "mirai") return await rejectMiraiSend("This saved application or student does not belong to Mirai", 400);
+      if (ownerPortal === "mirai") {
+        miraiTemplate = requestedMiraiTemplate;
+        const { data: sender, error: senderError } = await admin.from("whatsapp_channels")
+          .select("waba_id, meta_phone_number_id").eq("provider", "meta")
+          .eq("is_active", true).eq("meta_phone_number_id", MIRAI_PHONE_NUMBER_ID).maybeSingle();
+        if (senderError || !sender?.waba_id) return await rejectMiraiSend("Mirai's active sender and WABA must be configured before sending");
+        miraiSender = sender;
+        // Ignore sender overrides for lifecycle messages: stored ownership wins.
+        template_key = miraiTemplate.name;
+        try { button_urls = miraiButtonValues(miraiTemplate, button_urls); }
+        catch (error) { return await rejectMiraiSend(error instanceof Error ? error.message : "Invalid portal button", 400); }
+        if (miraiTemplate.button?.url.includes("{{1}}") && (button_urls?.length !== 1 || !button_urls[0]?.trim())) {
+          return await rejectMiraiSend("Mirai template requires one saved portal token for its URL button", 400);
+        }
+        if (miraiTemplate.header === "DOCUMENT" && (!header_document_url || header_image_url || header_video_url)) {
+          return await rejectMiraiSend("Mirai document template requires the applicant's generated PDF; approval samples cannot be sent", 400);
+        }
+      }
+    }
+
     let dynamicTemplateBody: string | null = null;
     // Real indexes of dynamic URL buttons for a catalog template (empty for the
     // hardcoded TEMPLATES path, which keeps its by-array-position mapping).
@@ -647,11 +698,11 @@ Deno.serve(async (req) => {
     if (!templateDef) {
       // A template can exist in multiple languages (e.g. en + hi) — maybeSingle
       // would error on >1 row and read as "Unknown template". Take one, English first.
-      const { data: dynamicRows, error: dynamicErr } = await admin
-        .from("whatsapp_templates")
+      let dynamicQuery = admin.from("whatsapp_templates")
         .select("name, status, placeholder_count, has_media, header_format, components, language, waba_id")
-        .eq("name", template_key)
-        .eq("status", "APPROVED")
+        .eq("name", template_key).eq("status", "APPROVED");
+      if (miraiSender) dynamicQuery = dynamicQuery.eq("waba_id", miraiSender.waba_id).eq("language", "en");
+      const { data: dynamicRows, error: dynamicErr } = await dynamicQuery
         .order("language", { ascending: true })
         .limit(1);
       const dynamicTemplate = (dynamicRows as any[] | null)?.[0] || null;
@@ -661,6 +712,11 @@ Deno.serve(async (req) => {
       // below), a media header falls back to whatsapp_template_settings
       // media_url / the passed header_image_url, and dynamic-URL-button suffixes
       // come from the caller's button_urls[] (validated just below).
+      if (miraiTemplate && miraiSender) {
+        const invalid = validateMiraiTemplate(miraiTemplate, dynamicTemplate, miraiSender.waba_id);
+        if (dynamicErr || invalid) return await rejectMiraiSend(invalid || "Could not verify approved Mirai template");
+        if (!Array.isArray(params) || params.length !== miraiTemplate.params.length) return await rejectMiraiSend(`Mirai template expects ${miraiTemplate.params.length} body parameters`, 400);
+      }
       if (!dynamicTemplate) {
         return new Response(
           JSON.stringify({ error: `Unknown template: ${template_key}` }),
@@ -768,7 +824,7 @@ Deno.serve(async (req) => {
       .select("media_url")
       .eq("template_key", template_key)
       .maybeSingle();
-    const settingsMediaUrl = (templateSettings as any)?.media_url?.trim() || null;
+    const settingsMediaUrl = miraiTemplate ? null : (templateSettings as any)?.media_url?.trim() || null;
 
     // Mutable so the settings fallback below can fill whichever header the
     // template actually needs.
@@ -899,7 +955,10 @@ Deno.serve(async (req) => {
     const requestedProvider = provider === "plivo" || provider === "meta" ? provider : null;
     const requestedBusinessNumber = typeof business_number === "string" ? business_number.replace(/[^0-9]/g, "") : null;
     const requestedPhoneNumberId = typeof business_phone_number_id === "string" ? business_phone_number_id : null;
-    const sendResult = await sendWhatsAppTemplate(admin as any, requestedProvider
+    const sendResult = await sendWhatsAppTemplate(admin as any, miraiSender
+      ? { provider: "meta", route: channelRoute, wabaId: miraiSender.waba_id,
+          businessPhoneNumberId: miraiSender.meta_phone_number_id, strictSender: true }
+      : requestedProvider
       ? {
         provider: requestedProvider,
         route: requestedProvider === "plivo" ? "plivo_admissions" : channelRoute,
@@ -913,6 +972,12 @@ Deno.serve(async (req) => {
       name: templateDef.name,
       language: templateLanguage,
       components,
+    }).catch(error => {
+      if (!miraiSender) throw error;
+      const message = error instanceof Error ? error.message : "Mirai sender became unavailable";
+      return { ok: false, provider: "meta" as const, messageId: null,
+        businessPhoneNumberId: miraiSender.meta_phone_number_id, businessNumber: null,
+        status: 503, raw: { error: { message } }, error: message };
     });
     const waResult = sendResult.raw as { error?: { message?: string }; messages?: { id?: string }[] } | null;
     const phoneNumberId = sendResult.businessPhoneNumberId;
@@ -976,7 +1041,7 @@ Deno.serve(async (req) => {
       student_services_tat: "Hi {{1}}, a Student Services request has been assigned to you.\n\nRequest: {{2}}\nService: {{3}}\nStudent: {{4}}\nCourse / Batch: {{5}}\nDue by: {{6}}\n\nPlease action it before the due date. Open the admin panel to proceed.",
     };
 
-    let readableContent = typeof rendered_template?.body === "string" && rendered_template.body.trim()
+    let readableContent = miraiTemplate ? miraiTemplate.body : typeof rendered_template?.body === "string" && rendered_template.body.trim()
       ? rendered_template.body.trim()
       : TEMPLATE_TEXTS[template_key] || dynamicTemplateBody || `[Template: ${template_key}]`;
     if (params && Array.isArray(params)) {
