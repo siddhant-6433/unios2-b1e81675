@@ -8,6 +8,8 @@ Counsellors can also open a prefilled chat in their logged-in WhatsApp Web sessi
 
 Configure these Supabase Edge Function secrets. Each route falls back to `WHATSAPP_API_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID` if the route-specific secret is not set.
 
+The gated Mirai lifecycle path is an exception: saved institution ownership selects Mirai's exact active registry sender and approved template WABA, and a missing match fails without another sender or WABA retry. See the [Mirai rollout guide](mirai-rollout.md) for approval and activation checks; this path remains disabled until those checks pass.
+
 | Route | Secrets | Current send paths |
 | --- | --- | --- |
 | OTP | `WHATSAPP_OTP_API_TOKEN`, `WHATSAPP_OTP_PHONE_NUMBER_ID` | `whatsapp-otp` login OTPs |

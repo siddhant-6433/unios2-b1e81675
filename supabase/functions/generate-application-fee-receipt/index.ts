@@ -5,6 +5,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PDFDocument, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
 import { formatPersonName } from "../_shared/personName.ts";
+import { applicationReceiptBrand } from "../_shared/application-receipt-brand.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,7 +25,7 @@ const LOGO_BY_SLUG: Record<string, string> = {
   nimt_grn: "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/nimt-logo.png",
   nimt_he:  "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/nimt-logo.png",
   beacon:   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/beacon-logo.png",
-  mirai:    "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/mirai-logo.png",
+  mirai:    "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/mirai-logo-transparent.png",
 };
 
 const GATEWAY_LABELS: Record<string, string> = {
@@ -441,7 +442,7 @@ Deno.serve(async (req) => {
         .is("application_id", null)
         .order("created_at", { ascending: false })
         .limit(2);
-      if ((rows || []).length === 1 && !appIdFromNotes(rows[0].notes)) {
+      if (rows?.length === 1 && !appIdFromNotes(rows[0].notes)) {
         payment = rows[0];
         await admin
           .from("lead_payments")
@@ -472,13 +473,13 @@ Deno.serve(async (req) => {
     const { data: branding } = await admin.rpc("lead_branding" as any, {
       _lead_id: app.lead_id, _doc_type: "receipt",
     });
-    const brandingResolved: Branding = {
+    const brandingResolved: Branding = await applicationReceiptBrand(admin, app, {
       slug:          branding?.slug ?? null,
       name:          branding?.name || "NIMT Educational Institutions",
       contact_email: branding?.contact_email || "admissions@nimt.ac.in",
       website:       branding?.website || null,
       address:       branding?.address || null,
-    };
+    });
     const brandHex = (brandingResolved.slug && BRAND_BY_SLUG[brandingResolved.slug]) || "#0035C5";
     const logoUrl  = (brandingResolved.slug && LOGO_BY_SLUG[brandingResolved.slug]) || LOGO_BY_SLUG.nimt;
 

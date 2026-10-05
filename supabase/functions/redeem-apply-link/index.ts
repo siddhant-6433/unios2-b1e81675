@@ -19,7 +19,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { resolveApplyPortal } from "../generate-apply-link/portal.ts";
+import { miraiRolloutEnabled, resolveStoredPortal } from "../_shared/mirai-brand.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -49,7 +49,21 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const db = createClient(supabaseUrl, serviceRoleKey);
 
-    const { token } = await req.json();
+    const { token, resolve_only, phone: lookupPhone, application_id } = await req.json();
+    // The existing applicant RPC exposes saved applications to the verified
+    // phone flow. Resolve only rows that RPC allows; return no personal data.
+    if (resolve_only === true) {
+      if (typeof lookupPhone !== "string" || typeof application_id !== "string") {
+        return json({ error: "Saved application and phone required" }, 400);
+      }
+      const { data: allowed, error: accessError } = await db.rpc("get_applicant_applications_by_phone", {
+        _phone: normalizePhone(lookupPhone),
+      });
+      const application = (allowed || []).find((app: any) => app.application_id === application_id);
+      if (accessError || !application?.lead_id) return json({ error: "Application not available" }, 404);
+      const portal = await resolveStoredPortal(db, { leadId: application.lead_id, applicationId: application_id });
+      return json({ portal, mirai_rollout_enabled: miraiRolloutEnabled() });
+    }
     if (!token) return json({ error: "token required" }, 400);
 
     const { data: row, error } = await db.from("apply_magic_tokens")
@@ -71,15 +85,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const name = lead?.name || "Applicant";
 
-    const { data: applications, error: appErr } = await db
-      .from("applications")
-      .select("flags, program_category, course_selections")
-      .eq("lead_id", row.lead_id)
-      .order("created_at", { ascending: false })
-      .limit(5);
-    if (appErr) return json({ error: appErr.message }, 500);
-
-    const portal = resolveApplyPortal(lead, applications || []);
+    const portal = await resolveStoredPortal(db, { leadId: row.lead_id });
 
     let onBehalf: any = null;
     if (row.mode === "academic_partner_on_behalf") {
@@ -115,7 +121,7 @@ Deno.serve(async (req) => {
       use_count: (row.use_count || 0) + 1,
     }).eq("token", row.token);
 
-    return json({ phone, name, lead_id: row.lead_id, portal, on_behalf: onBehalf });
+    return json({ phone, name, lead_id: row.lead_id, portal, on_behalf: onBehalf, mirai_rollout_enabled: miraiRolloutEnabled() });
   } catch (err: any) {
     console.error("[redeem-apply-link]", err);
     return json({ error: err.message }, 500);

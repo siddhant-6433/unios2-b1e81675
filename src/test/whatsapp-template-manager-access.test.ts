@@ -66,9 +66,10 @@ describe("WhatsApp template manager access", () => {
     expect(templateManager).toContain('onConflict: "template_key"');
   });
 
-  it("auto-registers newly approved Meta templates with visibility disabled", () => {
+  it("auto-registers approved templates hidden except the two Mirai staff actions", () => {
     expect(templateFunction).toContain("registerApprovedTemplateVisibilityRows");
-    expect(templateFunction).toContain("visibility: 'hidden'");
+    expect(templateFunction).toContain('["mirai_application_completion_reminder_v2", "mirai_document_request_v1"].includes(template.name)');
+    expect(templateFunction).toContain("? 'all' : 'hidden'");
     expect(templateFunction).toContain("visibility_registered");
     expect(templateFunction).toContain("normalizeTemplateStatus(template.status) === \"APPROVED\"");
   });

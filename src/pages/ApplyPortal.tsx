@@ -25,6 +25,8 @@ import { ReviewSubmit } from "@/components/apply/ReviewSubmit";
 import { SiblingDetails } from "@/components/apply/SiblingDetails";
 import { ParentQuestionnaire } from "@/components/apply/ParentQuestionnaire";
 import { PortalProvider, usePortal } from "@/components/apply/PortalContext";
+import { canonicalApplicationUrl } from "@/lib/siteBranding";
+import { selectSavedApplications } from "@/lib/savedApplicationRouting";
 import { TokenFeePanel } from "@/components/applicant/TokenFeePanel";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
@@ -130,13 +132,20 @@ function OtpLogin({
         if (data?.error) throw new Error(data.error);
         if (!data?.phone) throw new Error("Invalid link response");
 
-        // Strip the token from the URL so refreshing doesn't try to re-redeem.
-        url.searchParams.delete("token");
-        window.history.replaceState({}, "", url.toString());
-
         const portalId = typeof data.portal === "string" && data.portal in PORTAL_CONFIGS
           ? data.portal as PortalId
           : null;
+        // Resolve ownership before authenticating or removing the token.
+        // Both deployment gates must be open to redirect existing links.
+        const canonical = portalId && canonicalApplicationUrl(url.toString(), portalId,
+          data.mirai_rollout_enabled === true && import.meta.env.VITE_MIRAI_ROLLOUT_ENABLED === "true");
+        if (canonical) {
+          window.location.replace(canonical);
+          return;
+        }
+        // Strip the token from the URL so refreshing doesn't try to re-redeem.
+        url.searchParams.delete("token");
+        window.history.replaceState({}, "", url.toString());
 
         // Mirror the OTP login flow: just hand phone+name to onAuthenticated.
         // The apply portal is session-less for applicants — RLS on `applications`
@@ -315,13 +324,11 @@ function OtpLogin({
 
     if (portal.id === "mirai") {
       return (
-        <div className={`overflow-hidden rounded-2xl bg-[#77966d] shadow-sm ring-1 ring-white/15 ${compact ? "h-16 w-16" : "h-28 w-28 xl:h-32 xl:w-32"}`}>
-          <img
-            src={portal.logo}
-            alt={portal.name}
-            className="h-full w-full scale-[1.2] object-cover object-center"
-          />
-        </div>
+        <img
+          src={portal.logo}
+          alt={portal.name}
+          className={`${compact ? "h-16" : "h-28 xl:h-32 brightness-0 invert"} w-auto object-contain`}
+        />
       );
     }
 
@@ -1758,20 +1765,6 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
     if (resolvedPortalId && resolvedPortalId !== portal.id) {
       onPortalResolved?.(resolvedPortalId);
     }
-    setPhone(phoneVal);
-    setLeadName(name);
-    setOnBehalfContext(onBehalf);
-    setAuthed(true);
-    // Persist so refreshes don't log the user out (TTL: 7 days)
-    try {
-      localStorage.setItem(`portal_auth_${activePortal.id}`, JSON.stringify({
-        phone: phoneVal,
-        name,
-        onBehalf,
-        expiresAt: Date.now() + SESSION_TTL_MS,
-      }));
-    } catch { /* storage quota exceeded or private mode — non-fatal */ }
-
     // Fetch ALL applications for this phone (any status) so already-submitted
     // / under-review / approved apps load correctly. The submitted-state UI
     // (line ~1081) handles displaying them — without this we'd silently start
@@ -1785,38 +1778,53 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
       { _phone: phoneVal }
     );
 
-    // Pick apps belonging to this portal. There can be multiple — e.g. a
-    // submitted app + a new draft.
-    //
-    // Three cases:
-    //   1) flags includes `portal:${portal.id}` → match
-    //   2) flags has NO `portal:*` entry at all → legacy/test/manually-inserted
-    //      app from before the flagging logic existed; show it (better to surface
-    //      the existing submitted application than silently start a fresh draft
-    //      on top of it).
-    //   3) flags has a `portal:*` for a DIFFERENT portal → don't match.
-    const portalApps = (existingApps || []).filter(app => {
-      const flags = (app.flags as string[]) || [];
-      if (onBehalf && app.lead_id !== onBehalf.lead_id) return false;
-      if (flags.includes(`portal:${activePortal.id}`)) return true;
-      const hasAnyPortalFlag = flags.some((f: string) => f.startsWith("portal:"));
-      return !hasAnyPortalFlag;
-    });
-
-    // Self-heal: any matched app whose flags don't yet carry the portal tag
-    // gets it added so future visits don't rely on the unflagged-fallback
-    // branch above. Fire-and-forget — the dashboard render doesn't depend on
-    // this completing. RLS on applications permits anon writes scoped by phone.
-    const needsTag = portalApps.filter(a => {
-      const f = (a.flags as string[]) || [];
-      return !f.includes(`portal:${activePortal.id}`);
-    });
-    if (needsTag.length > 0) {
-      void Promise.all(needsTag.map(a => {
-        const merged = [...((a.flags as string[]) || []), `portal:${activePortal.id}`];
-        return supabase.from("applications").update({ flags: merged }).eq("id", a.id);
-      })).catch(e => console.error("portal-flag self-heal failed:", e));
+    // Resolve saved ownership before rendering any legacy application. The
+    // server checks the same application/lead phone scope as the existing RPC.
+    const scopedApps = (existingApps || []).filter(app => !onBehalf || app.lead_id === onBehalf.lead_id);
+    let portalApps: any[];
+    if (import.meta.env.VITE_MIRAI_ROLLOUT_ENABLED === "true") {
+      try {
+        const selection = await selectSavedApplications(scopedApps, activePortal.id, async application => {
+          const { data, error } = await supabase.functions.invoke("redeem-apply-link", {
+            body: { resolve_only: true, phone: phoneVal, application_id: application.application_id },
+          });
+          if (error || !data?.portal || !(data.portal in PORTAL_CONFIGS)) {
+            throw new Error("Could not verify the saved application's institution. Please try again.");
+          }
+          return data;
+        });
+        const target = selection.redirectPortal && canonicalApplicationUrl(window.location.href,
+          selection.redirectPortal, true);
+        if (target) {
+          window.location.replace(target);
+          return;
+        }
+        portalApps = selection.applications;
+      } catch (error) {
+        toast({ title: "Unable to open your saved application",
+          description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+        return;
+      }
+    } else {
+      portalApps = scopedApps.filter(app => {
+        const flags = (app.flags as string[]) || [];
+        return flags.includes(`portal:${activePortal.id}`) || !flags.some(flag => flag.startsWith("portal:"));
+      });
     }
+    // Never self-tag legacy applications from the visiting hostname.
+    setPhone(phoneVal);
+    setLeadName(name);
+    setOnBehalfContext(onBehalf);
+    setAuthed(true);
+    // Persist so refreshes don't log the user out (TTL: 7 days)
+    try {
+      localStorage.setItem(`portal_auth_${activePortal.id}`, JSON.stringify({
+        phone: phoneVal,
+        name,
+        onBehalf,
+        expiresAt: Date.now() + SESSION_TTL_MS,
+      }));
+    } catch { /* storage quota exceeded or private mode — non-fatal */ }
 
     const forceStartNew = Boolean(onBehalf) && new URLSearchParams(window.location.search).get("start_new") === "1";
     if (forceStartNew) {

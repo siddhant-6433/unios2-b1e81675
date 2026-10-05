@@ -10,6 +10,7 @@
 // (a genuine free amount). For purpose='fee_due' we DO trust the passed amount but
 // stamp it as the due — the pay-link settlement re-validates at settle time.
 
+import { MIRAI_APP_BASE, miraiRolloutEnabled, resolveStoredPortal } from "../_shared/mirai-brand.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -348,6 +349,10 @@ Deno.serve(async (req) => {
       effectiveNote = [note, `Breakup — ${breakup}`].filter(Boolean).join(" · ").slice(0, 500);
     }
 
+    const ownerPortal = miraiRolloutEnabled()
+      ? await resolveStoredPortal(admin, { leadId, studentId }) : null;
+    const payerBase = ownerPortal === "mirai" ? MIRAI_APP_BASE : publicBase;
+
     // --- Insert the link row (service role; amount is authoritative) ----------
     const { data: linkRow, error: insErr } = await admin
       .from("payment_links")
@@ -369,7 +374,7 @@ Deno.serve(async (req) => {
       .single();
     if (insErr || !linkRow) return json({ error: insErr?.message || "Failed to create link" }, 500);
 
-    const ourUrl = `${publicBase.replace(/\/$/, "")}/pay/${linkRow.token}`;
+    const ourUrl = `${payerBase.replace(/\/$/, "")}/pay/${linkRow.token}`;
     let gateway: string | null = null;
     let gatewayLinkId: string | null = null;
     let shortUrl: string | null = null;
@@ -457,6 +462,7 @@ Deno.serve(async (req) => {
           template_key: "payment_link_request",
           phone: payerPhone,
           ...(leadId ? { lead_id: leadId } : {}),
+          ...(studentId ? { student_id: studentId } : {}),
           params: [payerName, purposeLabel, amount.toLocaleString("en-IN"), validTill],
           button_urls: [linkRow.token],
         }),

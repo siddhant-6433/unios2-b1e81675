@@ -59,6 +59,7 @@
 	          "apply.nimt.ac.in": "GTM-NHC65VZ",
 	          "miraischool.in": "GTM-WL5MTC3D",
           "www.miraischool.in": "GTM-WL5MTC3D",
+          "uni.miraischool.in": "GTM-WL5MTC3D",
           "school.nimt.ac.in": "GTM-M9J8RJ7V",
           "seralislab.com": "GTM-NN2LQW8T",
           "www.seralislab.com": "GTM-NN2LQW8T"
@@ -109,7 +110,7 @@
         var path = window.location.pathname;
         var inApply =
           host === "apply.nimt.ac.in" ||
-          (host === "uni.nimt.ac.in" && path.indexOf("/apply") === 0);
+          ((host === "uni.nimt.ac.in" || host === "uni.miraischool.in") && /^\/apply(?:\/|$)/.test(path));
         if (!inApply) return;
 
         // ── Google Analytics ──
@@ -134,10 +135,12 @@
           beacon: "511947283685367",
           mirai:  "1461957365199748"
         };
-        var portal = "nimt";
+        var portal = host === "uni.miraischool.in" ? "mirai" : "nimt";
         var segs = path.split("/").filter(function (x) { return x; });
         var last = (segs[segs.length - 1] || "").toLowerCase();
-        if (PIXELS[last]) {
+        if (host === "uni.miraischool.in") {
+          portal = "mirai";
+        } else if (PIXELS[last]) {
           portal = last;
         } else {
           var qp = (new URLSearchParams(window.location.search).get("portal") || "").toLowerCase();

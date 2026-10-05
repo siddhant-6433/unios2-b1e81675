@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.3.0] - 2026-10-05
+
+### Added
+
+- Serve Mirai Uni branding by hostname with a transparent logo, accessible green theme, and existing account and role access.
+- Route saved applications and generate admissions, payment and student invitation links from institution ownership, preserving existing NIMT and Beacon routes.
+- Add 20 Mirai lifecycle WhatsApp templates with exact sender isolation, approval checks and staff-visible delivery failures.
+- Add rollout gates and a deployment checklist; Mirai activation remains disabled until provider checks, template approvals and controlled delivery pass.
+
 ## [0.2.2.1] - 2026-10-04
 
 ### Added

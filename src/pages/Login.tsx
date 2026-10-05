@@ -11,8 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { PhoneInput, parsePhone } from "@/components/ui/phone-input";
 import { ButtonOrb, OrbLoader } from "@/components/ui/thinking-orb";
 import { COUNTRIES } from "@/components/apply/countries";
-import uniosLogo from "@/assets/unios-logo.png";
-import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
+import { useSiteBrand } from "@/contexts/SiteBrandContext";
 
 const WhatsAppIcon = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor">
@@ -63,6 +62,7 @@ const readFunctionErrorMessage = async (error: unknown) => {
 const isEmailLike = (value: string) => /\S+@\S+\.\S+/.test(value.trim());
 
 const Login = () => {
+  const brand = useSiteBrand();
   const { session, loading, role, roleLoaded } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -456,13 +456,13 @@ const Login = () => {
       {/* Left panel — clean brand panel */}
       <div className="hidden lg:flex lg:w-1/2 bg-primary items-center justify-center p-12 relative">
         <div className="absolute top-6 left-6">
-          <img src={nimtLogo} alt="NIMT" width="64" height="32" className="h-8 w-auto brightness-0 invert opacity-80" />
+          <img src={brand.institutionLogo} alt={brand.isMirai ? "Mirai School" : "NIMT"} width="64" height="32" className={`${brand.isMirai ? "h-12" : "h-8"} brightness-0 invert w-auto opacity-80`} />
         </div>
         <div className="max-w-md text-center">
-          <img src={uniosLogo} alt="UniOs" width="128" height="128" className="h-32 w-32 mx-auto mb-8 object-contain brightness-0 invert" />
-          <h1 className="text-3xl font-bold text-primary-foreground mb-3">NIMT UniOs</h1>
+          <img src={brand.logo} alt={brand.logoAlt} width="128" height="128" className={`${brand.isMirai ? "h-40 w-40" : "h-32 w-32"} brightness-0 invert mx-auto mb-8 object-contain`} />
+          <h1 className="text-3xl font-bold text-primary-foreground mb-3">{brand.title}</h1>
           <p className="text-primary-foreground/70 text-base leading-relaxed">
-            Multi-campus education management platform. Manage admissions, students, finance, and more — all in one place.
+            {brand.description}
           </p>
         </div>
       </div>
@@ -471,20 +471,22 @@ const Login = () => {
       <div className="flex-1 flex items-center justify-center p-6 relative overflow-hidden">
         {/* NIMT logo — top right on mobile, hidden on desktop (shown on left panel) */}
         <div className="lg:hidden absolute top-5 right-5">
-          <img src={nimtLogo} alt="NIMT" width="56" height="28" className="h-7 w-auto opacity-60" />
+          <img src={brand.institutionLogo} alt={brand.isMirai ? "Mirai School" : "NIMT"} width="56" height="28" className="h-7 w-auto opacity-60" />
         </div>
 
         <div className="w-full max-w-sm space-y-6 relative z-10">
           {/* Mobile logo */}
           <div className="lg:hidden flex flex-col items-center gap-2 mb-4">
-            <img src={uniosLogo} alt="UniOs" width="64" height="64" className="h-16 w-16 object-contain" />
-            <span className="text-lg font-bold text-foreground">NIMT UniOs</span>
+            <img src={brand.logo} alt={brand.logoAlt} width="64" height="64" className={`${brand.isMirai ? "h-24 w-24" : "h-16 w-16"} object-contain`} />
+            <span className="text-lg font-bold text-foreground">{brand.title}</span>
           </div>
 
           <div>
-            <h2 className="text-xl font-bold text-foreground">Sign in to UniOs</h2>
+            <h2 className="text-xl font-bold text-foreground">Sign in to {brand.isMirai ? "Mirai Uni" : "UniOs"}</h2>
             <p className="text-sm text-muted-foreground mt-1">Use your registered WhatsApp number for the fastest access.</p>
           </div>
+
+          {brand.isMirai && <a href="/apply" className="block text-sm font-semibold text-primary hover:underline">New to Mirai? Apply for admission →</a>}
 
           {import.meta.env.DEV && (
             <div className="flex justify-end">
@@ -539,7 +541,7 @@ const Login = () => {
             <div className="space-y-4">
               {waSignInState === "no_account" ? (
                 <div className="rounded-xl bg-warning/50/5 border border-warning/35/30 p-5">
-                  <p className="text-sm font-medium text-foreground">No UniOs account on this WhatsApp number</p>
+                  <p className="text-sm font-medium text-foreground">No {brand.isMirai ? "Mirai Uni" : "UniOs"} account on this WhatsApp number</p>
                   <p className="text-xs text-muted-foreground mt-1.5">
                     Sign-in is for existing students, parents, and staff. New applicants should start an application instead.
                   </p>

@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useSiteBrand } from "@/contexts/SiteBrandContext";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Lock, Eye, EyeOff } from "lucide-react";
 
 const ResetPassword = () => {
+  const brand = useSiteBrand();
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -29,6 +31,7 @@ const ResetPassword = () => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-6">
       <div className="w-full max-w-sm space-y-6">
+        {brand.isMirai && <img src={brand.logo} alt={brand.logoAlt} className="h-12 w-40 object-contain" />}
         <div>
           <h2 className="text-xl font-bold text-foreground">Set New Password</h2>
           <p className="text-sm text-muted-foreground mt-1">Enter your new password below.</p>

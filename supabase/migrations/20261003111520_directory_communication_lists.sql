@@ -1,8 +1,12 @@
 -- Directory audiences stay live; campaign recipients are immutable snapshots.
 ALTER TABLE public.lead_lists ADD COLUMN audience_type text NOT NULL DEFAULT 'leads'
   CHECK (audience_type IN ('leads', 'consultants', 'academic_partners'));
-ALTER TABLE public.lead_lists ADD CONSTRAINT directory_lists_marketing_only
+DO $$ BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'directory_lists_marketing_only' AND conrelid = 'public.lead_lists'::regclass) THEN
+  ALTER TABLE public.lead_lists ADD CONSTRAINT directory_lists_marketing_only
   CHECK (audience_type = 'leads' OR (purpose = 'marketing' AND list_type = 'dynamic'));
+ END IF;
+END $$;
 CREATE UNIQUE INDEX directory_lists_one_active ON public.lead_lists(audience_type)
   WHERE audience_type <> 'leads' AND archived_at IS NULL;
 
@@ -17,6 +21,7 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
    OR public.has_role(_user_id, 'campus_admin') OR public.has_role(_user_id, 'admission_head')
  ELSE false END, false);
 $$;
+DROP POLICY IF EXISTS directory_list_access ON public.lead_lists;
 CREATE POLICY directory_list_access ON public.lead_lists AS RESTRICTIVE FOR ALL TO authenticated
  USING (audience_type = 'leads' OR public.can_access_directory_audience(audience_type))
  WITH CHECK (audience_type = 'leads' OR public.can_access_directory_audience(audience_type));
@@ -76,17 +81,27 @@ ALTER TABLE public.whatsapp_campaign_recipients
  ADD COLUMN consultant_id uuid, ADD COLUMN academic_partner_id uuid, ADD COLUMN recipient_name text, ADD COLUMN recipient_phone text, ADD COLUMN recipient_email text;
 ALTER TABLE public.email_campaign_recipients
  ADD COLUMN consultant_id uuid, ADD COLUMN academic_partner_id uuid, ADD COLUMN recipient_name text, ADD COLUMN recipient_phone text, ADD COLUMN recipient_email text;
-ALTER TABLE public.whatsapp_campaign_recipients DROP CONSTRAINT whatsapp_campaign_recipients_one_target;
-ALTER TABLE public.whatsapp_campaign_recipients ADD CONSTRAINT whatsapp_campaign_recipients_one_target
+ALTER TABLE public.whatsapp_campaign_recipients DROP CONSTRAINT IF EXISTS whatsapp_campaign_recipients_one_target;
+DO $$ BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'whatsapp_campaign_recipients_one_target' AND conrelid = 'public.whatsapp_campaign_recipients'::regclass) THEN
+  ALTER TABLE public.whatsapp_campaign_recipients ADD CONSTRAINT whatsapp_campaign_recipients_one_target
  CHECK (num_nonnulls(lead_id, contact_id, consultant_id, academic_partner_id) = 1);
-ALTER TABLE public.email_campaign_recipients DROP CONSTRAINT email_campaign_recipients_one_target;
-ALTER TABLE public.email_campaign_recipients ADD CONSTRAINT email_campaign_recipients_one_target
+ END IF;
+END $$;
+ALTER TABLE public.email_campaign_recipients DROP CONSTRAINT IF EXISTS email_campaign_recipients_one_target;
+DO $$ BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'email_campaign_recipients_one_target' AND conrelid = 'public.email_campaign_recipients'::regclass) THEN
+  ALTER TABLE public.email_campaign_recipients ADD CONSTRAINT email_campaign_recipients_one_target
  CHECK (num_nonnulls(lead_id, contact_id, consultant_id, academic_partner_id) = 1);
+ END IF;
+END $$;
+DROP POLICY IF EXISTS directory_recipient_access ON public.whatsapp_campaign_recipients;
 CREATE POLICY directory_recipient_access ON public.whatsapp_campaign_recipients AS RESTRICTIVE FOR ALL TO authenticated
  USING ((consultant_id IS NULL OR public.can_access_directory_audience('consultants')) AND
         (academic_partner_id IS NULL OR public.can_access_directory_audience('academic_partners')))
  WITH CHECK ((consultant_id IS NULL OR public.can_access_directory_audience('consultants')) AND
         (academic_partner_id IS NULL OR public.can_access_directory_audience('academic_partners')));
+DROP POLICY IF EXISTS directory_recipient_access ON public.email_campaign_recipients;
 CREATE POLICY directory_recipient_access ON public.email_campaign_recipients AS RESTRICTIVE FOR ALL TO authenticated
  USING ((consultant_id IS NULL OR public.can_access_directory_audience('consultants')) AND
         (academic_partner_id IS NULL OR public.can_access_directory_audience('academic_partners')))
@@ -109,9 +124,11 @@ $$;
 CREATE TRIGGER directory_lists_no_materialized_members BEFORE INSERT OR UPDATE OF list_id
  ON public.lead_list_members FOR EACH ROW EXECUTE FUNCTION public.reject_directory_list_members();
 -- Directory lists may only be used by staff with access to that directory.
+DROP POLICY IF EXISTS directory_campaign_list_access ON public.whatsapp_campaigns;
 CREATE POLICY directory_campaign_list_access ON public.whatsapp_campaigns AS RESTRICTIVE FOR ALL TO authenticated
  USING (list_id IS NULL OR EXISTS (SELECT 1 FROM public.lead_lists l WHERE l.id = list_id))
  WITH CHECK (list_id IS NULL OR EXISTS (SELECT 1 FROM public.lead_lists l WHERE l.id = list_id));
+DROP POLICY IF EXISTS directory_campaign_list_access ON public.email_campaigns;
 CREATE POLICY directory_campaign_list_access ON public.email_campaigns AS RESTRICTIVE FOR ALL TO authenticated
  USING (list_id IS NULL OR EXISTS (SELECT 1 FROM public.lead_lists l WHERE l.id = list_id))
  WITH CHECK (list_id IS NULL OR EXISTS (SELECT 1 FROM public.lead_lists l WHERE l.id = list_id));

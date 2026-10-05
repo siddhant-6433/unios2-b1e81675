@@ -21,6 +21,8 @@ import {
   RedirectRole,
 } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { SiteBrandProvider } from "@/contexts/SiteBrandContext";
+import { MIRAI_HOST } from "@/lib/siteBranding";
 
 // All pages are code-split so the initial JS bundle stays small. Counsellors
 // no longer download HR, IB-academics, parent/student portal, etc. just to
@@ -173,7 +175,7 @@ const APPLY_LINKER_DOMAINS = ["nimt.ac.in", "miraischool.in", "school.nimt.ac.in
 function isApplyAnalyticsSurface(pathname: string) {
   if (typeof window === "undefined") return false;
   const host = window.location.hostname;
-  return host === "apply.nimt.ac.in" || (host === "uni.nimt.ac.in" && pathname.startsWith("/apply"));
+  return host === "apply.nimt.ac.in" || (["uni.nimt.ac.in", MIRAI_HOST].includes(host) && /^\/apply(?:\/|$)/.test(pathname));
 }
 
 function GoogleRouteTracker() {
@@ -235,7 +237,10 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error
 function OfferLinkRedirect() {
   const { token } = useParams<{ token: string }>();
   if (!token) return <Navigate to="/apply" replace />;
-  return <Navigate to={`/apply?token=${encodeURIComponent(token)}&view=offer`} replace />;
+  const params = new URLSearchParams(window.location.search);
+  params.set("token", token);
+  params.set("view", "offer");
+  return <Navigate to={`/apply?${params.toString()}${window.location.hash}`} replace />;
 }
 
 function StudentPortalEntry() {
@@ -252,6 +257,7 @@ function StudentPortalEntry() {
 }
 
 const App = () => (
+  <SiteBrandProvider>
   <AppErrorBoundary>
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -490,6 +496,7 @@ const App = () => (
     </TooltipProvider>
   </QueryClientProvider>
   </AppErrorBoundary>
+  </SiteBrandProvider>
 );
 
 export default App;

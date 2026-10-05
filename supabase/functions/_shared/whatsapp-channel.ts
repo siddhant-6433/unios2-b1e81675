@@ -26,6 +26,8 @@ export interface WhatsAppChannel {
 }
 
 export interface WhatsAppChannelHint {
+  /** Pin the account and exact sender; never use environment or recovery fallback. */
+  strictSender?: boolean;
   provider?: WhatsAppProvider | null;
   route?: WhatsAppChannelRoute | null;
   businessPhoneNumberId?: string | null;
@@ -180,6 +182,9 @@ function channelAllowed(channel: WhatsAppChannel, hint: WhatsAppChannelHint): bo
 
 function scoreChannel(channel: WhatsAppChannel, hint: WhatsAppChannelHint): number {
   let score = 0;
+  if (hint.strictSender && (!hint.wabaId || !hint.businessPhoneNumberId
+    || channel.provider !== "meta" || channel.waba_id !== hint.wabaId
+    || channel.meta_phone_number_id !== hint.businessPhoneNumberId)) return -1;
   const hintedBusinessNumber = digits(
     hint.businessNumber || (isLikelyBusinessPhoneNumber(hint.businessPhoneNumberId) ? hint.businessPhoneNumberId : null),
   );
@@ -238,7 +243,7 @@ export async function resolveWhatsAppChannel(
       .filter((item) => item.score >= 0)
       .sort((a, b) => b.score - a.score);
 
-    if (requestedMetaPhoneNumberId && !candidates.some((item) => item.score >= 5)) {
+    if (!hint.strictSender && requestedMetaPhoneNumberId && !candidates.some((item) => item.score >= 5)) {
       const route = routeForMetaPhoneNumberId(requestedMetaPhoneNumberId, hint.route || "reply");
       return envMetaChannel(route, requestedMetaPhoneNumberId);
     }
@@ -246,6 +251,7 @@ export async function resolveWhatsAppChannel(
     if (candidates[0]) return candidates[0].channel;
   }
 
+  if (hint.strictSender) throw new Error("The approved Mirai WhatsApp sender is unavailable; no fallback sender was used");
   if (hint.provider === "plivo" || hint.route === "plivo_admissions") {
     return envPlivoChannel(digits(hint.businessNumber));
   }
@@ -676,7 +682,7 @@ export async function sendWhatsAppTemplate(
   }
 
   let result = await postMetaTemplate(token, phoneNumberId, to, template, channel.business_number);
-  if (result.errorCode === 133010) {
+  if (result.errorCode === 133010 && !hint.strictSender) {
     const recovered = await recoverUnregisteredMetaSender(admin, channel, phoneNumberId, token);
     if (recovered) {
       const retry = await postMetaTemplate(

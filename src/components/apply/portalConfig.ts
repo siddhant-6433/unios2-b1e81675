@@ -1,4 +1,5 @@
-import miraiLogoGreen from "@/assets/mirai-logo-green.svg";
+import miraiLogoGreen from "@/assets/mirai-logo-transparent.svg";
+import { MIRAI_THEME, restoreSiteTheme } from "@/lib/siteBranding";
 import miraiMan from "@/assets/mirai-man.png";
 import nimtBeaconLogo from "@/assets/nimt-beacon-logo.png";
 import nimtEduInstLogo from "@/assets/nimt-edu-inst-logo.svg";
@@ -152,7 +153,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     gradeKeywords: ["nursery", "lkg", "ukg", "toddler", "montessori", "grade", "class", "playgroup", "pre-primary", "eyp", "pyp"],
     campusKeywords: ["mirai"],
     programCategories: ["school"],
-    hostnames: ["miraischool.in", "www.miraischool.in", "apply.miraischool.in"],
+    hostnames: ["miraischool.in", "www.miraischool.in", "apply.miraischool.in", "uni.miraischool.in"],
     primaryColor: "#77966D",
     loginGradient: "linear-gradient(160deg, #111E0F 0%, #2E4A28 50%, #4A7042 100%)",
     loginBgImage: loginBgMirai,
@@ -214,7 +215,7 @@ export function detectPortal(search: string, pathname: string): PortalId {
  */
 export function applyPortalTheme(config: PortalConfig) {
   const root = document.documentElement;
-  Object.entries(config.cssVars).forEach(([key, value]) => {
+  Object.entries(config.id === "mirai" ? { ...config.cssVars, ...MIRAI_THEME } : config.cssVars).forEach(([key, value]) => {
     root.style.setProperty(key, value);
   });
 }
@@ -223,8 +224,5 @@ export function applyPortalTheme(config: PortalConfig) {
  * Remove portal CSS variables (restore defaults)
  */
 export function removePortalTheme(config: PortalConfig) {
-  const root = document.documentElement;
-  Object.keys(config.cssVars).forEach((key) => {
-    root.style.removeProperty(key);
-  });
+  restoreSiteTheme(Object.keys(config.cssVars));
 }
