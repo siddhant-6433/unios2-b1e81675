@@ -37,7 +37,7 @@ describe("application payment reconciliation", () => {
   it("lets receipt generation attach one safe legacy payment row", () => {
     expect(receiptFunction).toContain('.eq("amount", app.fee_amount)');
     expect(receiptFunction).toContain('.is("application_id", null)');
-    expect(receiptFunction).toContain("if ((rows || []).length === 1 && !appIdFromNotes(rows[0].notes))");
+    expect(receiptFunction).toContain("if (rows?.length === 1 && !appIdFromNotes(rows[0].notes))");
     expect(receiptFunction).toContain(".update({ application_id: app.application_id } as any)");
   });
 
