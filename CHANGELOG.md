@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.4.0] - 2026-10-05
+
+### Fixed
+
+- Let campus-assigned staff see school fee receipts, receipt numbers, payment dates, and PDF links while preserving campus restrictions and principal institution/course access.
+
 ## [0.2.3.0] - 2026-10-05
 
 ### Added
