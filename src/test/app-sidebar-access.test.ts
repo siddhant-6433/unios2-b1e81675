@@ -35,3 +35,19 @@ describe("AppSidebar access policy wiring", () => {
     expect(globalActionBar).not.toContain("useIsTeamLeader");
   });
 });
+
+describe("Admissions group restriction wiring", () => {
+  it("keeps dashboard listing links usable for excluded roles", () => {
+    const dashboard = readFileSync("src/pages/Dashboard.tsx", "utf8");
+    expect(dashboard).toContain('const leadBrowseUrl = canSeeAdmissions ? "/admissions" : "/search"');
+    expect(dashboard).not.toContain('to="/admissions"');
+    expect(dashboard).not.toContain('link: "/admissions"');
+  });
+  it("gates the whole group and its lead badge queries with the effective role", () => {
+    expect(sidebar).toContain("const canSeeAdmissions = canAccessAdmissions(role)");
+    expect(sidebar).toContain("!canSeeAdmissions ? [] : admissionSubMenu.filter");
+    expect(sidebar).toContain("const canSeeLeadBadges = canSeeAdmissions && canUsePermission");
+    expect(sidebar).toContain("if (!canSeeLeadBadges) return;");
+    expect(sidebar).toContain("pendingApprovals + (canSeeLeadBadges ? pendingFollowupCount : 0)");
+  });
+});

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.5.0] - 2026-10-05
+
+### Changed
+
+- Show Admissions navigation and the Leads listing only to counsellors, super admins, principals, and admission heads, while retaining existing permissions for individual pages.
+- Keep lead search, individual lead access, offline receipts, and existing refund permissions available to accountants and office admins, with lead return links and dashboard listing links pointing to Search.
+- Hide Admissions follow-up counts from the Inbox badge when switching to a role without Admissions access.
+
 ## [0.2.4.0] - 2026-10-05
 
 ### Fixed

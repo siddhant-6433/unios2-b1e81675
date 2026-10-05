@@ -22,6 +22,7 @@ import {
 } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SiteBrandProvider } from "@/contexts/SiteBrandContext";
+import { ADMISSIONS_ROLES } from "@/lib/accessPolicy";
 import { MIRAI_HOST } from "@/lib/siteBranding";
 
 // All pages are code-split so the initial JS bundle stays small. Counsellors
@@ -339,8 +340,8 @@ const App = () => (
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
 
-                      {/* Admissions — requires leads:view */}
-                      <Route path="/admissions" element={<RequirePermission module="leads" action="view"><Admissions /></RequirePermission>} />
+                      {/* Admissions listing is role-restricted; individual leads remain permission-based. */}
+                      <Route path="/admissions" element={<RequireRole roles={ADMISSIONS_ROLES}><RequirePermission module="leads" action="view"><Admissions /></RequirePermission></RequireRole>} />
                       <Route path="/admissions/:id" element={<RequirePermission module="leads" action="view"><LeadDetail /></RequirePermission>} />
                       <Route path="/lead-buckets" element={<RequirePermission module="lead_buckets" action="view"><LeadBuckets /></RequirePermission>} />
                       <Route path="/lead-assignments" element={<RequirePermission module="leads" action="view"><LeadAssignmentHistoryPage /></RequirePermission>} />

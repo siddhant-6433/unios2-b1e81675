@@ -3,7 +3,7 @@ import { useCountUp } from "@/hooks/useCountUp";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
-import { isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
+import { canAccessAdmissions, isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { Users, IndianRupee, GraduationCap, ClipboardCheck, BookOpen, CalendarDays, Bell, ArrowUpRight, ChevronRight, FileText } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageLoader } from "@/components/ui/page-loader";
@@ -92,6 +92,9 @@ function AnalyticsFallback() {
 // ── SuperAdminDashboard ─────────────────────────────────────────────────────
 
 const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
+  const { role } = useAuth();
+  const canSeeAdmissions = canAccessAdmissions(role);
+  const leadBrowseUrl = canSeeAdmissions ? "/admissions" : "/search";
   const { selectedCampusId } = useCampus();
   const [loading, setLoading] = useState(true);
 
@@ -154,10 +157,10 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
   const conversionRate  = leadCount > 0 ? Math.round((admittedCount / leadCount) * 100) : 0;
 
   const statCards = [
-    { label: "Total Leads",            value: leadCount,    trend: todayLeads > 0 ? `+${todayLeads} today` : null, trendUp: true,  icon: Users,         iconBg: "bg-pastel-blue",   link: "/admissions" },
+    { label: "Total Leads",            value: leadCount,    trend: todayLeads > 0 ? `+${todayLeads} today` : null, trendUp: true,  icon: Users,         iconBg: "bg-pastel-blue",   link: leadBrowseUrl },
     { label: "Applications In Progress",value: appInProgress,trend: "Filling application",                         trendUp: null,  icon: FileText,      iconBg: "bg-pastel-orange", link: "/applications" },
     { label: "Applications Submitted",  value: appSubmitted, trend: "Ready for review",                             trendUp: null,  icon: ClipboardCheck,iconBg: "bg-pastel-green",  link: "/applications?status=submitted" },
-    { label: "Admitted",               value: admittedCount,trend: conversionRate > 0 ? `${conversionRate}% conversion` : null, trendUp: conversionRate > 0, icon: GraduationCap, iconBg: "bg-pastel-purple", link: "/admissions?stage=admitted" },
+    { label: "Admitted",               value: admittedCount,trend: conversionRate > 0 ? `${conversionRate}% conversion` : null, trendUp: conversionRate > 0, icon: GraduationCap, iconBg: "bg-pastel-purple", link: canSeeAdmissions ? "/admissions?stage=admitted" : "/search" },
   ];
 
   return (
@@ -225,7 +228,7 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
             <div className="flex items-center justify-between">
               <CardTitle className="text-base font-semibold">Admission Funnel</CardTitle>
               <Button variant="link" size="sm" className="text-primary gap-1 px-0" asChild>
-                <Link to="/admissions">View all <ChevronRight className="h-3.5 w-3.5" /></Link>
+                <Link to={leadBrowseUrl}>{canSeeAdmissions ? "View all" : "Search leads"} <ChevronRight className="h-3.5 w-3.5" /></Link>
               </Button>
             </div>
             {/* RazorSense segmented progress bar */}
@@ -260,7 +263,7 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
             <div className="flex items-center justify-between">
               <CardTitle className="text-base font-semibold">Recent Leads</CardTitle>
               <Button variant="link" size="sm" className="text-primary gap-1 px-0" asChild>
-                <Link to="/admissions">View all <ChevronRight className="h-3.5 w-3.5" /></Link>
+                <Link to={leadBrowseUrl}>{canSeeAdmissions ? "View all" : "Search leads"} <ChevronRight className="h-3.5 w-3.5" /></Link>
               </Button>
             </div>
           </CardHeader>

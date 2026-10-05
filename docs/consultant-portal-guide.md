@@ -16,8 +16,9 @@ and password** and enter your registered consultant email and password.
 - Forgot your password? Click **Forgot Password** on the login screen.
 - Account issues → email `admissions@nimt.ac.in` or your assigned NIMT representative.
 
-Once you sign in, you land directly on your **Consultant Dashboard**. In the sidebar you
-have two items under **Admissions**: **Courses & Fees** and **My Leads** (your dashboard).
+Once you sign in, you land directly on your **Consultant Dashboard**. Consultants do
+not see the **Admissions** sidebar group. You can open [My Leads](https://uni.nimt.ac.in/consultant-portal)
+and [Courses & Fees](https://uni.nimt.ac.in/fee-structures) directly, subject to your existing account permissions.
 
 ![Login page](img/consultant/01-login.png)
 *`01-login.png` — Sign in to UniOs page*

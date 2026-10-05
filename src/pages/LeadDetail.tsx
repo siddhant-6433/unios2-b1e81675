@@ -5,6 +5,7 @@ import { useParams, Link, useNavigate, useSearchParams, useLocation } from "reac
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
 import { startCloudCall } from "@/lib/startCloudCall";
+import { canAccessAdmissions } from "@/lib/accessPolicy";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useOpenVisitGuard } from "@/hooks/useOpenVisitGuard";
@@ -113,6 +114,8 @@ const LeadDetail = () => {
   useOpenVisitGuard(id);
   const isTeamLeader = useIsTeamLeader();
   const isSuperAdmin = role === "super_admin";
+  const leadReturnUrl = canAccessAdmissions(role) ? "/admissions" : "/search";
+  const leadReturnLabel = canAccessAdmissions(role) ? "Leads" : "Search";
   const canTransfer = isSuperAdmin || isTeamLeader;
   // External owner (consultant / academic partner). Mirrors can_assign_lead_external_owner:
   // super_admin, principal, leads:assign_external_owner, or counsellor with consultants:view.
@@ -1040,7 +1043,7 @@ const LeadDetail = () => {
       setShowDeleteConfirm(false);
     } else {
       toast({ title: "Lead deleted", description: `${lead?.name || "Lead"} has been deleted.` });
-      navigate("/admissions");
+      navigate(leadReturnUrl);
     }
   };
 
@@ -1061,8 +1064,8 @@ const LeadDetail = () => {
               Please get the lead reassigned to you from admin to access this lead data.
             </p>
             <div className="pt-1">
-              <Link to="/admissions" className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground dark:text-warning/70 hover:underline">
-                <ArrowLeft className="h-3.5 w-3.5" /> Back to Leads
+              <Link to={leadReturnUrl} className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground dark:text-warning/70 hover:underline">
+                <ArrowLeft className="h-3.5 w-3.5" /> Back to {leadReturnLabel}
               </Link>
             </div>
           </div>
@@ -1081,8 +1084,8 @@ const LeadDetail = () => {
               This lead is currently unassigned. Please ask an admin to assign it to you to access this lead data.
             </p>
             <div className="pt-1">
-              <Link to="/admissions" className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground dark:text-warning/70 hover:underline">
-                <ArrowLeft className="h-3.5 w-3.5" /> Back to Leads
+              <Link to={leadReturnUrl} className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground dark:text-warning/70 hover:underline">
+                <ArrowLeft className="h-3.5 w-3.5" /> Back to {leadReturnLabel}
               </Link>
             </div>
           </div>
@@ -1172,8 +1175,8 @@ const LeadDetail = () => {
 
       {/* Breadcrumb + Actions */}
       <div className="flex items-center gap-2 text-sm overflow-x-auto">
-        <Link to="/admissions" className="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 shrink-0">
-          <ArrowLeft className="h-3.5 w-3.5" /> Leads
+        <Link to={leadReturnUrl} className="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 shrink-0">
+          <ArrowLeft className="h-3.5 w-3.5" /> {leadReturnLabel}
         </Link>
         <span className="text-muted-foreground/50 shrink-0">/</span>
         <span className="font-medium text-foreground truncate">{lead.name}</span>
