@@ -25,7 +25,7 @@ import { usePermissions } from "@/contexts/PermissionContext";
 import { supabase } from "@/integrations/supabase/client";
 import { ACTION_BADGE_POLL_MS, fetchActionBadgeCounts } from "@/lib/actionBadgeCounts";
 import { CAHET_SPRINT_OPEN, UPDELED_SPRINT_OPEN } from "@/lib/deadlineRollover";
-import { canSeePolicyItem, isAcademicPartnerPortalRole, isAdmissionPartnerPortalRole, isPortalRole, roleLabel as labelForRole, type AccessState, type AppRole } from "@/lib/accessPolicy";
+import { canAccessAdmissions, canUsePermission, canSeePolicyItem, isAcademicPartnerPortalRole, isAdmissionPartnerPortalRole, isPortalRole, roleLabel as labelForRole, type AccessState, type AppRole } from "@/lib/accessPolicy";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
   SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
@@ -281,7 +281,9 @@ export function AppSidebar() {
   // Pages that are now buckets of the Cloud Dialer queue. Counsellors get one
   // work surface; every other role keeps the standalone pages.
   const DIALER_FOLDED_URLS = ["/fresh-leads", "/missed-calls"];
+  const canSeeAdmissions = canAccessAdmissions(role);
   const canSee = (item: MenuItem) => {
+    if (item.url === "/admissions" && !canUsePermission(accessState, "leads:view")) return false;
     if (role === "counsellor" && DIALER_FOLDED_URLS.includes(item.url)) return false;
     return canSeePolicyItem(accessState, item);
   };
@@ -289,13 +291,7 @@ export function AppSidebar() {
   // (librarian, faculty, accountant, …) never render these badges, and running it
   // under their policies times out (57014) on every page. Gate the call the same
   // way the Admissions menu is gated.
-  const canSeeLeadBadges = canSeePolicyItem(accessState, {
-    title: "Admissions",
-    url: "/admissions",
-    icon: Users,
-    permission: "leads:view",
-    staffOnly: true,
-  });
+  const canSeeLeadBadges = canSeeAdmissions && canUsePermission(accessState, "leads:view");
   const canViewSettings = canSeePolicyItem(accessState, {
     title: "Settings",
     url: "/settings",
@@ -397,7 +393,7 @@ export function AppSidebar() {
     };
   }, [fetchAdmissionBadges, fetchPendingApprovals, role]);
 
-  const inboxBadge = pendingApprovals + pendingFollowupCount;
+  const inboxBadge = pendingApprovals + (canSeeLeadBadges ? pendingFollowupCount : 0);
   const isAdmissionPortalRole = isAdmissionPartnerPortalRole(role);
   const isPartnerPortalRole = isAcademicPartnerPortalRole(role) || isAdmissionPortalRole;
   const visibleMainSource = isAdmissionPortalRole
@@ -410,7 +406,7 @@ export function AppSidebar() {
     if (item.url === "/inbox" && inboxBadge > 0) return { ...item, badge: inboxBadge };
     return item;
   });
-  const visibleAdmission = (isPartnerPortalRole ? [] : admissionSubMenu.filter((item) => {
+  const visibleAdmission = (!canSeeAdmissions ? [] : admissionSubMenu.filter((item) => {
     if (item.url === "/cahet-sprint" && !CAHET_SPRINT_OPEN) return false;
     if (item.url === "/updeled-sprint" && !UPDELED_SPRINT_OPEN) return false;
     return canSee(item);
@@ -432,7 +428,7 @@ export function AppSidebar() {
     .map((group) => ({ label: group.label, items: group.items.filter(canSee) }))
     .filter((group) => group.items.length > 0);
   const visibleMgmt = managementMenu.filter(canSee);
-  const isAdmissionActive = !isPartnerPortalRole && admissionSubMenu.some(item => isActive(item.url));
+  const isAdmissionActive = canSeeAdmissions && admissionSubMenu.some(item => isActive(item.url));
   const isMarketingActive = !isPartnerPortalRole && marketingSubMenu.some(item => isActive(item.url));
   const isTeachingActive = teachingSubMenu.some(item => isActive(item.url));
   const isAcademicsActive = academicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/library"));

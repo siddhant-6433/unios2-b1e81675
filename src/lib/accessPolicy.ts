@@ -77,6 +77,7 @@ export interface AccessState {
 
 export interface RoutePolicy {
   path: string;
+  exact?: boolean;
   permission?: string;
   anyPermission?: readonly string[];
   roles?: readonly AppRole[];
@@ -149,9 +150,15 @@ export function permissionsForAcademicPartnerRole(role: AppRole | null): readonl
   return permissionsForPortalRole(role);
 }
 
+export const ADMISSIONS_ROLES: AppRole[] = ["counsellor", "super_admin", "principal", "admission_head"];
+
+export function canAccessAdmissions(role: AppRole | null): boolean {
+  return role !== null && ADMISSIONS_ROLES.includes(role);
+}
+
 export const STAFF_ROUTE_POLICIES: readonly RoutePolicy[] = [
   { path: "/", permission: "dashboard:view", staffOnly: true },
-  { path: "/admissions", permission: "leads:view", staffOnly: true },
+  { path: "/admissions", exact: true, roles: ADMISSIONS_ROLES, permission: "leads:view", staffOnly: true },
   { path: "/lead-buckets", permission: "lead_buckets:view", staffOnly: true },
   { path: "/lead-assignments", permission: "leads:view", staffOnly: true },
   { path: "/lists", permission: "leads:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter", "admission_partner"], staffOnly: true },
@@ -295,7 +302,7 @@ export function routePolicyFor(path: string): RoutePolicy | null {
   const normalized = normalizedPath(path);
   let best: RoutePolicy | null = null;
   for (const policy of STAFF_ROUTE_POLICIES) {
-    if (normalized === policy.path || normalized.startsWith(`${policy.path}/`)) {
+    if (normalized === policy.path || (!policy.exact && normalized.startsWith(`${policy.path}/`))) {
       if (!best || policy.path.length > best.path.length) best = policy;
     }
   }
