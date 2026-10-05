@@ -109,9 +109,14 @@ Deno.serve(async (req) => {
     // Block sends to DNC leads — except when the caller is explicitly the
     // DNC farewell flow (Mark DNC button), which marks the lead DNC first
     // and then needs to send the one final notification.
-    if (lead_id && !bypass_dnc) {
-      const { data: leadCheck } = await admin.from("leads").select("stage").eq("id", lead_id).single();
-      if (leadCheck?.stage === "dnc") {
+    if (lead_id) {
+      const { data: leadCheck, error: leadCheckError } = await admin.from("leads").select("stage, archived_at").eq("id", lead_id).single();
+      if (leadCheckError || !leadCheck || leadCheck.archived_at) {
+        return new Response(JSON.stringify({ error: "Lead archived or outreach eligibility unavailable" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (leadCheck?.stage === "dnc" && !bypass_dnc) {
         return new Response(JSON.stringify({ error: "Lead is DNC — message not sent" }), {
           status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });

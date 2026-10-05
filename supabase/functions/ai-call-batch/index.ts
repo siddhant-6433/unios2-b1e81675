@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
     // Filter leads that have phone numbers and are not in terminal stages
     const { data: validLeads } = await db
       .from("leads")
-      .select("id, phone, stage")
+      .select("id, phone, stage").is("archived_at", null)
       .in("id", lead_ids)
       .not("phone", "is", null)
       .not("stage", "in", '("not_interested","dnc","rejected","ineligible")');

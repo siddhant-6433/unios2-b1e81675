@@ -145,11 +145,12 @@ Deno.serve(async (req) => {
 
       const { data: lead, error: leadErr } = await db
         .from("leads")
-        .select("id, name, phone, stage, courses:course_id(name), campuses:campus_id(name)")
+        .select("id, name, phone, stage, archived_at, courses:course_id(name), campuses:campus_id(name)")
         .eq("id", leadId)
         .single();
 
       if (leadErr || !lead) return json({ error: "Lead not found" }, 404);
+      if (lead.archived_at) return json({ error: "Archived lead — restore before calling" }, 403);
       if (!lead.phone) return json({ error: "Lead has no phone number" }, 400);
       if (lead.stage === "dnc") return json({ error: "Lead is DNC — call blocked" }, 403);
       leadName = lead.name;

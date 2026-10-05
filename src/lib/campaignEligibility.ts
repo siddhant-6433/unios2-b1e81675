@@ -172,7 +172,7 @@ export function filterCampaignRecipients<T extends CampaignLeadLike>(
   let recentContact = 0;
   let excludedStage = 0;
   let duplicate = 0;
-  const directoryDestinations = new Set<string>();
+  const destinations = new Set<string>();
 
   for (let lead of leads) {
     if (!lead || !lead.id) continue;
@@ -226,11 +226,13 @@ export function filterCampaignRecipients<T extends CampaignLeadLike>(
       }
     }
 
-    if (lead.directoryKind) {
+    {
       const destination = opts.channel === 'email' ? String(lead.email).trim().toLowerCase() : String(lead.phone).replace(/\D/g, '');
-      const normalized = opts.channel === 'whatsapp' && destination.length === 10 ? '91' + destination : destination;
-      if (directoryDestinations.has(normalized)) { skipped.push({ lead, reason: 'duplicate' }); duplicate++; continue; }
-      directoryDestinations.add(normalized);
+      const normalized = opts.channel === 'whatsapp'
+        ? destination.length === 10 ? '91' + destination : destination.length === 11 && destination.startsWith('0') ? '91' + destination.slice(1) : destination
+        : destination;
+      if (destinations.has(normalized)) { skipped.push({ lead, reason: 'duplicate' }); duplicate++; continue; }
+      destinations.add(normalized);
       if (opts.channel === 'email') lead = { ...lead, email: normalized };
       else lead = { ...lead, phone: normalized };
     }
