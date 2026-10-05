@@ -16,8 +16,9 @@ Closed old prospects are archived first. Remaining old nursing/GNM leads go to
 Ashish; interested or human-follow-up school prospects go to Payal; Mirai prospects
 alternate between Reema and Harsh Verma in created-at/ID order, with the extra
 record going to Reema. Completed work and stages remain unchanged. Active owners
-must resolve uniquely through the assignable-counsellor directory; missing or
-ambiguous staff/course mappings stop preview creation.
+must resolve uniquely through the assignable-counsellor directory. Missing or
+ambiguous staff identities or missing canonical nursing/GNM courses stop preview
+creation; uncertain mappings on individual leads are left for review.
 
 Future leads enter the unassigned bucket. If an automatic assignment occurred
 between the cutoff and policy activation, the preview can include it as `bucket`.
