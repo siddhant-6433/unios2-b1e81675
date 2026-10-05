@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
       const TERMINAL_FOR_COLD = ["not_interested", "dnc", "rejected", "ineligible", "admitted"];
       const { data: activeLeads } = await db
         .from("leads")
-        .select("id")
+        .select("id").is("archived_at", null)
         .in("id", coldCandidateIds)
         .not("stage", "in", `(${TERMINAL_FOR_COLD.join(",")})`);
       const activeIds = (activeLeads || []).map((l: any) => l.id);
@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
             counsellor_id: null,
             assigned_at: null,
             updated_at: new Date().toISOString(),
-          } as any)
+          } as any).is("archived_at", null)
           .eq("id", lid);
         await db.from("lead_activities").insert({
           lead_id: lid,
@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
     if (candidateIds.length > 0) {
       const { data: activeLeads } = await db
         .from("leads")
-        .select("id, stage")
+        .select("id, stage").is("archived_at", null)
         .in("id", candidateIds)
         .not("stage", "in", `(${TERMINAL_STAGES.join(",")})`);
       const activeSet = new Set((activeLeads || []).map((l: any) => l.id));

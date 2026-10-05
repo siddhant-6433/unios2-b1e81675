@@ -1021,6 +1021,14 @@ Deno.serve(async (req) => {
         });
       }
 
+      if (recipient.lead_id) {
+        const { data: allowed, error: archiveError } = await adminClient.rpc("archive_marketing_recipient_allowed", { _lead_id: recipient.lead_id });
+        if (archiveError || allowed !== true) {
+          await adminClient.from("whatsapp_campaign_recipients").update({ status: "skipped", error_message: archiveError ? "Archive eligibility check unavailable; message withheld" : "Archived lead is now protected or opted out" }).eq("id", recipient.id);
+          return;
+        }
+      }
+
       try {
         const sendResult = await (sendWhatsAppTemplate as any)(adminClient, {
           route: "bulk",

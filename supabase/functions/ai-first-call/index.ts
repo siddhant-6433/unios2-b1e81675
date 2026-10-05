@@ -24,6 +24,7 @@ serve(async (req) => {
       .eq("id", lead_id).single();
 
     if (leadErr || !lead) throw new Error("Lead not found");
+    if (lead.archived_at) throw new Error("Archived lead — qualification blocked");
     if (lead.stage === "dnc") throw new Error("Lead is DNC — call blocked");
 
     if (!lovableApiKey) throw new Error("LOVABLE_API_KEY not configured");
@@ -92,7 +93,7 @@ Notes: ${lead.notes || "None"}`
       ai_notes: qualification,
       ai_called_at: new Date().toISOString(),
       ai_conversion_probability: convProb,
-    }).eq("id", lead_id);
+    }).is("archived_at", null).eq("id", lead_id);
 
     // Log activity with AI assessment
     await supabase.from("lead_activities").insert({

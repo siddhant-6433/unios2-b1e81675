@@ -19042,6 +19042,9 @@ export type Database = {
       }
       leads: {
         Row: {
+          archived_at: string | null
+          archive_reason: string | null
+          cleanup_run_id: string | null
           academic_partner_id: string | null
           abvmu_deposit_not_applicable: boolean
           admission_no: string | null
@@ -19145,6 +19148,9 @@ export type Database = {
           visit_date: string | null
         }
         Insert: {
+          archived_at?: string | null
+          archive_reason?: string | null
+          cleanup_run_id?: string | null
           academic_partner_id?: string | null
           abvmu_deposit_not_applicable?: boolean
           admission_no?: string | null
@@ -19248,6 +19254,9 @@ export type Database = {
           visit_date?: string | null
         }
         Update: {
+          archived_at?: string | null
+          archive_reason?: string | null
+          cleanup_run_id?: string | null
           academic_partner_id?: string | null
           abvmu_deposit_not_applicable?: boolean
           admission_no?: string | null

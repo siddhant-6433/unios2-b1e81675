@@ -359,6 +359,14 @@ Deno.serve(async (req) => {
         ? bodyHtml.replace("</body>", `${pixelTag}</body>`)
         : bodyHtml + pixelTag;
 
+      if (r.lead_id) {
+        const { data: allowed, error: archiveError } = await admin.rpc("archive_marketing_recipient_allowed", { _lead_id: r.lead_id });
+        if (archiveError || allowed !== true) {
+          await admin.from("email_campaign_recipients").update({ status: "skipped", error_message: archiveError ? "Archive eligibility check unavailable; message withheld" : "Archived lead is now protected or opted out" }).eq("id", r.id);
+          skipped++; continue;
+        }
+      }
+
       try {
         const res = await fetch("https://api.resend.com/emails", {
           method: "POST",

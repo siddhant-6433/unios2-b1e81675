@@ -610,7 +610,12 @@ Deno.serve(async (req) => {
 
     // Block sends to DNC leads
     if (lead_id) {
-      const { data: leadCheck } = await admin.from("leads").select("stage").eq("id", lead_id).single();
+      const { data: leadCheck, error: leadCheckError } = await admin.from("leads").select("stage, archived_at").eq("id", lead_id).single();
+      if (leadCheckError || !leadCheck || leadCheck.archived_at) {
+        return new Response(JSON.stringify({ error: "Lead archived or outreach eligibility unavailable" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       if (leadCheck?.stage === "dnc") {
         return new Response(JSON.stringify({ error: "Lead is DNC — message not sent" }), {
           status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
