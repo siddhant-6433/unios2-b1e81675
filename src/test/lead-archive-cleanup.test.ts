@@ -32,10 +32,15 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
       CREATE TABLE departments(id uuid PRIMARY KEY,institution_id uuid REFERENCES institutions);
       CREATE TABLE courses(id uuid PRIMARY KEY,name text,department_id uuid REFERENCES departments,code text);
       CREATE TABLE leads(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text,phone text,email text,created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now(),
-        stage text DEFAULT 'new_lead',counsellor_id uuid REFERENCES profiles,assigned_at timestamptz,application_id uuid,admission_no text,pre_admission_no text,
+        stage text DEFAULT 'new_lead',counsellor_id uuid REFERENCES profiles,assigned_at timestamptz,first_contact_at timestamptz,application_id uuid,admission_no text,pre_admission_no text,
         legacy_admission_no text,legacy_pre_admission_no text,admitted_at timestamptz,applied_at timestamptz,person_role text DEFAULT 'lead',
         token_amount numeric,jd_category text,course_id uuid REFERENCES courses,campus_id uuid,portal_brand text,lead_institution_type text DEFAULT 'college',is_mirror boolean DEFAULT false,
         mirror_lead_id uuid,source_lead_id uuid,application_progress jsonb,shared_with_nimt boolean DEFAULT true,notes text);
+      CREATE FUNCTION fn_lead_assignment_tracker() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+        IF OLD.counsellor_id IS DISTINCT FROM NEW.counsellor_id AND NEW.counsellor_id IS NOT NULL THEN NEW.assigned_at:=now(); NEW.first_contact_at:=NULL; END IF;
+        IF NEW.counsellor_id IS NULL AND OLD.counsellor_id IS NOT NULL THEN NEW.assigned_at:=NULL; END IF;
+        RETURN NEW; END $$;
+      CREATE TRIGGER trg_lead_assignment_tracker BEFORE UPDATE ON leads FOR EACH ROW EXECUTE FUNCTION fn_lead_assignment_tracker();
       CREATE TABLE applications(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),lead_id uuid REFERENCES leads,phone text);
       CREATE TABLE students(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),lead_id uuid REFERENCES leads,phone text,father_phone text,mother_phone text,guardian_phone text);
       CREATE TABLE lead_payments(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),lead_id uuid REFERENCES leads,amount numeric);
@@ -208,7 +213,9 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
   it("can resume small batches without duplicate members and rollback restores pending work", async () => {
     await db.exec("BEGIN");
     try {
-      await lead(140);
+      await lead(140, { counsellor_id: uid(4), assigned_at: "2026-09-02T00:00:00Z", first_contact_at: "2026-09-03T00:00:00Z" });
+      await lead(141, { course_id: uid(40), counsellor_id: uid(4), assigned_at: "2026-09-02T00:00:00Z", first_contact_at: "2026-09-03T00:00:00Z" });
+      const beforeRetain = await rpc<Record<string, Record<string, unknown>>>("lead_cleanup_snapshot($1)", [uid(141)]);
       const list = (await db.query<{ id: string }>("INSERT INTO lead_lists(name,purpose) VALUES('Existing calling list','calling') RETURNING id")).rows[0].id;
       await db.query("INSERT INTO lead_list_members(list_id,lead_id,assigned_to) VALUES($1,$2,$3)", [list,uid(140),uid(4)]);
       await db.query("INSERT INTO lead_followups(lead_id,user_id,notes) VALUES($1,$2,'Call next week')", [uid(140),uid(14)]);
@@ -224,6 +231,9 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
       const restored = await rpc<Record<string, unknown>>("lead_cleanup_snapshot($1)", [uid(140)]);
       expect({ ...restored, activities: [] }).toEqual({ ...(before as Record<string, unknown>), activities: [] });
       expect(await rpc("rollback_lead_cleanup($1,1)", [run])).toEqual({ processed: 0, remaining: 0 });
+      const restoredRetain = await rpc<Record<string, Record<string, unknown>>>("lead_cleanup_snapshot($1)", [uid(141)]);
+      expect(restoredRetain.lead.assigned_at).toEqual(beforeRetain.lead.assigned_at);
+      expect(restoredRetain.lead.first_contact_at).toEqual(beforeRetain.lead.first_contact_at);
     } finally { await db.exec("ROLLBACK"); }
   });
 
@@ -254,7 +264,12 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
       await db.query("INSERT INTO ai_call_records(lead_id,status) VALUES($1,'initiated')", [uid(162)]);
       await lead(163);
       await db.query("INSERT INTO payment_links(lead_id) VALUES($1)", [uid(163)]);
+      await db.query("INSERT INTO courses(id,name,code) VALUES($1,'BSc Nursing','BSCN-GN')", [uid(44)]);
+      await lead(165, { course_id: uid(44) });
+      await lead(164, { course_id: uid(40), portal_brand: "mirai" });
       const p = await preview();
+      expect(p.items.find(i => i.lead_id === uid(165))?.action).toBe("review");
+      expect(p.items.find(i => i.lead_id === uid(164))?.destination).toBe(uid(1));
       expect(p.items.find(i => i.lead_id === uid(160))?.action).toBe("review");
       expect(p.items.find(i => i.lead_id === uid(161))?.action).toBe("protected");
       expect(p.items.find(i => i.lead_id === uid(162))?.reason).toBe("active_call");

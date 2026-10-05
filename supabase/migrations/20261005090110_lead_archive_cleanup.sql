@@ -130,10 +130,10 @@ BEGIN
  WHEN created_at>=_cutoff THEN CASE WHEN EXISTS(SELECT 1 FROM public.lead_assignment_history h WHERE h.lead_id=b.id AND h.assignment_source IN ('assigned','self_picked','list_round_robin','list_followup'))
    OR NOT EXISTS(SELECT 1 FROM public.lead_assignment_history h WHERE h.lead_id=b.id AND h.assignment_source='ai_priority') THEN 'review' ELSE 'bucket' END
  WHEN stage::text IN ('not_interested','dnc','rejected','ineligible') THEN 'archive'
+ WHEN course_id=ANY(nursing) AND institution_id IS NOT NULL AND institution_type<>'school' THEN 'ashish'
  WHEN institution_id='d8c95a30-ecc6-4b41-8bed-987c960dc44a'::uuid OR lower(coalesce(portal_brand,''))='mirai'
    OR (lead_institution_type='school' AND campus_id='c0000002-0000-0000-0000-000000000001'::uuid AND institution_id IS NULL) THEN 'mirai'
  WHEN course_id IS NOT NULL AND institution_id IS NULL THEN 'review'
- WHEN course_id=ANY(nursing) AND institution_type<>'school' THEN 'ashish'
  WHEN (institution_type='school' OR lead_institution_type='school') AND
    (stage::text IN ('priority_interested','visit_scheduled') OR latest_disposition='interested' OR human_followup) THEN 'payal'
  WHEN course_id IS NOT NULL AND institution_id IS NULL THEN 'review'
@@ -290,6 +290,9 @@ BEGIN
  END IF;
  old:=jsonb_populate_record(NULL::public.leads,item.before_state->'lead');
  UPDATE public.leads SET counsellor_id=old.counsellor_id,assigned_at=old.assigned_at,archived_at=old.archived_at,archive_reason=old.archive_reason,cleanup_run_id=old.cleanup_run_id WHERE id=item.lead_id;
+ -- Restore SLA timestamps after the ownership trigger has run. With the owner
+ -- unchanged in this second update, it cannot replace the saved timestamps.
+ UPDATE public.leads SET assigned_at=old.assigned_at,first_contact_at=old.first_contact_at WHERE id=item.lead_id;
  FOR row IN SELECT * FROM jsonb_array_elements(item.before_state->'followups') LOOP
  f:=jsonb_populate_record(NULL::public.lead_followups,row);
  UPDATE public.lead_followups SET user_id=f.user_id,status=f.status,completed_at=f.completed_at,notes=f.notes WHERE id=f.id;
