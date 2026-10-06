@@ -131,7 +131,6 @@ const marketingSubMenu: MenuItem[] = [
 const teachingSubMenu: MenuItem[] = [
   { title: "My Classes", url: "/my-classes", icon: GraduationCap, permission: "students:view" },
   { title: "Timetable", url: "/timetable", icon: CalendarDays, permission: "timetable:view" },
-  { title: "Report Cards", url: "/report-cards", icon: FileText, permission: "marks:view" },
   ...(BEACON_ACADEMICS_ENABLED ? [{ title: "Assessments - CBSE", url: "/beacon-academics", icon: GraduationCap, permission: "marks:view" }] : []),
 ];
 
