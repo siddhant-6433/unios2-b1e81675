@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
         application_id, lead_temperature, lead_score,
         courses:course_id(name, code),
         campuses:campus_id(name, code)
-      `)
+      `).is("archived_at", null)
       .eq("id", lead_id)
       .single();
 
@@ -219,6 +219,11 @@ Deno.serve(async (req) => {
         }
       }
 
+      const isActiveForOutreach = async () => {
+        const { data, error } = await admin.from("leads").select("id").eq("id", lead.id).is("archived_at", null).maybeSingle();
+        return !error && !!data;
+      };
+
       for (const action of actions) {
         try {
           switch (action.type) {
@@ -261,6 +266,7 @@ Deno.serve(async (req) => {
                 buttonUrls = [campusQuery, "nimt"];
               }
 
+              if (!await isActiveForOutreach()) break;
               // Delay support: queue instead of sending immediately.
               if (action.delay_hours && action.delay_hours > 0) {
                 const sendAt = new Date(Date.now() + action.delay_hours * 60 * 60 * 1000).toISOString();
@@ -296,6 +302,7 @@ Deno.serve(async (req) => {
                 if (/beacon|bsa|cbse|grade/.test(courseText)) videoUrl = "https://www.instagram.com/reel/DXuOmFMkVXQ/";
                 else if (/mirai|mes|pyp|myp|ib|montessori/.test(courseText)) videoUrl = "https://www.instagram.com/p/DXMsuIBgYwF/";
 
+                if (!await isActiveForOutreach()) break;
                 await fetch(`${supabaseUrl}/functions/v1/whatsapp-reply`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
@@ -337,6 +344,7 @@ Deno.serve(async (req) => {
                   body = body.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), v);
                 }
 
+                if (!await isActiveForOutreach()) break;
                 await fetch("https://api.resend.com/emails", {
                   method: "POST",
                   headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
@@ -348,8 +356,8 @@ Deno.serve(async (req) => {
             }
 
             case "advance_stage": {
-              if (!action.to_stage) break;
-              await applyLeadTransition(admin, {
+              if (!action.to_stage || !await isActiveForOutreach()) break;
+              await applyLeadTransition({ from: (table: string) => admin.from(table === "leads" ? "active_outreach_leads" : table) }, {
                 leadId: lead.id,
                 currentStage: lead.stage,
                 command: "automationAdvanceStage",
@@ -400,14 +408,14 @@ Deno.serve(async (req) => {
               if (!action.field || action.value === undefined) break;
               const allowed = ["lead_temperature", "notes", "stage"];
               if (!allowed.includes(action.field)) break;
-              await admin.from("leads").update({ [action.field]: action.value }).eq("id", lead.id);
+              await admin.from("leads").update({ [action.field]: action.value }).is("archived_at", null).eq("id", lead.id);
               executedActions.push({ type: "update_field", field: action.field, value: action.value });
               break;
             }
 
             case "assign_counsellor": {
               if (!action.counsellor_id) break;
-              await admin.from("leads").update({ counsellor_id: action.counsellor_id }).eq("id", lead.id);
+              await admin.from("leads").update({ counsellor_id: action.counsellor_id }).is("archived_at", null).eq("id", lead.id);
               executedActions.push({ type: "assign_counsellor", to: action.counsellor_id });
               break;
             }

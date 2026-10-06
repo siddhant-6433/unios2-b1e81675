@@ -33,6 +33,11 @@ Deno.serve(async (req) => {
   let sent = 0;
   for (const row of rows) {
     try {
+      const { data: lead, error: leadError } = await admin.from("leads").select("id").eq("id", row.lead_id).is("archived_at", null).maybeSingle();
+      if (leadError || !lead) {
+        await admin.from("whatsapp_scheduled_sends").update({ status: "skipped", error: "Lead archived or outreach eligibility unavailable" }).eq("id", row.id).eq("status", "pending");
+        continue;
+      }
       const body: Record<string, unknown> = {
         template_key: row.template_key,
         phone: row.phone,

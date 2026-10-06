@@ -107,6 +107,7 @@ Deno.serve(async (req) => {
         .single();
 
       if (leadErr || !lead) return json({ error: "Lead not found" }, 404);
+      if (lead.archived_at) return json({ error: "Archived lead — restore before calling" }, 403);
       if (lead.stage === "dnc") return json({ error: "Lead is DNC — call blocked" }, 200);
       if (lead.stage === "not_interested") return json({ error: "Lead is Not Interested — call blocked" }, 200);
       if (!lead.phone) return json({ error: "Lead has no phone number" }, 400);
@@ -125,6 +126,7 @@ Deno.serve(async (req) => {
         .single();
 
       const activeLead = refreshedLead || lead;
+      if (activeLead.archived_at) return json({ error: "Archived lead — call blocked" }, 403);
 
       // Look up assigned counsellor's display name so the agent can name them
       // concretely at close ("kal subah Pooja ji aapko personally call karengi"
@@ -178,6 +180,17 @@ Deno.serve(async (req) => {
         console.error("Failed to set call context:", await ctxRes.text());
         return json({ error: "Voice agent server unreachable" }, 503);
       }
+
+      // Commit a reservation before contacting Plivo. The database trigger
+      // serializes this with archive cleanup and rejects archived leads.
+      const { error: reservationError } = await db.from("ai_call_records").insert({
+        lead_id,
+        call_uuid: callId,
+        initiated_by: user.id,
+        status: "initiated",
+        call_type: "ai",
+      });
+      if (reservationError) return json({ error: "Lead cannot start a call; refresh and try again" }, 409);
 
       // Initiate call via Plivo API
       const plivoUrl = `https://api.plivo.com/v1/Account/${PLIVO_AUTH_ID}/Call/`;
@@ -240,6 +253,7 @@ Deno.serve(async (req) => {
 
       if (!attempt.ok) {
         console.error("Plivo call error:", plivoResult);
+        await db.from("ai_call_records").update({ status: "failed", completed_at: new Date().toISOString(), summary: "Call setup failed" }).eq("call_uuid", callId);
         return json({ error: plivoResult?.error || "Failed to initiate call" }, 502);
       }
 
@@ -247,15 +261,8 @@ Deno.serve(async (req) => {
       const rawUuid = plivoResult.request_uuid;
       const plivoUuid = Array.isArray(rawUuid) ? rawUuid[0] : (rawUuid || "");
 
-      // Create AI call record
-      await db.from("ai_call_records").insert({
-        lead_id,
-        call_uuid: callId,
-        plivo_call_uuid: plivoUuid,
-        initiated_by: user.id,
-        status: "initiated",
-        call_type: "ai",
-      });
+      // Keep any status already delivered by provider callbacks.
+      await db.from("ai_call_records").update({ plivo_call_uuid: plivoUuid }).eq("call_uuid", callId);
 
       // Log activity (user_id null for system-initiated calls)
       await db.from("lead_activities").insert({
@@ -270,7 +277,7 @@ Deno.serve(async (req) => {
         ai_called: true,
         ai_called_at: new Date().toISOString(),
         ai_call_uuid: plivoUuid || callId,
-      } as any).eq("id", lead_id);
+      } as any).is("archived_at", null).eq("id", lead_id);
 
       return json({
         success: true,

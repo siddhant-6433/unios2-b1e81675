@@ -453,7 +453,7 @@ const Admissions = () => {
       // Get counsellor's active leads
       const { data: counsellorLeads, error: clErr } = await supabase
         .from("leads")
-        .select("id")
+        .select("id").is("archived_at", null)
         .eq("counsellor_id", cid);
 
       console.log("Not-called filter: counsellor leads", counsellorLeads?.length, "error:", clErr?.message);
@@ -481,7 +481,7 @@ const Admissions = () => {
       if (missingIds.length > 0) {
         const { data: extraLeads } = await supabase
           .from("leads")
-          .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+          .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)").is("archived_at", null)
           .in("id", missingIds);
         if (extraLeads) {
           setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({
@@ -626,7 +626,7 @@ const Admissions = () => {
       try {
         const [leadRows, appRows, paymentRows] = await Promise.all([
           fetchAllIdOrderedRows<{ id: string; stage: string }>((cursorId, pageSize) => {
-            let query = supabase.from("leads").select("id, stage").order("id", { ascending: true }).limit(pageSize);
+            let query = supabase.from("leads").select("id, stage").is("archived_at", null).order("id", { ascending: true }).limit(pageSize);
             if (cursorId) query = query.gt("id", cursorId);
             return query;
           }),
@@ -794,7 +794,7 @@ const Admissions = () => {
       if (view !== "list") {
         let query = supabase
           .from("leads")
-          .select(`*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`)
+          .select(`*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`).is("archived_at", null)
           .order("created_at", { ascending: leadSortOrder === "oldest" })
           .order("id", { ascending: leadSortOrder === "oldest" })
           .limit(500);
@@ -848,7 +848,7 @@ const Admissions = () => {
         .select(
           ADMISSIONS_LEAD_LIST_SELECT,
           page === 1 ? { count: hasActiveListFilters ? "exact" : "planned" } : undefined
-        );
+        ).is("archived_at", null);
       query = applyAdmissionsLeadSort(query, leadSortOrder);
       query = query.limit(PAGE_SIZE + 1);
 
@@ -1346,7 +1346,7 @@ const Admissions = () => {
     for (;;) {
       let query: any = supabase
         .from("leads")
-        .select(ADMISSIONS_LEAD_LIST_SELECT);
+        .select(ADMISSIONS_LEAD_LIST_SELECT).is("archived_at", null);
       query = applyAdmissionsLeadSort(query, leadSortOrder);
       query = query.limit(exportPageSize);
 
@@ -1456,7 +1456,7 @@ const Admissions = () => {
     for (;;) {
       let query: any = supabase
         .from("leads")
-        .select("id, name, phone, email, stage, source, person_role, created_at, application_id, pre_admission_no, admission_no, lead_score, lead_temperature, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)");
+        .select("id, name, phone, email, stage, source, person_role, created_at, application_id, pre_admission_no, admission_no, lead_score, lead_temperature, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)").is("archived_at", null);
       if (reportCourseId !== "all") query = query.eq("course_id", reportCourseId);
       if (reportCampusId !== "all") query = query.eq("campus_id", reportCampusId);
       if (reportStages.length > 0) query = query.in("stage", reportStages);
@@ -1711,7 +1711,7 @@ const Admissions = () => {
       // we don't accidentally exclude anyone in the union.
       const hotStages = leadStagesForBucket("hot");
       const { data: stageLeads } = await supabase.from("leads")
-        .select("id").in("stage", hotStages).eq("is_mirror", false).limit(2000);
+        .select("id").is("archived_at", null).in("stage", hotStages).eq("is_mirror", false).limit(2000);
       const union = new Set<string>([
         ...((stageLeads || []) as any[]).map((r) => r.id),
         ...interestedLeadIds,
@@ -1917,7 +1917,7 @@ const Admissions = () => {
       const step = Math.min(999, remaining);
       let query: any = supabase
         .from("leads")
-        .select("id, created_at")
+        .select("id, created_at").is("archived_at", null)
         .order("created_at", { ascending: leadSortOrder === "oldest" })
         .order("id", { ascending: leadSortOrder === "oldest" })
         .limit(step + 1);
@@ -2212,7 +2212,7 @@ const Admissions = () => {
                   const ids = [...new Set<string>((data || []).map((r: any) => r.lead_id))];
                   const missingIds = ids.filter(id => !leads.find(l => l.id === id));
                   if (missingIds.length > 0) {
-                    const { data: extraLeads } = await supabase.from("leads").select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)").in("id", missingIds);
+                    const { data: extraLeads } = await supabase.from("leads").select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)").is("archived_at", null).in("id", missingIds);
                     if (extraLeads) setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({ ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—", counsellor_name: l.profiles?.display_name || "Unassigned" }))]);
                   }
                   setVisitLeadIds(new Set(ids)); setFollowupLeadIds(null); setInactiveIds(null);
@@ -2224,7 +2224,7 @@ const Admissions = () => {
                   const ids = [...new Set<string>((data || []).map((r: any) => r.lead_id))];
                   const missingIds = ids.filter(id => !leads.find(l => l.id === id));
                   if (missingIds.length > 0) {
-                    const { data: extraLeads } = await supabase.from("leads").select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)").in("id", missingIds);
+                    const { data: extraLeads } = await supabase.from("leads").select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)").is("archived_at", null).in("id", missingIds);
                     if (extraLeads) setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({ ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—", counsellor_name: l.profiles?.display_name || "Unassigned" }))]);
                   }
                   setVisitLeadIds(new Set(ids)); setFollowupLeadIds(null); setInactiveIds(null);
@@ -2235,7 +2235,7 @@ const Admissions = () => {
                   if (stageFilter === stat.filterStage) { setStageFilter("all"); setPage(1); return; }
                   // Fetch leads at this stage from DB
                   let sq = supabase.from("leads")
-                    .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+                    .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)").is("archived_at", null)
                     .eq("stage", stat.filterStage).order("created_at", { ascending: false }).limit(100);
                   if (role === "counsellor" && profile?.id) sq = sq.eq("counsellor_id", profile.id);
                   else if (selectedCampusId !== "all") sq = sq.eq("campus_id", selectedCampusId);
@@ -2286,7 +2286,7 @@ const Admissions = () => {
                 // Get leads with fee-paid stages OR paid applications
                 const feeStages = ["application_fee_paid", "application_submitted", "offer_sent", "token_paid", "pre_admitted", "admitted"];
                 let stageQ = supabase.from("leads")
-                  .select("id")
+                  .select("id").is("archived_at", null)
                   .in("stage", feeStages);
                 if (role === "counsellor" && profile?.id) stageQ = stageQ.eq("counsellor_id", profile.id);
                 else if (selectedCampusId !== "all") stageQ = stageQ.eq("campus_id", selectedCampusId);
@@ -2305,7 +2305,7 @@ const Admissions = () => {
                 if (missingIds.length > 0) {
                   const { data: extraLeads } = await supabase
                     .from("leads")
-                    .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+                    .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)").is("archived_at", null)
                     .in("id", missingIds);
                   if (extraLeads) {
                     setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({
@@ -2330,7 +2330,7 @@ const Admissions = () => {
                 const stages = stat.filterStage.split(",");
                 let q = supabase
                   .from("leads")
-                  .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+                  .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)").is("archived_at", null)
                   .in("stage", stages)
                   .order("created_at", { ascending: false })
                   .limit(100);
@@ -2888,7 +2888,7 @@ const Admissions = () => {
                 if (missingIds.length > 0) {
                   const { data: extraLeads } = await supabase
                     .from("leads")
-                    .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+                    .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)").is("archived_at", null)
                     .in("id", missingIds);
                   if (extraLeads) {
                     setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({

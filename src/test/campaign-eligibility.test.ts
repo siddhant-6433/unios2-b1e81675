@@ -157,3 +157,23 @@ describe("polymorphic list members (leads + marketing contacts)", () => {
     }
   });
 });
+
+
+describe("archived marketing audience destination deduplication", () => {
+  it("sends once across local, country-code and trunk-prefix phone variants", () => {
+    const result = filterCampaignRecipients([
+      { id: "1", phone: "9876543210", stage: "not_interested" },
+      { id: "2", phone: "+91 98765 43210", stage: "cold" },
+      { id: "3", phone: "09876543210", stage: "new_lead" },
+    ], { channel: "whatsapp", excludeCold: false });
+    expect(result.eligible.map(l => l.id)).toEqual(["1"]);
+    expect(result.counts.duplicate).toBe(2);
+  });
+  it("sends once across case and whitespace variants of email addresses", () => {
+    const result = filterCampaignRecipients([
+      { id: "1", email: "Parent@Example.com" }, { id: "2", email: " parent@example.com " },
+    ], { channel: "email" });
+    expect(result.eligible.map(l => l.id)).toEqual(["1"]);
+    expect(result.eligible[0].email).toBe("parent@example.com");
+  });
+});

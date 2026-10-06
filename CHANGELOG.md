@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0.0] - 2026-10-05
+
+### Added
+
+- Preview, archive and roll back the old lead backlog while preserving applicants, students, payments and records needing review.
+- Keep nursing/GNM with Ashish, engaged school leads with Payal and split Mirai leads evenly between Reema and Harsh Verma, transferring pending work together.
+- Preserve archived prospects in a dated marketing list with cleanup reports and conflict-aware recovery.
+
+### Changed
+
+- Exclude archived leads from calling, pendency, reclaim, revival and automatic outreach; cancel pending follow-ups and scheduled WhatsApp sends while retaining history.
+- Keep new prospects unassigned in Lead Buckets until explicitly allocated after cleanup starts.
+- Deduplicate marketing audiences and recheck archived recipients for admission protection and opt-outs before sending.
+
+## [0.2.5.0] - 2026-10-05
+
+### Changed
+
+- Show Admissions navigation and the Leads listing only to counsellors, super admins, principals, and admission heads, while retaining existing permissions for individual pages.
+- Keep lead search, individual lead access, offline receipts, and existing refund permissions available to accountants and office admins, with lead return links and dashboard listing links pointing to Search.
+- Hide Admissions follow-up counts from the Inbox badge when switching to a role without Admissions access.
+
 ## [0.2.4.0] - 2026-10-05
 
 ### Fixed

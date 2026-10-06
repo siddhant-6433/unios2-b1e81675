@@ -1,3 +1,4 @@
+import { LeadCleanupDialog } from "@/components/leads/LeadCleanupDialog";
 import { CreateCommunicationListButton } from '@/components/leads/CreateCommunicationListButton';
 import { fetchCampaignListMembers, fetchLastWhatsAppMarketingAtByRecipients, campaignTarget, withLiveDirectoryCounts, isDirectoryList, audienceLabel, canAccessDirectoryAudience } from '@/lib/directoryCommunicationLists';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
@@ -1602,6 +1603,7 @@ export default function LeadLists() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2 shrink-0 self-start">
+          <LeadCleanupDialog onChanged={() => { void fetchLists(); }} />
           {(['consultants', 'academic_partners'] as const).some(a => canAccessDirectoryAudience(a, role, permissions)) && <Button variant="outline" onClick={() => setDynamicOpen(true)}>Create Dynamic List</Button>}
           <Dialog open={dynamicOpen} onOpenChange={setDynamicOpen}><DialogContent><DialogHeader><DialogTitle>Create Dynamic List</DialogTitle></DialogHeader>
             <p className="text-sm text-muted-foreground">These audiences include every status and update before each campaign.</p>

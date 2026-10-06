@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   ALL_APP_ROLES,
+  ADMISSIONS_ROLES,
+  canAccessAdmissions,
+  decideRoleAccess,
+  routePolicyFor,
   ROLE_LABELS,
   canSeePolicyItem,
   canUsePermission,
@@ -369,5 +373,34 @@ describe("accessPolicy", () => {
     expect(decidePermissionAccess(collegeFaculty, "attendance:mark_period").allowed).toBe(true);
     expect(decidePermissionAccess(collegeFaculty, "attendance:mark_daily").allowed).toBe(false);
     expect(decidePermissionAccess(collegeFaculty, "students:view_sensitive").allowed).toBe(false);
+  });
+});
+
+describe("Admissions access", () => {
+  it.each(ALL_APP_ROLES)("restricts Admissions visibility for %s regardless of lead permissions", (role) => {
+    const expected = ADMISSIONS_ROLES.includes(role);
+    const user = state({ role, realRole: role, permissions: ["leads:view", "search:view"] });
+    expect(canAccessAdmissions(role)).toBe(expected);
+    expect(canSeePolicyItem(user, { url: "/admissions", permission: "leads:view" })).toBe(expected);
+    expect(decideRoleAccess(user, ADMISSIONS_ROLES).allowed).toBe(expected);
+  });
+
+  it.each(["accountant", "office_admin"] as const)("preserves %s lead details and Search", (role) => {
+    const user = state({ role, realRole: role, permissions: ["leads:view", "search:view"] });
+    expect(canSeePolicyItem(user, { url: "/search" })).toBe(true);
+    expect(decidePermissionAccess(user, "leads:view").allowed).toBe(true);
+    expect(routePolicyFor("/admissions/lead-123")?.roles).toBeUndefined();
+    expect(routePolicyFor("/admissions?stage=admitted")?.roles).toEqual(ADMISSIONS_ROLES);
+    expect(routePolicyFor("/admissions/")?.roles).toEqual(ADMISSIONS_ROLES);
+  });
+
+  it("uses the impersonated role and hides Admissions while roles load", () => {
+    const user = state({ role: "accountant", realRole: "super_admin", isImpersonating: true });
+    expect(canAccessAdmissions(user.role)).toBe(false);
+    expect(canSeePolicyItem(user, { url: "/admissions" })).toBe(false);
+    expect(decideRoleAccess(user, ADMISSIONS_ROLES)).toEqual({
+      allowed: false, reason: "wrong_role", redirectTo: "/forbidden",
+    });
+    expect(canAccessAdmissions(null)).toBe(false);
   });
 });
