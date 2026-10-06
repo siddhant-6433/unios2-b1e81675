@@ -10,9 +10,11 @@ const refundActions = read("src/lib/leadRefundActions.ts");
 const migrationPath = readdirSync("supabase/migrations").find((f) => f.endsWith("_lead_payment_refunds.sql"))!;
 const multiReceiptMigrationPath = readdirSync("supabase/migrations").find((f) => f.endsWith("_lead_multi_receipt_refunds.sql"))!;
 const syncSafetyMigrationPath = readdirSync("supabase/migrations").find((f) => f.endsWith("_lead_refund_sync_idempotency_and_cent_validation.sql"))!;
+const refundNotificationMigrationPath = readdirSync("supabase/migrations").find((f) => f.endsWith("_notify_super_admins_of_refund_drafts.sql"))!;
 const migration = read(`supabase/migrations/${migrationPath}`);
 const multiReceiptMigration = read(`supabase/migrations/${multiReceiptMigrationPath}`);
 const syncSafetyMigration = read(`supabase/migrations/${syncSafetyMigrationPath}`);
+const refundNotificationMigration = read(`supabase/migrations/${refundNotificationMigrationPath}`);
 const zohoSync = read("supabase/functions/zoho-refund-sync/index.ts");
 
 describe("lead payment refunds", () => {
@@ -76,6 +78,16 @@ describe("lead payment refunds", () => {
     expect(multiReceiptMigration).toContain("lp.type <> 'application_fee'");
     expect(multiReceiptMigration).toContain("lp.status = 'confirmed'");
     expect(multiReceiptMigration).toContain("fr.status <> 'rejected'");
+  });
+
+  it("notifies super admins once a student or lead refund draft has its total", () => {
+    expect(refundNotificationMigration).toContain("CREATE CONSTRAINT TRIGGER trg_notify_super_admins_of_fee_refund_draft");
+    expect(refundNotificationMigration).toContain("DEFERRABLE INITIALLY DEFERRED");
+    expect(refundNotificationMigration).toContain("WHERE ur.role = 'super_admin'::public.app_role");
+    expect(refundNotificationMigration).toContain("COALESCE(s.name, l.name, 'Candidate')");
+    expect(refundNotificationMigration).toContain("to_char(v_total_amount");
+    expect(refundNotificationMigration).toContain("/finance?tab=refunds&status=draft&refund_id=%s");
+    expect(refundNotificationMigration).toContain("'approval_pending'");
   });
 
   it("enforces cent precision and serializes Zoho payout retries", () => {

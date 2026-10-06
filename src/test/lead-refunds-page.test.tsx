@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Refunds from "@/pages/Refunds";
 
@@ -25,6 +25,11 @@ function refundRowsQuery(rows: unknown[]) {
   chain.order = vi.fn(() => chain);
   chain.then = (resolve: (value: unknown) => void) => resolve({ data: rows, error: null });
   return chain;
+}
+
+function OpenRefundNotificationTarget() {
+  const navigate = useNavigate();
+  return <button onClick={() => navigate("/finance?tab=refunds&status=draft&refund_id=refund-1")}>Open notification</button>;
 }
 
 beforeEach(() => {
@@ -75,6 +80,41 @@ describe("Finance refunds page lead rows", () => {
     expect(screen.getByText("PA-2048")).toBeInTheDocument();
     expect(screen.getByText("Duplicate token receipt")).toBeInTheDocument();
     expect(screen.getByText("Awaiting super admin approval")).toBeInTheDocument();
+  });
+
+  it("opens a linked refund draft from the Finance URL", async () => {
+    mocks.auth.role = "super_admin";
+    render(<MemoryRouter initialEntries={["/finance?tab=refunds&status=draft&refund_id=refund-1"]}><Refunds embedded /></MemoryRouter>);
+
+    expect(await screen.findByRole("button", { name: "Draft" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Asha Verma").closest("tr")).toHaveAttribute("data-refund-id", "refund-1");
+    expect(screen.getByRole("button", { name: "Approve", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject refund" })).toBeInTheDocument();
+  });
+
+  it("refetches when a notification is opened while the Refunds page is mounted", async () => {
+    mocks.auth.role = "super_admin";
+    mocks.status = "approved";
+    render(<MemoryRouter initialEntries={["/finance?tab=refunds&status=approved"]}>
+      <Refunds embedded /><OpenRefundNotificationTarget />
+    </MemoryRouter>);
+
+    await screen.findByText("Asha Verma");
+    expect(mocks.from).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Open notification" }));
+
+    await waitFor(() => expect(mocks.from).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps the linked refund visible if its status changed after notification", async () => {
+    mocks.auth.role = "super_admin";
+    mocks.status = "approved";
+    render(<MemoryRouter initialEntries={["/finance?tab=refunds&status=draft&refund_id=refund-1"]}>
+      <Refunds embedded />
+    </MemoryRouter>);
+
+    const candidate = await screen.findByText("Asha Verma");
+    expect(candidate.closest("tr")).toHaveTextContent("Approved");
   });
 
   it("keeps the finance permission gate in front of the refund query", () => {

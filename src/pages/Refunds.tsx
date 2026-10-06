@@ -1,7 +1,7 @@
 import { PageLoader } from "@/components/ui/page-loader";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { useState, useEffect, useMemo } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -79,13 +79,16 @@ function refundUtrShareText(r: RefundRow) {
 }
 
 export default function Refunds({ embedded = false }: { embedded?: boolean }) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { role, hasPermission } = useAuth();
   const { toast } = useToast();
   const canRefund = hasPermission("finance:refund") || ["super_admin", "accountant"].includes(role || "");
   const canApprove = role === "super_admin";
   const canPay = canRefund;
 
-  const [filter, setFilter] = useState("approved");
+  const requestedFilter = searchParams.get("status");
+  const filter = FILTERS.some((f) => f.value === requestedFilter) ? requestedFilter! : "approved";
+  const focusedRefundId = searchParams.get("refund_id");
   const [rows, setRows] = useState<RefundRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
@@ -101,12 +104,28 @@ export default function Refunds({ embedded = false }: { embedded?: boolean }) {
     setLoading(false);
   };
 
-  useEffect(() => { if (canRefund) fetchAll(); }, [canRefund]);
+  useEffect(() => { if (canRefund) fetchAll(); }, [canRefund, focusedRefundId]);
 
   const filtered = useMemo(
-    () => filter === "all" ? rows : rows.filter((r) => r.status === filter),
-    [rows, filter],
+    () => filter === "all" ? rows : rows.filter((r) => r.status === filter || r.id === focusedRefundId),
+    [rows, filter, focusedRefundId],
   );
+
+  useEffect(() => {
+    if (loading || !focusedRefundId) return;
+    const row = Array.from(document.querySelectorAll<HTMLTableRowElement>("[data-refund-id]"))
+      .find((candidate) => candidate.dataset.refundId === focusedRefundId);
+    row?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  }, [loading, filtered, focusedRefundId]);
+
+  const changeFilter = (nextFilter: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("tab", "refunds");
+      next.set("status", nextFilter);
+      return next;
+    }, { replace: true });
+  };
 
   const handleApprove = async (r: RefundRow) => {
     setActing(r.id);
@@ -157,7 +176,7 @@ export default function Refunds({ embedded = false }: { embedded?: boolean }) {
         )}
         <div className="flex items-center gap-2 ml-auto">
           {FILTERS.map((f) => (
-            <Button key={f.value} size="sm" variant={filter === f.value ? "default" : "outline"} className="h-8 text-xs" onClick={() => setFilter(f.value)}>
+            <Button key={f.value} size="sm" variant={filter === f.value ? "default" : "outline"} aria-pressed={filter === f.value} className="h-8 text-xs" onClick={() => changeFilter(f.value)}>
               {f.label}
             </Button>
           ))}
@@ -196,7 +215,7 @@ export default function Refunds({ embedded = false }: { embedded?: boolean }) {
                 </thead>
                 <tbody>
                   {filtered.map((r) => (
-                    <tr key={r.id} className="border-b border-border/40 hover:bg-muted/20">
+                    <tr key={r.id} data-refund-id={r.id} className={`border-b border-border/40 hover:bg-muted/20 ${focusedRefundId === r.id ? "bg-primary/5 ring-1 ring-inset ring-primary/40" : ""}`}>
                       <td className="px-4 py-3">
                         <span className="block font-medium text-foreground">{r.students?.name || r.leads?.name || "—"}</span>
                         <span className="block text-[10px] text-muted-foreground">{r.students?.admission_no || r.leads?.admission_no || r.leads?.pre_admission_no || ""}</span>
@@ -242,7 +261,7 @@ export default function Refunds({ embedded = false }: { embedded?: boolean }) {
                                 </Button>
                               )}
                               {canApprove && (
-                                <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive hover:text-destructive" disabled={acting === r.id} onClick={() => handleReject(r)}>
+                                <Button size="sm" variant="ghost" aria-label="Reject refund" className="h-7 px-2 text-destructive hover:text-destructive" disabled={acting === r.id} onClick={() => handleReject(r)}>
                                   <XCircle className="h-3 w-3" />
                                 </Button>
                               )}
