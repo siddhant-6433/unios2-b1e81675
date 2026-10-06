@@ -113,7 +113,7 @@ describe("concessions never write the ledger from the client", () => {
   });
 
   it("shows the request control to principals, coordinators, office assistants, counsellors and finance roles", () => {
-    expect(studentFeePanel).toContain('["principal", "school_coordinator", "office_assistant", "counsellor", "super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "")');
+    expect(studentFeePanel).toContain('["principal", "vice_principal", "school_coordinator", "office_assistant", "counsellor", "super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "")');
   });
 
   it("labels pending concessions as under approval in the ledger", () => {

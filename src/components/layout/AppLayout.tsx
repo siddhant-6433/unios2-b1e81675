@@ -144,10 +144,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const title = pageTitles[location.pathname] || brand.title;
   const { profile, role } = useAuth();
   const [deferredShellReady, setDeferredShellReady] = useState(false);
-  const showWalkInBtn = role === "counsellor" || role === "admission_head" || role === "super_admin" || role === "campus_admin" || role === "principal";
+  const showWalkInBtn = role === "counsellor" || role === "admission_head" || role === "super_admin" || role === "campus_admin" || (role === "principal" || role === "vice_principal");
   // Active-users widget: super_admin sees everyone; campus_admin/principal/
   // admission_head see only members of teams they lead (scoped in the RPC).
-  const showActiveUsers = role === "super_admin" || role === "campus_admin" || role === "principal" || role === "admission_head";
+  const showActiveUsers = role === "super_admin" || role === "campus_admin" || (role === "principal" || role === "vice_principal") || role === "admission_head";
   // Console routes own their own scrolling and want the full viewport: the
   // shell stops growing and <main> stops padding, so a three-column layout can
   // just use h-full instead of guessing the chrome height with calc(100vh-Npx).

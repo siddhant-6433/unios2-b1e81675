@@ -121,7 +121,7 @@ const LeadDetail = () => {
   // super_admin, principal, leads:assign_external_owner, or counsellor with consultants:view.
   const canAssignExternalOwner =
     isSuperAdmin
-    || role === "principal"
+    || (role === "principal" || role === "vice_principal")
     || hasPermission("leads:assign_external_owner")
     || (role === "counsellor" && hasPermission("consultants:view"));
   const { coursesByDepartment, getCampusesForCourse, courseOptions } = useCourseCampusLink();
@@ -1336,7 +1336,7 @@ const LeadDetail = () => {
 
       {/* Quick action icon bar */}
       {(() => {
-        const canCreateProposal = role === "super_admin" || role === "principal" || role === "counsellor" || role === "admission_head" || role === "campus_admin";
+        const canCreateProposal = role === "super_admin" || (role === "principal" || role === "vice_principal") || role === "counsellor" || role === "admission_head" || role === "campus_admin";
         const showFeeProposalNewBadge = new Date() < FEE_PROPOSAL_NEW_BADGE_VISIBLE_UNTIL;
 
         const actions = [
@@ -1482,7 +1482,7 @@ const LeadDetail = () => {
           leadId={lead.id}
           leadPhone={lead.phone}
           applicationId={lead.application_id}
-          canImpersonate={role === "super_admin" || role === "principal" || role === "campus_admin" || role === "admission_head" || role === "counsellor"}
+          canImpersonate={role === "super_admin" || (role === "principal" || role === "vice_principal") || role === "campus_admin" || role === "admission_head" || role === "counsellor"}
         />
       )}
 

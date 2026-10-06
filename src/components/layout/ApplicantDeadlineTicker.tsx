@@ -19,6 +19,7 @@ const STAFF_ROLES = new Set([
   "super_admin",
   "campus_admin",
   "principal",
+  "vice_principal",
   "admission_head",
   "counsellor",
   "accountant",

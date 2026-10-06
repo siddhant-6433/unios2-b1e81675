@@ -104,9 +104,9 @@ function StudentFeePanelForStudent({ student, onRefresh }: StudentFeePanelProps)
   const [refunds, setRefunds] = useState<any[]>([]);
 
   const isSuperAdmin = role === "super_admin";
-  const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant", "office_admin"].includes(role || "");
+  const isFinanceRole = ["super_admin", "campus_admin", "principal", "vice_principal", "accountant", "office_admin"].includes(role || "");
   const canProvision = isFinanceRole;
-  const canRequestConcession = ["principal", "school_coordinator", "office_assistant", "counsellor", "super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
+  const canRequestConcession = ["principal", "vice_principal", "school_coordinator", "office_assistant", "counsellor", "super_admin", "campus_admin", "accountant", "office_admin"].includes(role || "");
   const canReallocate = hasPermission("fee_ledger:reallocate") || ["super_admin", "accountant", "office_admin"].includes(role || "");
   // Taking money at the counter is cashier-only, same gate as OfflinePaymentDialog.
   // Works for both lead-based candidates and lead-less (school) students — the

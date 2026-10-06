@@ -251,7 +251,7 @@ const ADMISSIONS_ROLES = [
   "super_admin", "campus_admin", "principal", "admission_head", "counsellor", "data_entry",
 ];
 
-const APPROVER_ROLES = ["super_admin", "principal", "campus_admin", "admission_head"];
+const APPROVER_ROLES = ["super_admin", "principal", "vice_principal", "campus_admin", "admission_head"];
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
@@ -290,7 +290,7 @@ export default function Inbox() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const isSuperAdmin = role === "super_admin";
-  const isPrincipal = role === "principal";
+  const isPrincipal = (role === "principal" || role === "vice_principal");
   const isAdmissions = ADMISSIONS_ROLES.includes(role || "");
   const isApprover = APPROVER_ROLES.includes(role || "");
 
@@ -366,7 +366,7 @@ export default function Inbox() {
       label: "Contact Changes",
       icon: User,
       count: counts.contact_changes,
-      roles: ["super_admin", "principal"],
+      roles: ["super_admin", "principal", "vice_principal"],
       color: "text-cyan-600",
     },
     {

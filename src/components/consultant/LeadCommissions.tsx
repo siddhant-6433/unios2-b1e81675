@@ -43,7 +43,7 @@ export function LeadCommissions({ consultantId }: Props) {
   const [newType, setNewType] = useState("fixed");
   const [newNotes, setNewNotes] = useState("");
 
-  const canEdit = ["super_admin", "campus_admin", "principal", "admission_head"].includes(role || "");
+  const canEdit = ["super_admin", "campus_admin", "principal", "vice_principal", "admission_head"].includes(role || "");
 
   const fetchOverrides = async () => {
     const { data } = await supabase

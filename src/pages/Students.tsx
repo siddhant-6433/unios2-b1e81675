@@ -287,9 +287,9 @@ const Students = () => {
   const { toast } = useToast();
   const canSeeContact = can("students", "view_contact");
   const canCreateStudents = can("students", "create");
-  const canExportStudents = role === "super_admin" || role === "principal";
+  const canExportStudents = role === "super_admin" || (role === "principal" || role === "vice_principal");
   // ponytail: same roles that can see StudentFeePanel's Auto-Assign
-  const canAssignFees = ["super_admin", "campus_admin", "principal", "accountant", "admission_head"].includes(role || "");
+  const canAssignFees = ["super_admin", "campus_admin", "principal", "vice_principal", "accountant", "admission_head"].includes(role || "");
   const [assigning, setAssigning] = useState(false);
   const rosterRequest = useRef(0);
 

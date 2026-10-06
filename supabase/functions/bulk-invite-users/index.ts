@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 const VALID_ROLES = [
-  "super_admin", "campus_admin", "principal", "admission_head",
+  "super_admin", "campus_admin", "principal", "vice_principal", "admission_head",
   "counsellor", "accountant", "faculty", "teacher",
   "data_entry", "office_assistant", "hostel_warden", "student", "parent",
 ];

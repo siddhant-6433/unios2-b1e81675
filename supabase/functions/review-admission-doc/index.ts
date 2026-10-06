@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
     if (authErr || !user) return json({ error: "Auth failed" }, 401);
     const { data: roleRows } = await db.from("user_roles").select("role").eq("user_id", user.id);
     const roles = (roleRows || []).map((r: any) => String(r.role));
-    if (!roles.some(r => r === "super_admin" || r === "principal")) {
+    if (!roles.some(r => r === "super_admin" || (r === "principal" || r === "vice_principal"))) {
       return json({ error: "Forbidden: reviewer role required" }, 403);
     }
 

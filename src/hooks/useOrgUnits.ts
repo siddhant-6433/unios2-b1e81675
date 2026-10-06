@@ -17,7 +17,7 @@ export interface CourseUnit { id: string; name: string; code: string | null; dep
 
 // Roles the students RLS already scopes to an assigned campus. Mirrored here so
 // HR staff at one campus don't get a picker full of campuses they can't touch.
-const CAMPUS_SCOPED_ROLES = new Set(["office_assistant", "school_coordinator", "principal"]);
+const CAMPUS_SCOPED_ROLES = new Set(["office_assistant", "school_coordinator", "principal", "vice_principal"]);
 
 export function useOrgUnits() {
   const { role } = useAuth();

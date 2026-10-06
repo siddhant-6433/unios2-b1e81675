@@ -305,7 +305,7 @@ function ApplicationEditDialog({ app, steps, isSchool, cahetRegistration, onClos
   const [view, setView] = useState<"edit" | "audit" | "access">("edit");
   const [currentApp, setCurrentApp] = useState<ApplicationRow>(app);
 
-  const isAdmin = role === "super_admin" || role === "admission_head" || role === "principal" || role === "campus_admin" || isTeamLeader;
+  const isAdmin = role === "super_admin" || role === "admission_head" || (role === "principal" || role === "vice_principal") || role === "campus_admin" || isTeamLeader;
   const canRequest = isAdmin || role === "counsellor";
 
   const onChange = (updates: Partial<ApplicationData>) => {

@@ -44,7 +44,7 @@ export function CourseCommissions({ consultantId }: Props) {
   const [saving, setSaving] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
-  const canRequestEdit = ["counsellor", "principal", "admission_head", "campus_admin"].includes(role || "");
+  const canRequestEdit = ["counsellor", "principal", "vice_principal", "admission_head", "campus_admin"].includes(role || "");
 
   const fetchCommissions = async () => {
     // Fetch commissions
