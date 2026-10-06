@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { UserPlus, X, ChevronDown } from "lucide-react";
@@ -252,7 +253,7 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
     }
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="fixed inset-0 bg-foreground/20 backdrop-blur-sm" onClick={onClose} />
       <div className="relative z-10 max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-card card-shadow p-6 mx-4 animate-fade-in">
@@ -449,7 +450,8 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0.1] - 2026-10-06
+
+### Fixed
+
+- Keep the Admin Panel's Invite User dialog visible in the viewport when opening it from a scrolled page.
+
 ## [0.3.0.0] - 2026-10-05
 
 ### Added
