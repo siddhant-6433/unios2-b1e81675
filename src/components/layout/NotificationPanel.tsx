@@ -252,7 +252,7 @@ export function NotificationPanel() {
               onClose={() => dismissToast(t.id)}
               onClick={() => {
                 dismissToast(t.id);
-                if (t.link) navigate(t.link);
+                void handleClick(t);
               }}
             />
           ))}

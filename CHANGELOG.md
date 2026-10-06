@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0.0] - 2026-10-06
+
+### Added
+
+- Notify super admins when student or lead refund drafts are created, with a link that opens and highlights the refund in Finance.
+
 ## [0.3.0.2] - 2026-10-06
 
 ### Fixed
