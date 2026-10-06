@@ -69,6 +69,13 @@ export function resolveApplyPortal(
   applications: PortalApplication[] = [],
   opts: { isMiraiInstitution?: boolean } = {},
 ): ApplyPortalId {
+  // A resolved course owner is authoritative in both directions. In
+  // particular, shared-campus College of Education courses must not inherit a
+  // stale Mirai brand from the lead or application flags.
+  if (opts.isMiraiInstitution !== undefined) {
+    return opts.isMiraiInstitution ? "mirai" : "nimt";
+  }
+
   const explicitAppPortal = portalFromApplicationFlags(applications);
   if (explicitAppPortal) return explicitAppPortal;
 
