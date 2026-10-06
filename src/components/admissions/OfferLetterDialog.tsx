@@ -184,7 +184,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
   const { user, role, realRole, isImpersonating } = useAuth();
   const { toast } = useToast();
   const [offers, setOffers] = useState<OfferLetter[]>([]);
-  const isApprover = role === "super_admin" || role === "principal";
+  const isApprover = role === "super_admin" || (role === "principal" || role === "vice_principal");
   const isPrincipalOrAbove = isApprover;
   const isSuperAdmin = role === "super_admin";
   const isAcademicPartnerOfferIssuer = role === "academic_partner_offer_letter";
@@ -1244,7 +1244,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
       }
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
-        description: `Offer letter approved by ${role === "principal" ? "principal" : "super admin"}`,
+        description: `Offer letter approved by ${(role === "principal" || role === "vice_principal") ? "principal" : "super admin"}`,
       });
       // Fire the PDF generator + notify student now that offer is officially approved.
       setSelectedOfferId(offerId);

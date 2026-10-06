@@ -102,7 +102,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Fresh Leads", url: "/fresh-leads", icon: Sparkles, permission: "call_log:view" },
   { title: "Pending Follow-ups", url: "/pending-followups", icon: AlertTriangle, permission: "call_log:view" },
   { title: "Visit Center", url: "/visit-center", icon: DoorOpen, permission: "leads:view" },
-  { title: "Visit Monitor", url: "/visit-monitor", icon: Footprints, roles: ["super_admin", "principal", "admission_head"] },
+  { title: "Visit Monitor", url: "/visit-monitor", icon: Footprints, roles: ["super_admin", "principal", "vice_principal", "admission_head"] },
   { title: "Call Log", url: "/call-log", icon: Phone, permission: "call_log:view" },
   { title: "AI Call Log", url: "/ai-call-log", icon: Bot, permission: "automation:view" },
   { title: "Automation", url: "/automation-rules", icon: Zap, permission: "automation:view" },
@@ -243,7 +243,7 @@ const managementMenu: MenuItem[] = [
     title: "ID Card Center",
     url: "/id-card-center",
     icon: CreditCard,
-    roles: ["super_admin", "principal", "office_admin", "office_assistant", "school_coordinator", "campus_admin"],
+    roles: ["super_admin", "principal", "vice_principal", "office_admin", "office_assistant", "school_coordinator", "campus_admin"],
     anyPermission: ["hr:view"],
   },
   { title: "WhatsApp Health", url: "/whatsapp-health", icon: AlertTriangle, permission: "user_management:view" },
@@ -337,7 +337,7 @@ export function AppSidebar() {
 
   const fetchPendingApprovals = useCallback(async () => {
     // Only approvers need this count
-    if (!["super_admin", "principal", "campus_admin", "admission_head"].includes(role || "")) {
+    if (!["super_admin", "principal", "vice_principal", "campus_admin", "admission_head"].includes(role || "")) {
       setPendingApprovals(0);
       return;
     }
@@ -352,7 +352,7 @@ export function AppSidebar() {
     const actionableCount = (data || []).filter((item: any) => {
       if (item.kind === "pending_an") return false;
       if (role === "super_admin") return true;
-      if (role === "principal") return item.pending_role === "principal";
+      if ((role === "principal" || role === "vice_principal")) return item.pending_role === "principal";
       if (role === "admission_head") return item.pending_role === "principal";
       if (role === "campus_admin") return item.pending_role === "super_admin";
       return false;

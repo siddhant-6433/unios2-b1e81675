@@ -30,7 +30,7 @@ interface Props {
 export function LeadDraftsPanel({
   refreshKey,
   onResume,
-  adminRoles = ["super_admin", "campus_admin", "principal", "admission_head"],
+  adminRoles = ["super_admin", "campus_admin", "principal", "vice_principal", "admission_head"],
 }: Props) {
   const { user, role } = useAuth();
   const [drafts, setDrafts] = useState<LeadDraft[]>([]);

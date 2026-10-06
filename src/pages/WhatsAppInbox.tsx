@@ -408,7 +408,7 @@ const INBOX_TEMPLATES: WhatsAppTemplateDefinition[] = [
 const isAdminRole = (role: string | null | undefined) =>
   role === "super_admin" || role === "admission_head" || role === "campus_admin";
 
-const ALLOWED_ROLES = new Set(["super_admin", "campus_admin", "principal", "admission_head", "counsellor", "hr_manager"]);
+const ALLOWED_ROLES = new Set(["super_admin", "campus_admin", "principal", "vice_principal", "admission_head", "counsellor", "hr_manager"]);
 
 // HR-scoped inbox: messages on +919599675267 (NIMT HR / careers number) plus
 // any conversation that's been categorised as a job_applicant on the
@@ -1912,7 +1912,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         const { data: staffRoles } = await supabase
           .from("user_roles")
           .select("user_id, role")
-          .in("role", ["super_admin", "campus_admin", "principal", "admission_head", "counsellor", "accountant", "faculty", "teacher", "data_entry", "office_admin", "office_assistant", "school_coordinator", "hostel_warden"]);
+          .in("role", ["super_admin", "campus_admin", "principal", "vice_principal", "admission_head", "counsellor", "accountant", "faculty", "teacher", "data_entry", "office_admin", "office_assistant", "school_coordinator", "hostel_warden"]);
 
         if (cancelled) return;
         const staffUserIds = new Set((staffRoles || []).map((r: any) => r.user_id));

@@ -691,7 +691,7 @@ export function SchoolFeeProposalDialog({ open, onOpenChange, lead }: SchoolFeeP
   const [showGuide, setShowGuide] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
-  const canCreate = ["super_admin", "principal", "counsellor", "admission_head", "campus_admin"].includes(role || "");
+  const canCreate = ["super_admin", "principal", "vice_principal", "counsellor", "admission_head", "campus_admin"].includes(role || "");
 
   const courseById = useMemo(() => new Map(courses.map((course) => [course.courseId, course])), [courses]);
   const relatedLeadById = useMemo(() => new Map(relatedLeads.map((item) => [item.id, item])), [relatedLeads]);

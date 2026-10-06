@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
       const { data: roleRows } = await db
         .from("user_roles").select("role").eq("user_id", user.id).limit(1);
       const callerRole = roleRows?.[0]?.role;
-      const allowed = ["super_admin", "campus_admin", "principal", "accountant", "admission_head", "counsellor"];
+      const allowed = ["super_admin", "campus_admin", "principal", "vice_principal", "accountant", "admission_head", "counsellor"];
       if (!callerRole || !allowed.includes(String(callerRole))) {
         return json({ error: `Forbidden: your role is "${callerRole || "unknown"}"` }, 403);
       }

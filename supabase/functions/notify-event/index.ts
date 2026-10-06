@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
         .from("user_roles")
         .select("role")
         .eq("user_id", jwtUserId);
-      const allowed = new Set(["super_admin", "campus_admin", "admission_head", "principal", "accountant", "counsellor"]);
+      const allowed = new Set(["super_admin", "campus_admin", "admission_head", "principal", "vice_principal", "accountant", "counsellor"]);
       if ((roles || []).some((r: any) => allowed.has(r.role))) okAuth = true;
     }
   }

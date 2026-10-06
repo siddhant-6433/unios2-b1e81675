@@ -13,6 +13,7 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   super_admin: "Super Admin",
   campus_admin: "Campus Admin",
   principal: "Principal",
+  vice_principal: "Vice Principal",
   admission_head: "Admission Head",
   hr_executive: "HR Executive",
   counsellor: "Counsellor",
@@ -150,7 +151,7 @@ export function permissionsForAcademicPartnerRole(role: AppRole | null): readonl
   return permissionsForPortalRole(role);
 }
 
-export const ADMISSIONS_ROLES: AppRole[] = ["counsellor", "super_admin", "principal", "admission_head"];
+export const ADMISSIONS_ROLES: AppRole[] = ["counsellor", "super_admin", "principal", "vice_principal", "admission_head"];
 
 export function canAccessAdmissions(role: AppRole | null): boolean {
   return role !== null && ADMISSIONS_ROLES.includes(role);
@@ -170,7 +171,7 @@ export const STAFF_ROUTE_POLICIES: readonly RoutePolicy[] = [
   // leads:view, which every counsellor has — so the sidebar rendered a link
   // that 403s, and the item's own roles allow-list was silently widened by this
   // fallback (see canSeePolicyItem).
-  { path: "/visit-monitor", roles: ["super_admin", "principal", "admission_head"], staffOnly: true },
+  { path: "/visit-monitor", roles: ["super_admin", "principal", "vice_principal", "admission_head"], staffOnly: true },
   { path: "/call-log", permission: "call_log:view", staffOnly: true },
   { path: "/ai-call-log", permission: "call_log:view", staffOnly: true },
   { path: "/cloud-dialer", permission: "call_log:view", staffOnly: true },
@@ -217,7 +218,7 @@ export const STAFF_ROUTE_POLICIES: readonly RoutePolicy[] = [
   { path: "/hr-referrals", permission: "hr:self", staffOnly: true },
   { path: "/hr-settings", permission: "hr:employees_edit", staffOnly: true },
   { path: "/admin", anyPermission: ["campuses_courses:view", "user_management:view", "permissions:view"], staffOnly: true },
-  { path: "/id-card-center", roles: ["super_admin", "principal", "office_admin", "office_assistant", "school_coordinator", "campus_admin"], anyPermission: ["hr:view"], staffOnly: true },
+  { path: "/id-card-center", roles: ["super_admin", "principal", "vice_principal", "office_admin", "office_assistant", "school_coordinator", "campus_admin"], anyPermission: ["hr:view"], staffOnly: true },
   { path: "/settings", permission: "user_management:view", staffOnly: true },
   { path: "/inbox", permission: "leads:view", staffOnly: true },
   { path: "/whatsapp-inbox", permission: "whatsapp:view", staffOnly: true },

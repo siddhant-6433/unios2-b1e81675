@@ -353,7 +353,7 @@ const App = () => (
                           Admins and team leaders keep the standalone pages (bulk reassign
                           lives there and counsellors can't see it anyway). */}
                       <Route path="/fresh-leads" element={<RedirectRole roles={["counsellor"]} to="/cloud-dialer"><RequirePermission module="leads" action="view"><FreshLeads /></RequirePermission></RedirectRole>} />
-                      <Route path="/visit-monitor" element={<RequireRole roles={["super_admin", "principal", "admission_head"]}><VisitMonitor /></RequireRole>} />
+                      <Route path="/visit-monitor" element={<RequireRole roles={["super_admin", "principal", "vice_principal", "admission_head"]}><VisitMonitor /></RequireRole>} />
                       <Route path="/visit-center" element={<RequirePermission module="leads" action="view"><VisitCenter /></RequirePermission>} />
                       <Route path="/call-log" element={<RequirePermission module="call_log" action="view"><CallLog /></RequirePermission>} />
                       <Route path="/ai-call-log" element={<RequirePermission module="call_log" action="view"><AiCallLog /></RequirePermission>} />

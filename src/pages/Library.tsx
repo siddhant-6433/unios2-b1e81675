@@ -317,10 +317,10 @@ const Library = () => {
   const canInventory = can("library", "inventory");
   const canDigitize = can("library", "digitize");
   const canManageSettings = can("library", "manage_settings");
-  const canCreateLibrary = role === "super_admin" || role === "campus_admin" || role === "principal";
+  const canCreateLibrary = role === "super_admin" || role === "campus_admin" || (role === "principal" || role === "vice_principal");
   const canExport = can("library", "export");
   const isSuperAdmin = role === "super_admin";
-  const isOversightRole = role === "campus_admin" || role === "principal";
+  const isOversightRole = role === "campus_admin" || (role === "principal" || role === "vice_principal");
   // Faculty/teacher (and any role with only `library:view`) get the patron
   // discovery experience, not the staff console.
   const isPatronOnly = !canCatalog && !canCirculate && !canInventory && !canDigitize
@@ -509,7 +509,7 @@ const Library = () => {
     return institutions.filter((institution) => libraryCampusId === "all" || institution.campus_id === libraryCampusId);
   }, [institutions, libraryCampusId]);
 
-  const isLibraryAdministrator = role === "super_admin" || role === "campus_admin" || role === "principal";
+  const isLibraryAdministrator = role === "super_admin" || role === "campus_admin" || (role === "principal" || role === "vice_principal");
   const myAssignedBranchIds = useMemo(() => {
     return new Set(staffAssignments.filter((assignment) => assignment.user_id === user?.id && assignment.active).map((assignment) => assignment.branch_id));
   }, [staffAssignments, user?.id]);

@@ -424,7 +424,7 @@ const StudentProfile = () => {
   const [batchOpts, setBatchOpts] = useState<Array<{ id: string; name: string; section?: string | null }>>([]);
   const [sessionOpts, setSessionOpts] = useState<Array<{ id: string; name: string }>>([]);
 
-  const canArchive = role === "office_assistant" || role === "school_coordinator" || role === "principal" || role === "super_admin";
+  const canArchive = role === "office_assistant" || role === "school_coordinator" || (role === "principal" || role === "vice_principal") || role === "super_admin";
   const canDelete = role === "super_admin";
   const canChangePlacement = role === "super_admin";
   const canToggleLogin = role === "super_admin";
@@ -957,7 +957,7 @@ const StudentProfile = () => {
     [!canSeeFees && "fees", !canSeeAudit && "audit", !canSeeDocuments && "documents"].filter(Boolean) as string[],
   );
   const activeTab = hiddenTabs.has(requestedTab) ? "details" : requestedTab;
-  const canCorrectProfile = can("students", "update") || ["office_assistant", "school_coordinator", "office_admin", "principal", "campus_admin", "super_admin"].includes(role || "");
+  const canCorrectProfile = can("students", "update") || ["office_assistant", "school_coordinator", "office_admin", "principal", "vice_principal", "campus_admin", "super_admin"].includes(role || "");
   const canUploadPhoto = canCorrectProfile;
 
   const syncFromApplication = async () => {
@@ -1172,7 +1172,7 @@ const StudentProfile = () => {
     }
   };
 
-  const canRequestContactChange = ["office_assistant", "school_coordinator", "office_admin", "principal", "super_admin"].includes(role || "");
+  const canRequestContactChange = ["office_assistant", "school_coordinator", "office_admin", "principal", "vice_principal", "super_admin"].includes(role || "");
   const selectedContactLabel = CONTACT_FIELDS.find((f) => f.value === contactField)?.label || "Contact number";
   const selectedContactOldValue = student?.[contactField] || "";
 

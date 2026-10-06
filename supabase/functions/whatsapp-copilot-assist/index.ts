@@ -11,7 +11,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const ALLOWED_ROLES = new Set(["super_admin", "campus_admin", "principal", "admission_head", "counsellor", "hr_manager"]);
+const ALLOWED_ROLES = new Set(["super_admin", "campus_admin", "principal", "vice_principal", "admission_head", "counsellor", "hr_manager"]);
 
 type MessageRow = {
   direction?: string | null;

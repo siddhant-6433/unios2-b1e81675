@@ -14,6 +14,7 @@ const ALL_ROLES: { value: AppRole; label: string }[] = [
   { value: "super_admin", label: "Super Admin" },
   { value: "campus_admin", label: "Campus Admin" },
   { value: "principal", label: "Principal" },
+  { value: "vice_principal", label: "Vice Principal" },
   { value: "admission_head", label: "Admission Head" },
   { value: "counsellor", label: "Counsellor" },
   { value: "accountant", label: "Accountant" },

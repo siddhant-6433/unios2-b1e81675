@@ -18,7 +18,7 @@ export function TatDefaultsCard() {
   if (loading) return null;
 
   const isCounsellor = role === "counsellor";
-  const isAdmin = ["super_admin", "campus_admin", "admission_head", "principal"].includes(role || "");
+  const isAdmin = ["super_admin", "campus_admin", "admission_head", "principal", "vice_principal"].includes(role || "");
 
   // Counsellor: show own defaults
   if (isCounsellor && myDefaults && myDefaults.total_defaults > 0) {

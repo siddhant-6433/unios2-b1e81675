@@ -36,7 +36,7 @@ export function PhotoDayAssigneesPanel() {
       setChecking(false);
       return;
     }
-    if (role === "super_admin" || role === "principal") {
+    if (role === "super_admin" || (role === "principal" || role === "vice_principal")) {
       setAllowed(true);
       setChecking(false);
       return;
