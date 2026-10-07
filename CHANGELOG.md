@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0.1] - 2026-10-07
+
+### Changed
+
+- See course names for leads, students and applications in header search results.
+
 ## [0.4.0.0] - 2026-10-06
 
 ### Added
