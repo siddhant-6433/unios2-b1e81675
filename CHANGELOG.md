@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0.1] - 2026-10-07
+
+### Changed
+
+- Show course names alongside candidates in the header search results.
+
 ## [0.4.0.0] - 2026-10-06
 
 ### Added
