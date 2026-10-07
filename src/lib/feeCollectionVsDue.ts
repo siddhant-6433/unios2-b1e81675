@@ -36,6 +36,16 @@ export type CollectionVsDueLine = {
   fee_ledger_payment_id?: string | null;
 };
 
+/** Canonicalizes known DAOTT naming variants for this report's course grouping. */
+export function canonicalReportCourseName(name: string | null | undefined) {
+  const value = String(name || "").trim();
+  const normalized = value.toLowerCase().replace(/[._-]+/g, " ").replace(/\s+/g, " ");
+  if (normalized.includes("daott") || (normalized.includes("anesthesia") && normalized.includes("ot technology"))) {
+    return "Diploma of Anesthesia & OT Technology (D.AOTT)";
+  }
+  return value || null;
+}
+
 export type CollectionVsDueDims = {
   campus_name: string | null;
   course_name: string | null;
@@ -113,7 +123,7 @@ export type ProgrammeBatchSection = {
 };
 
 export function sectionKey(line: CollectionVsDueDims) {
-  return [displayVal(line.campus_name), displayVal(line.course_name), displayVal(line.batch_name)].join("||");
+  return [displayVal(line.campus_name), displayVal(canonicalReportCourseName(line.course_name)), displayVal(line.batch_name)].join("||");
 }
 
 const romanGradeValues: Record<string, number> = {
@@ -160,7 +170,7 @@ export function groupByProgrammeBatch(lines: CollectionVsDueLine[]): ProgrammeBa
       section = {
         key,
         campus_name: displayVal(line.campus_name),
-        course_name: displayVal(line.course_name),
+        course_name: displayVal(canonicalReportCourseName(line.course_name)),
         batch_name: displayVal(line.batch_name),
         lines: [],
       };

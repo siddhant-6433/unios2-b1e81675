@@ -5,6 +5,7 @@ import {
   aggregateKpis,
   buildDetailedExportRows,
   buildSummaryExportRows,
+  canonicalReportCourseName,
   feeHeadKey,
   feeHeadsForLines,
   filterLinesForPdfSelection,
@@ -15,6 +16,7 @@ import {
   pivotStudents,
   type CollectionVsDueLine,
 } from "@/lib/feeCollectionVsDue";
+import { buildDaottReconciliationExportRows, DAOTT_RECONCILIATION_SOURCE, DAOTT_UNVERIFIED_CANDIDATES } from "@/lib/daottPartnerReconciliation";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -50,6 +52,33 @@ const line = (over: Partial<CollectionVsDueLine>): CollectionVsDueLine => ({
 });
 
 describe("fee collection vs due grouping", () => {
+  it("groups DAOTT naming variants together without changing other course names", () => {
+    expect(canonicalReportCourseName("DAOTT - GN")).toBe("Diploma of Anesthesia & OT Technology (D.AOTT)");
+    expect(canonicalReportCourseName("Diploma of Anesthesia & OT Technology (D.AOTT)")).toBe("Diploma of Anesthesia & OT Technology (D.AOTT)");
+    expect(canonicalReportCourseName("GNM")).toBe("GNM");
+    const sections = groupByProgrammeBatch([
+      line({ course_name: "DAOTT - GN", course_id: "c1" }),
+      line({ student_id: "s2", name: "Bina", admission_no: "AN-2", course_name: "Diploma of Anesthesia & OT Technology (D.AOTT)", course_id: "c2", fee_ledger_id: "l2" }),
+    ]);
+    expect(sections).toHaveLength(1);
+    expect(sections[0].course_name).toBe("Diploma of Anesthesia & OT Technology (D.AOTT)");
+    expect(sections[0].lines).toHaveLength(2);
+  });
+
+  it("keeps partner reference amounts unverified and separate from Finance totals", () => {
+    expect(DAOTT_UNVERIFIED_CANDIDATES.map((candidate) => candidate.name)).toEqual([
+      "Anamika", "Muskan", "Swati Kumari", "Rajesh Saini", "Gagan Bedi",
+    ]);
+    expect(DAOTT_UNVERIFIED_CANDIDATES.reduce((total, candidate) => total + candidate.referenceAmount, 0)).toBe(134600);
+    expect(DAOTT_RECONCILIATION_SOURCE.partnerCandidateCount - DAOTT_RECONCILIATION_SOURCE.financeExportCandidateCount).toBe(4);
+    const referenceRows = buildDaottReconciliationExportRows();
+    expect(referenceRows).toHaveLength(5);
+    expect(referenceRows.every((row) => row["Total Due"] === 0 && row["Total Collected"] === 0 && row.Balance === 0)).toBe(true);
+    expect(referenceRows[0]["Reference Amount (Unverified)"]).toBe(56000);
+    const financeLines = [line({ due_amount: 40000, collected_amount: 10000, balance: 30000 })];
+    expect(aggregateKpis(financeLines)).toMatchObject({ students: 1, due: 40000, collected: 10000, balance: 30000 });
+  });
+
   it("sections lines by campus, programme and batch", () => {
     const sections = groupByProgrammeBatch([
       line({ student_id: "s1" }),
