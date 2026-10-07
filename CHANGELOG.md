@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Show course names alongside candidates in the header search results.
+- See course names for leads, students and applications in header search results.
 
 ## [0.4.0.0] - 2026-10-06
 
