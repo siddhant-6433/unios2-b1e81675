@@ -16,6 +16,7 @@ import { getStudentClaimToken } from "@/lib/studentClaim";
 import { brandForStudentOwner, type StudentBrand } from "@/lib/studentBranding";
 import { fetchLeadFeeStatus } from "@/lib/leadFeeStatus";
 import { buildYear1LumpSumOffer } from "@/lib/year1LumpSumWaiver";
+import { resolveAbvmuDepositAmount } from "@/lib/abvmuDeposit";
 import { Year1LumpSumIncentiveCard } from "@/components/finance/Year1LumpSumBanner";
 import { IndianRupee, ClipboardCheck, Megaphone, AlertCircle, CheckCircle, Clock, CreditCard, FileText, // Aliased: `Receipt` is the payment-row type in this file.
   Receipt as ReceiptIcon, ChevronDown } from "lucide-react";
@@ -212,7 +213,9 @@ export default function StudentPortal() {
         const { data: status } = await fetchLeadFeeStatus(studentData.lead_id);
         const pct = Number(status?.lump_sum_pct);
         setLumpSumPct(Number.isFinite(pct) ? Math.max(0, pct) : 5);
-        setAbvmuCollegeDeduction(Math.max(0, Number(status?.abvmu_deposit_amount || 0)));
+        setAbvmuCollegeDeduction(
+          resolveAbvmuDepositAmount(course?.name || course?.code, status?.abvmu_deposit_amount),
+        );
       } else {
         setLumpSumPct(5);
         setAbvmuCollegeDeduction(0);

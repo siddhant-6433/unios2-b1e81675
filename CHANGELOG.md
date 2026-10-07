@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0.0] - 2026-10-07
+
+### Fixed
+
+- Show D.Pharma Year 1 tuition as the regular college fee without an ABVMU deposit across finance, applicant, and student fee views.
+
 ## [0.4.0.1] - 2026-10-07
 
 ### Changed

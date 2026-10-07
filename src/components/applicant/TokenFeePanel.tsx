@@ -17,6 +17,7 @@ import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayChecko
 import { feeTermLabel, feeTermLabelLong, feePeriodNoun } from "@/lib/feeTermLabels";
 import { useFeeStructureMeta } from "@/hooks/useFeeStructureMeta";
 import { uniformFeeFromMetadata } from "@/lib/abvmuCahetAllotment";
+import { resolveAbvmuDepositAmount } from "@/lib/abvmuDeposit";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
 // The single source of truth is _app_config — these are last-resort
@@ -1071,8 +1072,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   const isAdmitted = !!lead.admission_no;
   const isPreAdmitted = !!lead.pre_admission_no;
   const useLocalLoanLetterPreview = shouldUseLocalLoanLetterPreview();
-  const abvmuDepositAmount = Math.max(0, Number(feeStatus.abvmu_deposit_amount || 0));
-  const abvmuApprovedCredit = Math.max(0, Number(feeStatus.abvmu_approved_credit || 0));
+  const abvmuDepositAmount = resolveAbvmuDepositAmount(courseName, feeStatus.abvmu_deposit_amount);
+  const abvmuApprovedCredit = resolveAbvmuDepositAmount(courseName, feeStatus.abvmu_approved_credit);
   const abvmuOpenClaim = abvmuClaims.find((c) => c.status === "pending" || c.status === "approved");
   const showAbvmuClaim = abvmuDepositAmount > 0 && abvmuApprovedCredit <= 0;
 
