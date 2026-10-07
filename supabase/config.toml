@@ -309,3 +309,7 @@ static_files = ["./functions/beacon-report-pdf/assets/*"]
 
 [functions.apply-job]
 verify_jwt = false
+
+# Staff JWT and role are validated inside the academic partner bill sync handler.
+[functions.zoho-academic-partner-bill-sync]
+verify_jwt = false
