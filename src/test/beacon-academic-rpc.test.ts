@@ -19,7 +19,7 @@ const MIGRATIONS = [
   "supabase/migrations/20260929055340_beacon_class_teachers_assign_and_change.sql",
   "supabase/migrations/20260930153158_beacon_report_content_and_bulk_print.sql",
   "supabase/migrations/20260930163537_beacon_aggregate_weights_and_release_overview.sql",
-  "supabase/migrations/20261008095340_cbse_half_yearly_ut_best_and_co_scholastic_grades.sql",
+  "supabase/migrations/20261008131123_cbse_half_yearly_ut_best_and_co_scholastic_grades.sql",
 ];
 const SUBJECTS_SEED = MIGRATIONS[1];
 
