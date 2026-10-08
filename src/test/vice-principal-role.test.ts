@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ALL_APP_ROLES, ROLE_LABELS } from "@/lib/accessPolicy";
 
-const enumMigration = readFileSync("supabase/migrations/20261005134017_add_vice_principal_role_access.sql", "utf8");
-const grantsMigration = readFileSync("supabase/migrations/20261005134101_add_vice_principal_permissions.sql", "utf8");
+const enumMigration = readFileSync("supabase/migrations/20261006062808_add_vice_principal_role_access.sql", "utf8");
+const grantsMigration = readFileSync("supabase/migrations/20261006062809_add_vice_principal_permissions.sql", "utf8");
 const inviteDialog = readFileSync("src/components/admin/InviteUserDialog.tsx", "utf8");
 const employeeLogin = readFileSync("src/lib/employeeLogin.ts", "utf8");
 

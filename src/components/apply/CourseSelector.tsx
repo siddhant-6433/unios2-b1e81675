@@ -231,14 +231,18 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
 
     // Applicant sessions use the anon key and cannot read the CRM leads table.
     // The application insert trigger and security-definer RPC link Mirai leads.
-    const existingLead = portal.id === "mirai" ? null : await supabase
-      .from("leads")
-      .select("id, campus_id, portal_brand, lead_institution_type, is_mirror")
-      .eq("phone", phone)
-      .eq("is_mirror", false)
-      .order("created_at", { ascending: false })
-      .limit(5)
-      .then(({ data }) => pickLeadForPortal(data, portal.id));
+    let existingLeads: any[] = [];
+    if (portal.id !== "mirai") {
+      const { data } = await supabase
+        .from("leads")
+        .select("id, campus_id, portal_brand, lead_institution_type, is_mirror")
+        .eq("phone", phone)
+        .eq("is_mirror", false)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      existingLeads = data || [];
+    }
+    const existingLead = pickLeadForPortal(existingLeads, portal.id);
 
     onComplete(selectedSession, selections, existingLead?.id || null);
     setSaving(false);

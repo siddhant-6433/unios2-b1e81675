@@ -9,7 +9,7 @@ export async function notifyMiraiAdmissions(admin: any, input: { leadId: string;
   if (!candidates.length) return;
   const { data: roles, error: rolesError } = await admin.from("user_roles").select("user_id, role").in("user_id", candidates);
   if (rolesError) throw rolesError;
-  const allowedRoles = new Set(["super_admin", "admission_head", "campus_admin"]);
+  const allowedRoles = new Set(["super_admin", "admission_head", "campus_admin", "counsellor"]);
   const userIds = [...new Set((roles || []).filter((row: any) => allowedRoles.has(row.role)).map((row: any) => row.user_id))];
   if (!userIds.length) return;
   const { error } = await admin.from("notifications").insert(userIds.map(user_id => ({

@@ -231,17 +231,19 @@ describe("academic partner access scope", () => {
     expect(superAdminCount).toBe(2);
   });
 
-  it("splits the Students tab into Token Paid/Pre-Admitted/Admitted, deriving all three from one unified candidateRows list", () => {
-    // Sub-tabs exist, defaulting to the first non-empty bucket in Token Paid → Pre-Admitted → Admitted order.
+  it("splits the Students tab into Pipeline/Token Paid/Pre-Admitted/Admitted from one unified candidateRows list", () => {
+    // Sub-tabs default to the first non-empty bucket in the application funnel order.
     expect(portal).toContain(
-      'defaultValue={tokenPaidRows.length > 0 ? "token_paid" : preAdmittedRows.length > 0 ? "pre_admitted" : "admitted"}',
+      'defaultValue={pipelineRows.length > 0 ? "pipeline" : tokenPaidRows.length > 0 ? "token_paid" : preAdmittedRows.length > 0 ? "pre_admitted" : "admitted"}',
     );
     expect(portal).toContain("Token Paid ({tokenPaidRows.length})");
     expect(portal).toContain("Pre-Admitted ({preAdmittedRows.length})");
     expect(portal).toContain("Admitted ({admittedRows.length})");
+    expect(portal).toContain("Pipeline ({pipelineRows.length})");
     expect(portal).toContain("No admitted students yet");
     expect(portal).toContain("No pre-admitted candidates yet");
     expect(portal).toContain("No token-paid candidates yet");
+    expect(portal).toContain("No candidates currently in pipeline");
     // candidateRows unifies partner-attributed leads with assignment-scoped
     // students not covered by a lead, so a candidate with no `students` row at
     // all (paid a token/part fee, no admission number) still shows up.
@@ -256,7 +258,8 @@ describe("academic partner access scope", () => {
       "const admittedRows = useMemo(() => candidateRows.filter((row) => Boolean(row.admissionNo)), [candidateRows]);",
     );
     expect(portal).toContain("candidateRows.filter((row) => !row.admissionNo && Boolean(row.pan))");
-    expect(portal).toContain("candidateRows.filter((row) => !row.admissionNo && !row.pan)");
+    expect(portal).toContain("candidateRows.filter((row) => !row.admissionNo && !row.pan && row.hasNonApplicationFeePayment)");
+    expect(portal).toContain("candidateRows.filter((row) => !row.admissionNo && !row.pan && !row.hasNonApplicationFeePayment)");
   });
 
   it("bucket (b): a non-attributed (teaching-only) student is bucketed by admission no and rendered with the Direct badge", () => {
