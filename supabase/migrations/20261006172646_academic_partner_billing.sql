@@ -1,3 +1,6 @@
+-- keep-migration-version: already recorded on production schema_migrations
+-- Restored from the production Supabase migration ledger to reconcile local history.
+
 -- academic partner billing
 -- Academic partner receipt reconciliation, payout batches and Zoho bills.
 
@@ -38,13 +41,16 @@ ALTER TABLE public.academic_partner_payouts
 
 CREATE INDEX IF NOT EXISTS idx_academic_partner_bills_partner_period
   ON public.academic_partner_bills(partner_id, period_start DESC);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_academic_partner_bills_active_period
   ON public.academic_partner_bills(partner_id, period_start, period_end)
   WHERE status <> 'cancelled';
+
 CREATE INDEX IF NOT EXISTS idx_academic_partner_payouts_bill
   ON public.academic_partner_payouts(bill_id) WHERE bill_id IS NOT NULL;
 
 ALTER TABLE public.academic_partner_bills ENABLE ROW LEVEL SECURITY;
+
 GRANT SELECT, INSERT, UPDATE ON public.academic_partner_bills TO authenticated;
 
 -- lint-allow: production-applied historical migration restored from schema_migrations.
@@ -207,4 +213,5 @@ END;
 $function$;
 
 GRANT EXECUTE ON FUNCTION public.create_academic_partner_bill(uuid, date, date) TO authenticated;
+
 GRANT EXECUTE ON FUNCTION public.approve_academic_partner_bill(uuid) TO authenticated;

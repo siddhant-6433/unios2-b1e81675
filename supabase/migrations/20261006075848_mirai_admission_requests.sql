@@ -1,3 +1,6 @@
+-- keep-migration-version: already recorded on production schema_migrations
+-- Restored from the production Supabase migration ledger to reconcile local history.
+
 -- Parent requests for a Mirai admissions call or campus tour.
 CREATE TABLE public.mirai_admission_requests (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -12,13 +15,17 @@ CREATE TABLE public.mirai_admission_requests (
 
 CREATE INDEX idx_mirai_admission_requests_pending
   ON public.mirai_admission_requests (created_at DESC) WHERE status = 'pending';
+
 CREATE UNIQUE INDEX idx_mirai_admission_request_one_pending_per_type
   ON public.mirai_admission_requests (lead_id, request_type) WHERE status = 'pending';
 
 ALTER TABLE public.mirai_admission_requests ENABLE ROW LEVEL SECURITY;
+
 GRANT SELECT, UPDATE ON public.mirai_admission_requests TO authenticated;
+
 GRANT ALL ON public.mirai_admission_requests TO service_role;
 
+-- lint-allow: production-applied historical migration restored from schema_migrations.
 CREATE POLICY "Mirai admissions staff can manage requests"
   ON public.mirai_admission_requests FOR ALL TO authenticated
   USING (

@@ -1,3 +1,6 @@
+-- keep-migration-version: already recorded on production schema_migrations
+-- Restored from the production Supabase migration ledger to reconcile local history.
+
 -- mirai application started activity
 -- Applicant sessions use the anon role and cannot insert into lead_activities.
 -- Preserve the existing Mirai application-start event inside the database after
@@ -36,6 +39,7 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_mirai_application_started_activity ON public.applications;
+
 CREATE TRIGGER trg_mirai_application_started_activity
   AFTER INSERT ON public.applications
   FOR EACH ROW

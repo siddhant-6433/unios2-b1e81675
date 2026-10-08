@@ -1,71 +1,8 @@
--- academic partner billing
--- Academic partner receipt reconciliation, payout batches and Zoho bills.
+-- keep-migration-version: already recorded on production schema_migrations
+-- Restored from the production Supabase migration ledger to reconcile local history.
 
-ALTER TABLE public.academic_partners
-  ADD COLUMN IF NOT EXISTS zoho_vendor_id text;
-
-ALTER TABLE public.academic_partner_payouts
-  ADD COLUMN IF NOT EXISTS zoho_bill_id text,
-  ADD COLUMN IF NOT EXISTS zoho_bill_number text,
-  ADD COLUMN IF NOT EXISTS zoho_synced_at timestamptz,
-  ADD COLUMN IF NOT EXISTS zoho_sync_error text,
-  ADD COLUMN IF NOT EXISTS approved_at timestamptz,
-  ADD COLUMN IF NOT EXISTS bill_id uuid;
-
-CREATE TABLE IF NOT EXISTS public.academic_partner_bills (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  partner_id uuid NOT NULL REFERENCES public.academic_partners(id) ON DELETE CASCADE,
-  period_start date NOT NULL,
-  period_end date NOT NULL,
-  amount numeric(12,2) NOT NULL CHECK (amount >= 0),
-  payout_count integer NOT NULL DEFAULT 0 CHECK (payout_count >= 0),
-  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'approved', 'synced_to_zoho', 'cancelled')),
-  created_by uuid REFERENCES public.profiles(id),
-  approved_by uuid REFERENCES public.profiles(id),
-  approved_at timestamptz,
-  zoho_bill_id text,
-  zoho_bill_number text,
-  zoho_synced_at timestamptz,
-  zoho_sync_error text,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  CHECK (period_end >= period_start)
-);
-
-ALTER TABLE public.academic_partner_payouts
-  -- lint-allow: production-applied historical migration restored from schema_migrations.
-  ADD CONSTRAINT academic_partner_payouts_bill_id_fkey
-  FOREIGN KEY (bill_id) REFERENCES public.academic_partner_bills(id) ON DELETE SET NULL;
-
-CREATE INDEX IF NOT EXISTS idx_academic_partner_bills_partner_period
-  ON public.academic_partner_bills(partner_id, period_start DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_academic_partner_bills_active_period
-  ON public.academic_partner_bills(partner_id, period_start, period_end)
-  WHERE status <> 'cancelled';
-CREATE INDEX IF NOT EXISTS idx_academic_partner_payouts_bill
-  ON public.academic_partner_payouts(bill_id) WHERE bill_id IS NOT NULL;
-
-ALTER TABLE public.academic_partner_bills ENABLE ROW LEVEL SECURITY;
-GRANT SELECT, INSERT, UPDATE ON public.academic_partner_bills TO authenticated;
-
--- lint-allow: production-applied historical migration restored from schema_migrations.
-CREATE POLICY "Admins manage academic partner bills"
-  ON public.academic_partner_bills FOR ALL TO authenticated
-  USING (
-    public.has_role(auth.uid(), 'super_admin'::public.app_role)
-    OR public.has_role(auth.uid(), 'campus_admin'::public.app_role)
-    OR public.has_role(auth.uid(), 'admission_head'::public.app_role)
-  )
-  WITH CHECK (
-    public.has_role(auth.uid(), 'super_admin'::public.app_role)
-    OR public.has_role(auth.uid(), 'campus_admin'::public.app_role)
-    OR public.has_role(auth.uid(), 'admission_head'::public.app_role)
-  );
-
--- lint-allow: production-applied historical migration restored from schema_migrations.
-CREATE POLICY "Academic partners read own bills"
-  ON public.academic_partner_bills FOR SELECT TO authenticated
-  USING (partner_id IN (SELECT id FROM public.academic_partners WHERE user_id = auth.uid()));
-
+-- Bill actor columns reference profiles.id, while auth.uid() is profiles.user_id.
+-- Resolve the authenticated user's profile row before writing audit fields.
 CREATE OR REPLACE FUNCTION public.create_academic_partner_bill(
   _partner_id uuid,
   _period_start date,
@@ -78,6 +15,7 @@ SET search_path TO 'public'
 AS $function$
 DECLARE
   v_uid uuid := auth.uid();
+  v_profile_id uuid;
   v_bill_id uuid;
   v_amount numeric(12,2);
   v_count integer;
@@ -88,6 +26,10 @@ BEGIN
     OR public.has_role(v_uid, 'admission_head'::public.app_role)
   ) THEN
     RAISE EXCEPTION 'Only authorised finance staff can create partner bills';
+  END IF;
+  SELECT p.id INTO v_profile_id FROM public.profiles p WHERE p.user_id = v_uid;
+  IF v_profile_id IS NULL THEN
+    RAISE EXCEPTION 'Authorised staff profile not found';
   END IF;
   IF _period_start IS NULL OR _period_end IS NULL OR _period_end < _period_start THEN
     RAISE EXCEPTION 'A valid bill period is required';
@@ -105,8 +47,9 @@ BEGIN
     RAISE EXCEPTION 'A bill already covers part of this partner period';
   END IF;
 
-  -- One payout row per eligible confirmed receipt. The most specific active
-  -- course/batch assignment wins; an unbatched assignment is the fallback.
+  -- The most specific active course/batch assignment wins; an unbatched
+  -- assignment is the fallback. Only confirmed receipts without a payout row
+  -- are included, so an all-pending backlog range is safe to bill once.
   INSERT INTO public.academic_partner_payouts (
     partner_id, lead_id, student_id, lead_payment_id, course_id, batch_id,
     payout_percentage, fee_paid, payout_amount, status, notes
@@ -160,7 +103,7 @@ BEGIN
 
   INSERT INTO public.academic_partner_bills (
     partner_id, period_start, period_end, amount, payout_count, created_by
-  ) VALUES (_partner_id, _period_start, _period_end, v_amount, v_count, v_uid)
+  ) VALUES (_partner_id, _period_start, _period_end, v_amount, v_count, v_profile_id)
   RETURNING id INTO v_bill_id;
 
   UPDATE public.academic_partner_payouts
@@ -185,6 +128,7 @@ SET search_path TO 'public'
 AS $function$
 DECLARE
   v_uid uuid := auth.uid();
+  v_profile_id uuid;
   v_partner_id uuid;
 BEGIN
   IF v_uid IS NULL OR NOT (
@@ -194,17 +138,18 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'Only authorised finance staff can approve partner bills';
   END IF;
+  SELECT p.id INTO v_profile_id FROM public.profiles p WHERE p.user_id = v_uid;
+  IF v_profile_id IS NULL THEN
+    RAISE EXCEPTION 'Authorised staff profile not found';
+  END IF;
   UPDATE public.academic_partner_bills
-  SET status = 'approved', approved_by = v_uid, approved_at = now(), zoho_sync_error = NULL
+  SET status = 'approved', approved_by = v_profile_id, approved_at = now(), zoho_sync_error = NULL
   WHERE id = _bill_id AND status = 'draft'
   RETURNING partner_id INTO v_partner_id;
   IF v_partner_id IS NULL THEN RAISE EXCEPTION 'Draft partner bill not found'; END IF;
   UPDATE public.academic_partner_payouts
-  SET status = 'approved', approved_by = v_uid, approved_at = now()
+  SET status = 'approved', approved_by = v_profile_id, approved_at = now()
   WHERE bill_id = _bill_id AND status = 'pending';
   RETURN _bill_id;
 END;
 $function$;
-
-GRANT EXECUTE ON FUNCTION public.create_academic_partner_bill(uuid, date, date) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.approve_academic_partner_bill(uuid) TO authenticated;
