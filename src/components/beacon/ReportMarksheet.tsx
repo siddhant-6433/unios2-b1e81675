@@ -72,7 +72,7 @@ export function ReportMarksheet({ snapshot }: { snapshot: ReportSnapshot }) {
           <td className="border-b border-slate-200 px-3 py-2 align-top">
             <span className="font-medium text-slate-900">{subject.name}</span>{subject.code ? <span className="text-slate-400"> ({subject.code})</span> : null}
             {subject.contributes_to_total === false && <span className="ml-1 text-[10px] uppercase text-slate-400">excluded</span>}
-            <span className="mt-0.5 block text-[10.5px] text-slate-500">{subject.components.map(c => `${c.label} ${number(c.score)}/${c.max}`).join(" · ")}</span>
+            <span className="mt-0.5 block text-[10.5px] text-slate-500">{subject.components.filter(c=>!c.source_only).map(c => `${c.label} ${number(c.score)}/${c.max}`).join(" · ")}</span>
           </td>
           <td className="border-b border-slate-200 px-2 py-2 text-right align-top tabular-nums">{number(subject.max)}</td>
           <td className="border-b border-slate-200 px-2 py-2 text-right align-top font-semibold tabular-nums">{number(subject.obtained)}</td>
@@ -82,6 +82,8 @@ export function ReportMarksheet({ snapshot }: { snapshot: ReportSnapshot }) {
         </tr>)}
       </tbody>
     </table>
+
+    {snapshot.co_scholastic_grades&&<section className="mt-4 grid grid-cols-2 gap-4 text-[12px]"><div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Art</p><p className="mt-0.5 font-semibold text-slate-900">{snapshot.co_scholastic_grades.art??"—"}</p></div><div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Moral Values</p><p className="mt-0.5 font-semibold text-slate-900">{snapshot.co_scholastic_grades.moral_values??"—"}</p></div></section>}
 
     <section className="mt-4 grid grid-cols-4 divide-x divide-slate-200 overflow-hidden rounded-lg border border-slate-200 text-center">
       <div className="px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">Aggregate</p><p className="text-base font-bold text-slate-900">{summary.obtained}/{summary.max}</p></div>
