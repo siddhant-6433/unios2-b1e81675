@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS public.academic_partner_bills (
 );
 
 ALTER TABLE public.academic_partner_payouts
+  -- lint-allow: production-applied historical migration restored from schema_migrations.
   ADD CONSTRAINT academic_partner_payouts_bill_id_fkey
   FOREIGN KEY (bill_id) REFERENCES public.academic_partner_bills(id) ON DELETE SET NULL;
 
@@ -46,6 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_academic_partner_payouts_bill
 ALTER TABLE public.academic_partner_bills ENABLE ROW LEVEL SECURITY;
 GRANT SELECT, INSERT, UPDATE ON public.academic_partner_bills TO authenticated;
 
+-- lint-allow: production-applied historical migration restored from schema_migrations.
 CREATE POLICY "Admins manage academic partner bills"
   ON public.academic_partner_bills FOR ALL TO authenticated
   USING (
@@ -59,6 +61,7 @@ CREATE POLICY "Admins manage academic partner bills"
     OR public.has_role(auth.uid(), 'admission_head'::public.app_role)
   );
 
+-- lint-allow: production-applied historical migration restored from schema_migrations.
 CREATE POLICY "Academic partners read own bills"
   ON public.academic_partner_bills FOR SELECT TO authenticated
   USING (partner_id IN (SELECT id FROM public.academic_partners WHERE user_id = auth.uid()));

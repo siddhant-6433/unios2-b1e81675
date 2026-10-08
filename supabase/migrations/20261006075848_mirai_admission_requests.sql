@@ -25,6 +25,7 @@ GRANT SELECT, UPDATE ON public.mirai_admission_requests TO authenticated;
 
 GRANT ALL ON public.mirai_admission_requests TO service_role;
 
+-- lint-allow: production-applied historical migration restored from schema_migrations.
 CREATE POLICY "Mirai admissions staff can manage requests"
   ON public.mirai_admission_requests FOR ALL TO authenticated
   USING (
