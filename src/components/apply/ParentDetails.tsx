@@ -7,7 +7,7 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { DatePickerField, SelectField, TextField } from "@/components/ui/state-fields";
 import { ApplicationData } from "./types";
 import { usePortal } from "./PortalContext";
-import { getNationalityOptions, isIndianNationality } from "./countries";
+import { getNationalityOptions, isIndianNationality, isIndianAddressCountry, getPostalCodeLabel } from "./countries";
 
 const PHONE_DIGITS_RE = /\d{10,}/; // accepts +91XXXXXXXXXX, 91XXXXXXXXXX, or 10-digit local
 
@@ -113,15 +113,15 @@ function SchoolParentBlock({
     : "";
   const employmentStatus = value.employment_status || legacyStatus;
   const positionValue = value.position || (legacyStatus ? "" : value.current_position || "");
-  const isHomemaker = employmentStatus === "Homemaker";
+  const skipsEmployerDetails = employmentStatus === "Homemaker" || employmentStatus === "Retired";
   const missing = {
     first_name: !value.first_name?.trim(),
     last_name: !value.last_name?.trim(),
     nationality: !nationality.trim(),
     education: !value.education?.trim(),
     employment_status: !employmentStatus,
-    employer_name: !isHomemaker && !value.employer_name?.trim(),
-    current_position: !isHomemaker && !positionValue.trim(),
+    employer_name: !skipsEmployerDetails && !value.employer_name?.trim(),
+    current_position: !skipsEmployerDetails && !positionValue.trim(),
     marital_status: !value.marital_status?.trim(),
     email: !value.email?.trim() || !EMAIL_RE.test(value.email),
     phone_mobile: !PHONE_DIGITS_RE.test((value.phone_mobile || value.phone || '').replace(/\D/g, '')),
@@ -240,9 +240,9 @@ function SchoolParentBlock({
                   onChange({
                     ...value,
                     employment_status: status,
-                    employer_name: status === "Homemaker" ? "" : value.employer_name,
-                    position: status === "Homemaker" ? "" : value.position,
-                    current_position: status === "Homemaker" || legacyStatus ? "" : value.current_position,
+                    employer_name: status === "Homemaker" || status === "Retired" ? "" : value.employer_name,
+                    position: status === "Homemaker" || status === "Retired" ? "" : value.position,
+                    current_position: status === "Homemaker" || status === "Retired" || legacyStatus ? "" : value.current_position,
                   });
               }}
               options={employmentStatusOptions}
@@ -250,7 +250,7 @@ function SchoolParentBlock({
               error={showErrors && missing.employment_status ? "Employment status is required." : undefined}
               triggerClassName={`${inputCls} ${showErrors && missing.employment_status ? invalidCls : ''}`}
             />
-            {!isHomemaker && (
+            {!skipsEmployerDetails && (
               <>
                 <TextField
                   label="Employer Name"
@@ -388,6 +388,8 @@ function GuardianBlock({
   const set = (patch: Partial<Guardian>) => onChange({ ...value, ...patch });
   const setAddr = (patch: Record<string, string>) => onChange({ ...value, address: { ...(value.address || {}), ...patch } });
   const addr = value.address || {};
+  const isIndianAddress = isIndianAddressCountry(addr.country);
+  const postalCodeLabel = getPostalCodeLabel(addr.country);
 
   const nameMissing = !(value.name || '').trim();
   const phoneMissing = !PHONE_DIGITS_RE.test((value.phone || '').replace(/\D/g, ''));
@@ -399,7 +401,7 @@ function GuardianBlock({
     city: !addr.city?.trim(),
     state: !addr.state?.trim(),
     country: !(addr.country || 'India').trim(),
-    pin: !/^\d{6}$/.test((addr.pin_code || '').trim()),
+    pin: isIndianAddress ? !/^\d{6}$/.test((addr.pin_code || '').trim()) : !addr.pin_code?.trim(),
   };
 
   return (
@@ -508,11 +510,11 @@ function GuardianBlock({
             inputClassName={inputCls}
           />
           <TextField
-            label="PIN Code"
+            label={postalCodeLabel}
             required
             value={addr.pin_code || ''}
-            onValueChange={(nextValue) => setAddr({ pin_code: nextValue.replace(/\D/g, '').slice(0, 6) })}
-            error={showErrors && addrMissing.pin ? "Enter a valid 6-digit PIN code." : undefined}
+            onValueChange={(nextValue) => setAddr({ pin_code: isIndianAddress ? nextValue.replace(/\D/g, '').slice(0, 6) : nextValue })}
+            error={showErrors && addrMissing.pin ? (isIndianAddress ? "Enter a valid 6-digit PIN code." : `${postalCodeLabel} is required.`) : undefined}
             inputClassName={inputCls}
           />
         </div>
@@ -542,7 +544,7 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
       ? p.current_position || ""
       : "";
     const employmentStatus = p.employment_status || legacyStatus;
-    const isHomemaker = employmentStatus === "Homemaker";
+    const skipsEmployerDetails = employmentStatus === "Homemaker" || employmentStatus === "Retired";
     const positionValue = p.position || (legacyStatus ? "" : p.current_position || "");
     const nationality = p.nationality || "Indian";
 
@@ -552,8 +554,8 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
       && nationality.trim()
       && p.education?.trim()
       && employmentStatus
-      && (isHomemaker || p.employer_name?.trim())
-      && (isHomemaker || positionValue.trim())
+      && (skipsEmployerDetails || p.employer_name?.trim())
+      && (skipsEmployerDetails || positionValue.trim())
       && p.marital_status?.trim()
       && p.email?.trim()
       && EMAIL_RE.test(p.email)

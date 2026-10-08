@@ -131,12 +131,12 @@ describe("concessions never write the ledger from the client", () => {
   });
 
   it("keeps edit/reduce aligned with the server RPC policy", () => {
-    expect(concessionPopover).toContain('["principal", "office_assistant", "office_admin", "counsellor", "super_admin", "accountant"].includes(role || "")');
+    expect(concessionPopover).toContain('["principal", "vice_principal", "office_assistant", "office_admin", "counsellor", "super_admin", "accountant"].includes(role || "")');
     expect(campusScopeMigration).toContain("Not authorised to request a concession");
   });
 
   it("lets named staff remove concessions immediately with a required note and audit", () => {
-    expect(concessionPopover).toContain('["principal", "office_assistant", "office_admin", "counsellor", "super_admin"].includes(role || "")');
+    expect(concessionPopover).toContain('["principal", "vice_principal", "office_assistant", "office_admin", "counsellor", "super_admin"].includes(role || "")');
     expect(concessionPopover).toContain('"remove_fee_concession"');
     expect(concessionPopover).toContain("Manage or remove waiver on this head");
     expect(concessionPopover).toContain("A removal note is required");

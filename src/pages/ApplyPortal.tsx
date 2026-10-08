@@ -35,6 +35,7 @@ import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/le
 import { captureAttribution, trackPixelLead } from "@/lib/analytics";
 import { PORTAL_CONFIGS, pickLeadForPortal, type PortalId } from "@/components/apply/portalConfig";
 import { displayValue } from "@/lib/displayValue";
+import { findMiraiSection, MIRAI_STEPS } from "@/components/apply/miraiJourney";
 
 type OnBehalfContext = {
   mode: "academic_partner_on_behalf";
@@ -209,7 +210,7 @@ function OtpLogin({
     setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("whatsapp-otp", {
-        body: { phone, action: "send" },
+        body: { phone, action: "send", portal_id: portal.id },
       });
       if (error) {
         const ctx = (error as any)?.context;
@@ -714,7 +715,7 @@ const DEFAULT_STEPS = [
 ] as const;
 
 function DynamicStepProgress({ steps, currentStep, completedSections, onStepClick, isPaid, editUnlocked, unlockedSections }: {
-  steps: readonly { key: string; label: string; icon: any }[];
+  steps: readonly { key: string; label: string; icon: any; sectionKeys?: readonly string[] }[];
   currentStep: number;
   completedSections: Record<string, boolean>;
   onStepClick: (step: number) => void;
@@ -722,22 +723,24 @@ function DynamicStepProgress({ steps, currentStep, completedSections, onStepClic
   editUnlocked?: boolean;
   unlockedSections?: string[] | null;
 }) {
-  const paymentIdx = steps.findIndex(s => s.key === "payment");
+  const sectionKeys = (step: typeof steps[number]) => step.sectionKeys || [step.key];
+  const groupDone = (step: typeof steps[number]) => sectionKeys(step).every(key => completedSections[key] === true);
+  const paymentIdx = steps.findIndex(s => sectionKeys(s).includes("payment"));
 
   return (
     <div className="flex items-center gap-1 mb-8 overflow-x-auto pb-2">
       {steps.map((s, i) => {
-        const done    = completedSections[s.key] === true;
+        const done    = groupDone(s);
         const active  = currentStep === i;
         // Sequential navigation: a step is locked if any previous step is incomplete.
         // User must complete steps in order. They CAN come back to edit completed ones.
         // Exception: once payment is done, ALL pre-payment steps are permanently locked.
         // Override: if staff granted edit access, pre-payment steps become editable again
         //   (either all, or only the sections in unlockedSections)
-        const allPrevDone = steps.slice(0, i).every(prev => completedSections[prev.key] === true);
+        const allPrevDone = steps.slice(0, i).every(groupDone);
         const basePaymentLock = isPaid && i < paymentIdx;
         const inUnlockedScope = editUnlocked && i < paymentIdx && (
-          !unlockedSections || unlockedSections.length === 0 || unlockedSections.includes(s.key)
+          !unlockedSections || unlockedSections.length === 0 || sectionKeys(s).some(key => unlockedSections.includes(key))
         );
         const lockedByPayment = basePaymentLock && !inUnlockedScope;
         const lockedBySequence = !allPrevDone && !active;
@@ -780,8 +783,9 @@ function DynamicStepProgress({ steps, currentStep, completedSections, onStepClic
 // ─── Course Summary Banner ───
 function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; leadName: string; onEdit: () => void | null }) {
   const [expanded, setExpanded] = useState(false);
+  const portal = usePortal();
   const selections = app.course_selections || [];
-  const estimatedFee = calculateFee(selections);
+  const estimatedFee = calculateFee(selections, portal.id);
   const dob = app.dob;
   const programCategory = app.program_category || '';
 
@@ -1719,6 +1723,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
 
   const [app, setApp] = useState<ApplicationData | null>(null);
   const [step, setStep] = useState(0);
+  const [activeSection, setActiveSection] = useState("personal");
   const [saving, setSaving] = useState(false);
   const [generatingApplicationPdf, setGeneratingApplicationPdf] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -1752,7 +1757,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
   // Whether the dashboard exists to go back to (i.e. multiple apps OR any non-draft).
   const [hasDashboard, setHasDashboard] = useState(false);
 
-  const steps = isSchool ? SCHOOL_STEPS : DEFAULT_STEPS;
+  const steps = portal.id === "mirai" ? MIRAI_STEPS : isSchool ? SCHOOL_STEPS : DEFAULT_STEPS;
   const totalSteps = steps.length;
 
   const handleAuthenticated = async (
@@ -1837,6 +1842,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
       setSubmitted(false);
       setShowCourseSelector(true);
       setStep(0);
+      setActiveSection("personal");
       return;
     }
 
@@ -1889,7 +1895,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
     // editing, current behaviour).
     const existingApp = portalApps[0];
     if (existingApp) {
-      const activeSteps = activePortal.programCategories.includes("school") ? SCHOOL_STEPS : DEFAULT_STEPS;
+      const activeSteps = activePortal.id === "mirai" ? MIRAI_STEPS : activePortal.programCategories.includes("school") ? SCHOOL_STEPS : DEFAULT_STEPS;
       loadAppIntoEditor(existingApp, activeSteps);
     }
   };
@@ -1921,10 +1927,16 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
     if (existingApp.status === 'submitted' || existingApp.status === 'under_review' || existingApp.status === 'approved') {
       if (editUnlocked) {
         setSubmitted(false);
-        const stepKeys = stepList.map(s => s.key);
-        const preferredKey = unlockedSections?.find(key => stepKeys.includes(key)) || "documents";
-        const preferredIdx = stepKeys.indexOf(preferredKey);
-        setStep(preferredIdx >= 0 ? preferredIdx : stepList.length - 2);
+        if (portal.id === "mirai") {
+          const mapped = findMiraiSection(appData.completed_sections as Record<string, boolean>, unlockedSections?.[0] || "documents");
+          setStep(mapped.stepIndex);
+          setActiveSection(mapped.sectionKey);
+        } else {
+          const stepKeys = stepList.map(s => s.key);
+          const preferredKey = unlockedSections?.find(key => stepKeys.includes(key)) || "documents";
+          const preferredIdx = stepKeys.indexOf(preferredKey);
+          setStep(preferredIdx >= 0 ? preferredIdx : stepList.length - 2);
+        }
         return;
       }
       setSubmitted(true);
@@ -1936,10 +1948,16 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
         .catch(() => setPreviewDocs([]));
       return;
     }
-    const stepKeys = stepList.map(s => s.key);
     const cs = appData.completed_sections as Record<string, boolean>;
-    const firstIncomplete = stepKeys.findIndex(k => !cs[k]);
-    setStep(firstIncomplete >= 0 ? firstIncomplete : stepList.length - 1);
+    if (portal.id === "mirai") {
+      const mapped = findMiraiSection(cs);
+      setStep(mapped.stepIndex);
+      setActiveSection(mapped.sectionKey);
+    } else {
+      const stepKeys = stepList.map(s => s.key);
+      const firstIncomplete = stepKeys.findIndex(k => !cs[k]);
+      setStep(firstIncomplete >= 0 ? firstIncomplete : stepList.length - 1);
+    }
   };
 
   const ensureApplicationPdf = async (applicationId: string) => {
@@ -1986,6 +2004,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
     setSubmitted(false);
     setShowCourseSelector(true);
     setStep(0);
+    setActiveSection("personal");
   };
 
   const runOnBehalfApplicationAction = async (
@@ -2012,7 +2031,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
     const scopedLeadId = onBehalfContext?.lead_id || leadId;
 
     const primaryCategory = selections[0]?.program_category || 'undergraduate';
-    const feeAmount = calculateFee(selections);
+    const feeAmount = calculateFee(selections, portal.id);
     const flags: string[] = [];
     if (feeAmount > 0) flags.push('payment_pending');
 
@@ -2174,7 +2193,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
       }
     }
 
-    if (resolvedLeadId && !onBehalfContext) {
+    if (resolvedLeadId && !onBehalfContext && portal.id !== "mirai") {
       await supabase.from("lead_activities").insert({
         lead_id: resolvedLeadId,
         type: "application_started",
@@ -2214,6 +2233,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
     } as ApplicationData);
     setShowCourseSelector(false);
     setStep(0);
+    setActiveSection("personal");
     setSaving(false);
     toast({ title: "Application created", description: `ID: ${appId}` });
   };
@@ -2453,7 +2473,22 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
       ...saveable
     } = app as any;
     const ok = await saveSection(saveable, sectionKey);
-    if (ok) setStep(nextStep);
+    if (ok) advanceAfterSection(sectionKey, nextStep);
+  };
+
+  const advanceAfterSection = (sectionKey: string, nextStep: number) => {
+    if (portal.id !== "mirai") { setStep(nextStep); return; }
+    const group = MIRAI_STEPS[step];
+    const sectionIndex = group.sectionKeys.indexOf(sectionKey);
+    const nextSection = group.sectionKeys[sectionIndex + 1];
+    const isSectionUnlocked = (key: string) => !editUnlocked || !unlockedSections || unlockedSections.length === 0 || unlockedSections.includes(key);
+    if (nextSection) {
+      if (isSectionUnlocked(nextSection)) setActiveSection(nextSection);
+      return;
+    }
+    setStep(nextStep);
+    const nextGroup = MIRAI_STEPS[nextStep];
+    if (nextGroup) setActiveSection(nextGroup.sectionKeys[0]);
   };
 
   // ── Restoring session from localStorage ──
@@ -2676,9 +2711,11 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
 
   if (!app) return null;
 
-  const completedCount = Object.values(app.completed_sections).filter(Boolean).length;
+  const completedCount = portal.id === "mirai"
+    ? MIRAI_STEPS.filter(group => group.sectionKeys.every(key => (app.completed_sections as any)[key] === true)).length
+    : Object.values(app.completed_sections).filter(Boolean).length;
   const isPaid = app.payment_status === "paid";
-  const paymentStepIdx = steps.findIndex(s => s.key === "payment");
+  const paymentStepIdx = steps.findIndex(s => ("sectionKeys" in s ? s.sectionKeys.includes("payment") : s.key === "payment"));
   const cs = app.completed_sections as Record<string, boolean>;
 
   // Determine if user can navigate back from current step.
@@ -2687,25 +2724,44 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
   //  - we're at the first step (nowhere to go)
   //  - payment is done and the previous step would be a pre-payment (locked) step
   //    UNLESS staff granted edit access
+  const currentGroupSections = portal.id === "mirai" ? MIRAI_STEPS[step]?.sectionKeys || [] : [];
+  const activeSectionIndex = currentGroupSections.indexOf(activeSection);
+  const previousMiraiSectionUnlocked = activeSectionIndex > 0 && (
+    !editUnlocked || !unlockedSections || unlockedSections.length === 0 || unlockedSections.includes(currentGroupSections[activeSectionIndex - 1])
+  );
   const canGoBack = (() => {
+    if (portal.id === "mirai" && activeSectionIndex > 0) return previousMiraiSectionUnlocked;
     if (step === 0) return false;
-    const prevKey = steps[step - 1]?.key;
+    const previous: any = steps[step - 1];
+    const previousKeys: string[] = previous?.sectionKeys || [previous?.key];
     if (isPaid && (step - 1) < paymentStepIdx) {
-      if (!editUnlocked) return false;
-      // In scope: either no section filter (all) or this specific prev section is unlocked
-      if (!unlockedSections || unlockedSections.length === 0 || unlockedSections.includes(prevKey)) {
-        return true;
-      }
-      return false;
+      return !!editUnlocked && (!unlockedSections || unlockedSections.length === 0 || previousKeys.some(key => unlockedSections.includes(key)));
     }
     return true;
   })();
 
-  const backHandler = canGoBack ? () => setStep(step - 1) : undefined;
+  const backHandler = canGoBack ? () => {
+    if (portal.id === "mirai" && activeSectionIndex > 0) {
+      setActiveSection(currentGroupSections[activeSectionIndex - 1]);
+      return;
+    }
+    const previousStep = step - 1;
+    setStep(previousStep);
+    if (portal.id === "mirai") setActiveSection(MIRAI_STEPS[previousStep].sectionKeys.at(-1) || "personal");
+  } : undefined;
+
+  const jumpToStep = (target: number) => {
+    setStep(target);
+    if (portal.id === "mirai") {
+      const group = MIRAI_STEPS[target];
+      const permitted = (key: string) => !editUnlocked || !unlockedSections || unlockedSections.length === 0 || unlockedSections.includes(key);
+      if (group) setActiveSection(group.sectionKeys.find(key => permitted(key) && !(app.completed_sections as any)[key]) || group.sectionKeys.find(permitted) || group.sectionKeys[0]);
+    }
+  };
 
   // Build step rendering based on portal type
   const renderStep = () => {
-    const stepKey = steps[step]?.key;
+    const stepKey = portal.id === "mirai" ? activeSection : steps[step]?.key;
 
     if (stepKey === "personal") {
       return (
@@ -2714,6 +2770,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
           onChange={onChange}
           onNext={() => handleStepNext('personal', step + 1)}
           saving={saving}
+          isMirai={portal.id === "mirai"}
         />
       );
     }
@@ -2781,7 +2838,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
             // payment_status is server-owned (set by settlement); only mark the
             // section complete here — never write payment_status from the client.
             const ok = await saveSection({}, 'payment');
-            if (ok) setStep(step + 1);
+            if (ok) advanceAfterSection("payment", step + 1);
           }}
           onBack={backHandler}
           saving={saving}
@@ -2796,7 +2853,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
           onChange={(partial) => setApp(prev => ({ ...prev, ...partial }))}
           onNext={async () => {
             const ok = await saveSection({}, 'documents');
-            if (ok) setStep(step + 1);
+            if (ok) advanceAfterSection("documents", step + 1);
           }}
           onBack={backHandler}
           saving={saving}
@@ -2818,7 +2875,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
 
   return (
     <div className="min-h-screen bg-background">
-      <Header appId={app.application_id} completedCount={completedCount} totalSteps={totalSteps} onLogout={handleLogout} />
+      <Header appId={app.application_id} completedCount={completedCount} totalSteps={portal.id === "mirai" ? MIRAI_STEPS.length : totalSteps} onLogout={handleLogout} />
 
       <div className="max-w-3xl mx-auto px-6 py-8">
         <OnBehalfBanner context={onBehalfContext} candidateName={leadName || displayValue(app.full_name) || "the candidate"} />
@@ -2864,15 +2921,22 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
           steps={steps}
           currentStep={step}
           completedSections={app.completed_sections as any}
-          onStepClick={setStep}
+          onStepClick={jumpToStep}
           isPaid={app.payment_status === "paid"}
           editUnlocked={editUnlocked}
           unlockedSections={unlockedSections}
         />
 
-        <Card className="border-border/60 shadow-none">
+        <Card className={portal.id === "mirai" ? "rounded-2xl border-[#e0e7dc] shadow-[0_14px_42px_rgba(43,61,36,0.07)]" : "border-border/60 shadow-none"}>
           <CardContent className="p-6">
-            <div key={step} className="animate-rs-slide-up">
+            {portal.id === "mirai" && (
+              <div className="mb-5 border-b border-[#e9eee5] pb-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-primary">Application · Stage {step + 1} of {MIRAI_STEPS.length}</p>
+                <h2 className="mt-1 text-lg font-semibold tracking-tight text-foreground">{MIRAI_STEPS[step]?.label}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">Your progress is saved as you complete each section.</p>
+              </div>
+            )}
+            <div key={portal.id === "mirai" ? activeSection : step} className="animate-rs-slide-up">
               {renderStep()}
             </div>
           </CardContent>

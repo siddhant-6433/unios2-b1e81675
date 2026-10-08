@@ -157,7 +157,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     primaryColor: "#77966D",
     loginGradient: "linear-gradient(160deg, #111E0F 0%, #2E4A28 50%, #4A7042 100%)",
     loginBgImage: loginBgMirai,
-    loginHeadline: "IB World School\nAdmissions 2026–27",
+    loginHeadline: "IB World School\nAdmissions 2027–28",
     loginSubheadline: "EYP · PYP · Nursery to Grade VIII",
     loginWatermark: miraiMan,
   },

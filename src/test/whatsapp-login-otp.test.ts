@@ -11,7 +11,7 @@ describe("WhatsApp login OTP edge function", () => {
     const startSignInIndex = whatsappOtp.indexOf('if (action === "start_sign_in")');
     const statusSignInIndex = whatsappOtp.indexOf('if (action === "status_sign_in")');
     const sendIndex = whatsappOtp.indexOf('if (action === "send")');
-    const sendTokenIndex = whatsappOtp.indexOf('const whatsappToken = Deno.env.get("WHATSAPP_OTP_API_TOKEN")', sendIndex);
+    const sendTokenIndex = whatsappOtp.indexOf('token: Deno.env.get("WHATSAPP_OTP_API_TOKEN")', sendIndex);
     const configErrorIndex = whatsappOtp.indexOf("WhatsApp API not configured", sendIndex);
 
     expect(startSignInIndex).toBeGreaterThan(-1);
@@ -25,6 +25,16 @@ describe("WhatsApp login OTP edge function", () => {
     expect(whatsappOtp).toContain("function normalizeLoginPhone(phone: unknown): string | null");
     expect(whatsappOtp).toContain('if (digits.length === 10) return `+91${digits}`;');
     expect(whatsappOtp).toContain('if (digits.length > 0 && trimmed.startsWith("+")) return `+${digits}`;');
+  });
+
+  it("routes Mirai login OTPs through the Mirai sender first and only falls back to NIMT on send failure", () => {
+    expect(readFileSync("src/pages/ApplyPortal.tsx", "utf8")).toContain('body: { phone, action: "send", portal_id: portal.id }');
+    expect(whatsappOtp).toContain('if (portal_id === "mirai")');
+    expect(whatsappOtp).toContain('candidate.meta_phone_number_id === "1110238142172240"');
+    expect(whatsappOtp).toContain('label: "mirai"');
+    expect(whatsappOtp).toContain('if (!waAttempt.response.ok && activeSender.label === "mirai" && nimtSender.token && nimtSender.phoneNumberId)');
+    expect(whatsappOtp).toContain('activeSender = nimtSender;');
+    expect(whatsappOtp).toContain('sender: activeSender.label');
   });
 
   it("resolves existing auth users through the indexed RPC, not a capped page scan", () => {

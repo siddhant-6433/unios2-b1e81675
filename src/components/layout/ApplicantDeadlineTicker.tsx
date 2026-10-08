@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePortal } from "@/components/apply/PortalContext";
 import {
   applicationDeadlineHeadline,
+  currentMiraiAdmissionRound,
   effectiveApplicationDeadline,
   INITIAL_APPLICATION_DEADLINE,
 } from "@/lib/deadlineRollover";
@@ -108,13 +109,18 @@ function PublicApplicationDeadlineHeader({
   showCta: boolean;
 }) {
   const [now, setNow] = useState(Date.now());
-  const effectiveDeadline = effectiveApplicationDeadline(deadline, now);
+  const miraiRound = portalId === "mirai" ? currentMiraiAdmissionRound(now) : null;
+  const effectiveDeadline = portalId === "mirai"
+    ? miraiRound?.deadline || deadline
+    : effectiveApplicationDeadline(deadline, now);
   const deadlineLabel = formatLongDate(effectiveDeadline);
   const upDeledDeadlineLabel = formatLongDate(UP_DELED_DEADLINE);
   const showUpDeledDeadline = usesUpDeledDeadline(audience, portalId);
   const countdownDeadline = showUpDeledDeadline ? UP_DELED_DEADLINE : effectiveDeadline;
   const countdown = countdownRemaining(countdownDeadline, now);
-  const headline = applicationDeadlineHeadline(portalId, now);
+  const headline = miraiRound
+    ? `Round ${miraiRound.round} Application Deadline for Admission`
+    : applicationDeadlineHeadline(portalId, now);
   const scopeLabel = showUpDeledDeadline ? "UP-DELED" : portalName;
   const capsuleText = showUpDeledDeadline ? "Deadline" : "Application deadline";
   const capsuleDeadlineLabel = showUpDeledDeadline ? upDeledDeadlineLabel : deadlineLabel;
@@ -128,13 +134,15 @@ function PublicApplicationDeadlineHeader({
     return () => window.clearInterval(interval);
   }, []);
 
+  if (portalId === "mirai" && !miraiRound) return null;
+
   return (
     <div className="border-b border-white/10 px-4 py-2 text-white shadow-sm" style={{ backgroundColor }}>
       <div className="mx-auto flex w-full max-w-[112rem] flex-wrap items-center justify-center gap-2 text-center text-xs font-semibold xl:flex-nowrap xl:justify-between xl:text-left">
         <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 xl:flex-nowrap xl:justify-start">
           <span className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-[10px] font-black uppercase tracking-[0.14em] text-sky-300 sm:text-xs">
             <span className="h-2 w-2 rounded-full bg-success/50" aria-hidden="true" />
-            Admissions 2026-27
+            Admissions {portalId === "mirai" ? "2027-28" : "2026-27"}
           </span>
           <span className="min-w-0 text-sm font-bold text-white sm:text-base xl:truncate">
             {headlineText}
@@ -196,11 +204,12 @@ export function ApplicantDeadlineTicker({ audience = "staff" }: ApplicantDeadlin
 
   if (!eligible) return null;
 
-  const displayDeadline = usesUpDeledDeadline(audience, portal.id)
-    ? UP_DELED_DEADLINE
-    : effectiveApplicationDeadline(deadline);
-  const days = daysRemaining(displayDeadline);
-  if (days === 0) return null;
+  const miraiRound = portal.id === "mirai" ? currentMiraiAdmissionRound() : null;
+  const displayDeadline = portal.id === "mirai"
+    ? miraiRound?.deadline
+    : usesUpDeledDeadline(audience, portal.id) ? UP_DELED_DEADLINE : effectiveApplicationDeadline(deadline);
+  if (portal.id === "mirai" && !miraiRound) return null;
+  if (displayDeadline && daysRemaining(displayDeadline) === 0) return null;
 
   return (
     <PublicApplicationDeadlineHeader

@@ -173,10 +173,7 @@ export function getDobEligibilityCutoff(
   campusName?: string,
 ): { month: number; day: number; label: string } {
   if (programCategory === 'school') {
-    const isMirai = campusName?.toLowerCase().includes('mirai');
-    return isMirai
-      ? { month: 5, day: 1, label: `June 1, ${admissionYear}` }
-      : { month: 6, day: 31, label: `July 31, ${admissionYear}` };
+    return { month: 6, day: 31, label: `July 31, ${admissionYear}` };
   }
 
   return { month: 11, day: 31, label: `December 31, ${admissionYear}` };
@@ -515,7 +512,10 @@ export function validatePerCourseEligibility(
   return courseSelections.map(cs => {
     const rule = courseRules[cs.course_id];
     const results = validateAcademicEligibility(programCategory, academicDetails, rule, additionalQualifications, applicantCategory);
-    const dobResult = validateDobEligibility(programCategory, dob, sessionYear, rule, cs.course_name, cs.campus_name);
+    const isMirai = `${cs.campus_name} ${cs.course_name}`.toLowerCase().includes('mirai');
+    const dobResult = isMirai
+      ? null
+      : validateDobEligibility(programCategory, dob, sessionYear, rule, cs.course_name, cs.campus_name);
     const yearResults = validateAcademicYears(academicDetails, sessionYear, rule?.requiresGraduation);
     const hasErrors = results.some(r => r.type === 'error')
       || dobResult?.type === 'error'

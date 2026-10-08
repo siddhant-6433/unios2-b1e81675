@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0.0] - 2026-10-08
+
+### Added
+
+- Let families send Mirai admission enquiries and request a call or campus tour, with confirmation and admissions-team follow-up.
+- Guide Mirai applicants through five stages, with Mirai-branded screens, saved progress and WhatsApp OTP delivery from Mirai with NIMT fallback.
+- Show Mirai age guidance as of 31 July for the selected intake, and keep 2027–28 as the active Mirai session.
+- Show Mirai application deadlines in six rolling rounds from October through March.
+
+### Changed
+
+- Adapt school application fields for nationality, address country, parent employment status and optional child email; remove redundant transport and instruction-medium preferences.
+
+### Fixed
+
+- Preserve Mirai parent, child, grade, intake and attribution details through lead ingestion, and calculate the Mirai application fee from its portal configuration.
+
 ## [0.5.0.0] - 2026-10-07
 
 ### Fixed
