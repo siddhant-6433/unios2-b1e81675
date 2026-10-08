@@ -38854,6 +38854,7 @@ export type Database = {
         | "super_admin"
         | "campus_admin"
         | "principal"
+        | "vice_principal"
         | "admission_head"
         | "counsellor"
         | "accountant"
@@ -39097,6 +39098,7 @@ export const Constants = {
         "super_admin",
         "campus_admin",
         "principal",
+        "vice_principal",
         "admission_head",
         "counsellor",
         "accountant",

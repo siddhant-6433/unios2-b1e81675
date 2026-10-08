@@ -48,6 +48,17 @@ describe("generate-apply-link portal routing", () => {
     )).toBe("mirai");
   });
 
+  it.each([
+    ["B.Ed", "Bachelor of Education (B.Ed)"],
+    ["D.El.Ed", "Diploma in Elementary Education (D.El.Ed)"],
+  ])("routes GZ2 %s to NIMT despite stale Mirai branding", (_label, courseName) => {
+    expect(resolveApplyPortal(
+      { portal_brand: "mirai", lead_institution_type: "college", campus_id: "c0000002-0000-0000-0000-000000000001" },
+      [{ flags: ["portal:mirai"], program_category: "undergraduate", course_selections: [{ course_name: courseName, campus_name: "Ghaziabad Campus 2 (Avantika)" }] }],
+      { isMiraiInstitution: false },
+    )).toBe("nimt");
+  });
+
   it("keeps a B.Ed lead on the shared GZ2/Avantika campus on the NIMT apply portal", () => {
     // GZ2 is shared with the College of Education — the campus id must NOT force
     // Mirai. Without a Mirai course/source, a B.Ed lead resolves to NIMT.

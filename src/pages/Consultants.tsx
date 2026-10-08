@@ -218,7 +218,7 @@ const Consultants = () => {
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
   const [tab, setTab] = useState<"list" | "performance" | "payouts" | "requests" | "association_requests">("list");
-  const canSeeRequests = ["super_admin", "principal", "admission_head", "campus_admin"].includes(role || "");
+  const canSeeRequests = ["super_admin", "principal", "vice_principal", "admission_head", "campus_admin"].includes(role || "");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -243,10 +243,10 @@ const Consultants = () => {
   const [merging, setMerging] = useState(false);
   const [detailConsultant, setDetailConsultant] = useState<Consultant | null>(null);
   const isSuperAdmin = role === "super_admin";
-  const canLinkLeads = role === "super_admin" || role === "principal";
+  const canLinkLeads = role === "super_admin" || (role === "principal" || role === "vice_principal");
   const canAccessConsultantOnboarding =
     role === "super_admin"
-    || ((role === "principal" || role === "counsellor") && hasPermission("consultants:view"));
+    || (((role === "principal" || role === "vice_principal") || role === "counsellor") && hasPermission("consultants:view"));
 
   const fetchConsultants = async () => {
     setLoading(true);

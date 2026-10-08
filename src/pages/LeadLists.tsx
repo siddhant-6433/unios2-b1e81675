@@ -519,7 +519,7 @@ export default function LeadLists() {
   // render for everyone and only fail on submit.
   const isTeamLeader = useIsTeamLeader();
   const canAssignLists = role === "super_admin" || role === "admission_head"
-    || role === "principal" || isTeamLeader;
+    || (role === "principal" || role === "vice_principal") || isTeamLeader;
   // A counsellor can put a list on their OWN dialer. loadAssignableCounsellors
   // returns only themselves, and assign_lead_list_round_robin restricts a plain
   // counsellor to self — so this button just needs to be reachable for them.

@@ -15,7 +15,7 @@ const activeDocGateMigration = readFileSync("supabase/migrations/20260624151000_
 
 describe("application document review access", () => {
   it("keeps document approval controls read-only for non-approvers", () => {
-    expect(adminApplicationView).toContain('const canApproveApplication = role === "super_admin" || role === "principal"');
+    expect(adminApplicationView).toContain('const canApproveApplication = role === "super_admin" || (role === "principal" || role === "vice_principal")');
     expect(adminApplicationView).toContain("readOnly={!canApproveApplication}");
     expect(adminApplicationView).toContain("canApproveApplication && canDecideCurrentApplication");
     expect(adminApplicationView).toContain("readOnlyReason={!canApproveApplication");
@@ -36,7 +36,7 @@ describe("application document review access", () => {
   });
 
   it("allows counsellors to upload documents without granting approval controls", () => {
-    expect(adminApplicationView).toContain('const canUploadDocuments = role === "super_admin" || role === "principal" || role === "counsellor"');
+    expect(adminApplicationView).toContain('const canUploadDocuments = role === "super_admin" || (role === "principal" || role === "vice_principal") || role === "counsellor"');
     expect(adminApplicationView).toContain("<DocumentUpload");
     expect(adminApplicationView).toContain('nextLabel="Refresh document list"');
     expect(adminApplicationView).toContain('storageTarget="supabase"');

@@ -44,7 +44,7 @@ export function AiCallLogsPanel() {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const canSee = ["super_admin", "principal", "admission_head", "campus_admin"].includes(role || "");
+  const canSee = ["super_admin", "principal", "vice_principal", "admission_head", "campus_admin"].includes(role || "");
 
   useEffect(() => {
     if (!canSee) { setLoading(false); return; }

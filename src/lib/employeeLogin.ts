@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 // (supabase/functions/invite-user/index.ts). Keep the two in sync.
 export const PROVISIONABLE_ROLES: { value: string; label: string }[] = [
   { value: "principal", label: "Principal" },
+  { value: "vice_principal", label: "Vice Principal" },
   { value: "admission_head", label: "Admission Head" },
   { value: "hr_executive", label: "HR Executive" },
   { value: "counsellor", label: "Counsellor" },

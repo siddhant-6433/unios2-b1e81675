@@ -473,7 +473,7 @@ const Dashboard = () => {
   // Counsellors land on the cloud dialer — their prioritized queue is the day's work
   if (role === "counsellor") return <Navigate to="/cloud-dialer" replace />;
 
-  const isAdmin   = ["super_admin", "campus_admin", "admission_head", "principal"].includes(role || "");
+  const isAdmin   = ["super_admin", "campus_admin", "admission_head", "principal", "vice_principal"].includes(role || "");
   const isFaculty = ["faculty", "teacher"].includes(role || "");
   const isStudent = role === "student";
   const isParent  = role === "parent";

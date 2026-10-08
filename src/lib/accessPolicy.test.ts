@@ -363,7 +363,7 @@ describe("accessPolicy", () => {
     for (const denied of ["students:view_sensitive", "finance:view", "documents:upload", "marks:publish"]) {
       expect(decidePermissionAccess(classTeacher, denied).allowed).toBe(false);
     }
-    expect(canSeePolicyItem(classTeacher, { url: "/report-cards" })).toBe(true);
+    expect(canSeePolicyItem(classTeacher, { url: "/beacon-academics" })).toBe(true);
 
     // teacher = school (whole-day register), faculty = college (per lecture).
     const collegeFaculty = state({

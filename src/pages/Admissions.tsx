@@ -376,14 +376,14 @@ const Admissions = () => {
   const [exporting, setExporting] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
-  const canExportLeads = isSuperAdmin || role === "admission_head" || role === "principal";
+  const canExportLeads = isSuperAdmin || role === "admission_head" || (role === "principal" || role === "vice_principal");
   const { myDefaults } = useTatDefaults();
   const canTransfer = isSuperAdmin || isTeamLeader
-    || role === "admission_head" || role === "campus_admin" || role === "principal";
+    || role === "admission_head" || role === "campus_admin" || (role === "principal" || role === "vice_principal");
   const canFilterByCounsellor = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
   // Mirrors assign_lead_list_round_robin's own permission check.
   const canAssignLists = isSuperAdmin || isTeamLeader
-    || role === "admission_head" || role === "principal";
+    || role === "admission_head" || (role === "principal" || role === "vice_principal");
 
   const [notCalledIds, setNotCalledIds] = useState<Set<string> | null>(null);
   const [pendingNotCalledFilter, setPendingNotCalledFilter] = useState<string | null>(null);

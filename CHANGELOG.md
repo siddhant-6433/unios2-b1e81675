@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0.0] - 2026-10-07
+
+### Fixed
+
+- Show D.Pharma Year 1 tuition as the regular college fee without an ABVMU deposit across finance, applicant, and student fee views.
+
+## [0.4.0.1] - 2026-10-07
+
+### Changed
+
+- See course names for leads, students and applications in header search results.
+
+## [0.4.0.0] - 2026-10-06
+
+### Added
+
+- Notify super admins when student or lead refund drafts are created, with a link that opens and highlights the refund in Finance.
+
+## [0.3.0.2] - 2026-10-06
+
+### Fixed
+
+- Route Ghaziabad Campus 2 B.Ed and D.El.Ed applications to NIMT when stale Mirai branding is present.
+
+## [0.3.0.1] - 2026-10-06
+
+### Fixed
+
+- Keep the Admin Panel's Invite User dialog visible in the viewport when opening it from a scrolled page.
+
 ## [0.3.0.0] - 2026-10-05
 
 ### Added

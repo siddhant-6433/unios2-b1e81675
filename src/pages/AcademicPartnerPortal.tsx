@@ -194,6 +194,19 @@ type Payout = {
   lead_name?: string;
   student_name?: string;
   course_name?: string;
+  lead_payment_id?: string;
+  bill_id?: string | null;
+};
+
+type PartnerBill = {
+  id: string;
+  period_start: string;
+  period_end: string;
+  amount: number;
+  payout_count: number;
+  status: "draft" | "approved" | "synced_to_zoho";
+  zoho_bill_number: string | null;
+  zoho_sync_error: string | null;
 };
 
 type ApplicationSummary = {
@@ -411,6 +424,7 @@ type CandidateRow = {
   stage: string;
   paid: number;
   attributed: boolean;
+  hasNonApplicationFeePayment: boolean;
 };
 
 // Badge marking a candidate row that is not attributed to this partner (a
@@ -537,6 +551,12 @@ export default function AcademicPartnerPortal() {
   const [fees, setFees] = useState<FeeRow[]>([]);
   const [receiptsByLead, setReceiptsByLead] = useState<Map<string, FeeReceipt[]>>(new Map());
   const [payouts, setPayouts] = useState<Payout[]>([]);
+  const [partnerBills, setPartnerBills] = useState<PartnerBill[]>([]);
+  const [billMonth, setBillMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const [billBusy, setBillBusy] = useState<string | null>(null);
   const [referrals, setReferrals] = useState<ReferralRow[]>([]);
   const [referralNotesDraft, setReferralNotesDraft] = useState<Record<string, string>>({});
   const [savingReferralId, setSavingReferralId] = useState<string | null>(null);
@@ -646,12 +666,11 @@ export default function AcademicPartnerPortal() {
     () => paidApplications.filter((lead) => Boolean(lead.application_id || lead.application_status || lead.application_created_at)),
     [paidApplications],
   );
-  // Students tab: one unified candidate list, mirroring the Applications
-  // funnel strip's Token Paid / Pre-Admitted / Admitted stages exactly.
+  // Students tab: one unified candidate list with pipeline, payment, PAN and
+  // admission buckets for attributed leads plus assignment-scoped students.
   //
-  // Row (a): partner-attributed leads (from `leads`) that already qualify as
-  // a candidate — admission no, pre-admission no (PAN), or a confirmed
-  // payment beyond the application fee. `attributed: true`.
+  // Row (a): every partner-attributed lead, including candidates still in
+  // pipeline. `attributed: true`.
   // Row (b): students (from `students`) not already covered by (a) — these
   // sit in a course/batch the partner is assigned to teach but their lead
   // isn't attributed to the partner, so they earn no payout. `attributed: false`.
@@ -668,7 +687,6 @@ export default function AcademicPartnerPortal() {
       // pre_admission_token / registration_fee / other non-application
       // payments also qualify a candidate as token-paid.
       const hasNonApplicationFeePayment = receipts.some((r) => r.type !== "application_fee");
-      if (!admissionNo && !pan && !hasNonApplicationFeePayment) return;
       coveredLeadIds.add(lead.id);
       rows.push({
         key: lead.id,
@@ -684,6 +702,7 @@ export default function AcademicPartnerPortal() {
         stage: lead.stage,
         paid: receipts.reduce((sum, r) => sum + Number(r.amount || 0), 0),
         attributed: true,
+        hasNonApplicationFeePayment,
       });
     });
 
@@ -704,6 +723,7 @@ export default function AcademicPartnerPortal() {
         stage: student.status,
         paid: receipts.reduce((sum, r) => sum + Number(r.amount || 0), 0),
         attributed: false,
+        hasNonApplicationFeePayment: receipts.some((r) => r.type !== "application_fee"),
       });
     });
 
@@ -717,7 +737,11 @@ export default function AcademicPartnerPortal() {
     [candidateRows],
   );
   const tokenPaidRows = useMemo(
-    () => candidateRows.filter((row) => !row.admissionNo && !row.pan),
+    () => candidateRows.filter((row) => !row.admissionNo && !row.pan && row.hasNonApplicationFeePayment),
+    [candidateRows],
+  );
+  const pipelineRows = useMemo(
+    () => candidateRows.filter((row) => !row.admissionNo && !row.pan && !row.hasNonApplicationFeePayment),
     [candidateRows],
   );
 
@@ -810,11 +834,12 @@ export default function AcademicPartnerPortal() {
   }, []);
 
   const fetchPortal = useCallback(async (partnerId: string) => {
-    const [statsRes, assignmentsRes, leadsRes, payoutsRes] = await Promise.all([
+    const [statsRes, assignmentsRes, leadsRes, payoutsRes, billsRes] = await Promise.all([
       supabase.from("academic_partner_dashboard").select("*").eq("partner_id", partnerId).single(),
       supabase.from("academic_partner_assignment_summary").select("*").eq("partner_id", partnerId).eq("is_active", true).order("course_name"),
-      supabase.from("leads").select(ACADEMIC_PARTNER_PIPELINE_LEAD_SELECT).eq("academic_partner_id", partnerId).order("created_at", { ascending: false }).limit(200),
-      supabase.from("academic_partner_payouts").select("*, leads:lead_id(name), students:student_id(name), courses:course_id(name)").eq("partner_id", partnerId).order("created_at", { ascending: false }).limit(100),
+      supabase.from("leads").select(ACADEMIC_PARTNER_PIPELINE_LEAD_SELECT).eq("academic_partner_id", partnerId).order("created_at", { ascending: false }).limit(1000),
+      supabase.from("academic_partner_payouts").select("*, leads:lead_id(name), students:student_id(name), courses:course_id(name)").eq("partner_id", partnerId).order("created_at", { ascending: false }).limit(1000),
+      supabase.from("academic_partner_bills" as any).select("*").eq("partner_id", partnerId).order("period_start", { ascending: false }).limit(100),
     ]);
 
     if (statsRes.data) setStats(statsRes.data as DashboardStats);
@@ -825,6 +850,7 @@ export default function AcademicPartnerPortal() {
       fee_collected: Number(a.fee_collected || 0),
     }));
     setAssignments(activeAssignments);
+    setPartnerBills((billsRes.data || []) as unknown as PartnerBill[]);
 
     const scopedRows = scopePartnerPipelineLeads((leadsRes.data || []) as unknown as LeadRow[], partnerId);
 
@@ -1048,6 +1074,43 @@ export default function AcademicPartnerPortal() {
       course_name: p.courses?.name,
     })));
   }, [canIssueOfferLetters, toast]);
+
+  const financeActorRole = isImpersonating ? realRole : role;
+  const canManagePartnerFinance = ["super_admin", "campus_admin", "admission_head"].includes(financeActorRole || "");
+  const runPartnerBillAction = async (action: "create" | "approve" | "send", billId?: string) => {
+    if (!partner) return;
+    const busyKey = billId || "create";
+    setBillBusy(busyKey);
+    try {
+      if (action === "create") {
+        const [year, month] = billMonth.split("-").map(Number);
+        const start = `${billMonth}-01`;
+        const lastDay = new Date(year, month, 0).getDate();
+        const end = `${billMonth}-${String(lastDay).padStart(2, "0")}`;
+        const { error } = await supabase.rpc("create_academic_partner_bill" as any, {
+          _partner_id: partner.id,
+          _period_start: start,
+          _period_end: end,
+        } as any);
+        if (error) throw error;
+        toast({ title: "Draft bill created", description: "Review the calculated payouts before approval." });
+      } else if (action === "approve" && billId) {
+        const { error } = await supabase.rpc("approve_academic_partner_bill" as any, { _bill_id: billId } as any);
+        if (error) throw error;
+        toast({ title: "Bill approved", description: "It is ready to send to Zoho Books." });
+      } else if (action === "send" && billId) {
+        const { data, error } = await supabase.functions.invoke("zoho-academic-partner-bill-sync", { body: { bill_id: billId } });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+        toast({ title: "Bill sent to Zoho Books", description: data?.zoho_bill_number ? `Bill ${data.zoho_bill_number}` : undefined });
+      }
+      await fetchPortal(partner.id);
+    } catch (error) {
+      toast({ title: "Partner bill action failed", description: errorMessage(error), variant: "destructive" });
+    } finally {
+      setBillBusy(null);
+    }
+  };
 
   const fetchCallingAgentPhone = useCallback(async () => {
     if (!user?.id) return;
@@ -1603,14 +1666,12 @@ export default function AcademicPartnerPortal() {
           { label: "Courses", value: stats?.assigned_courses || 0, icon: BookOpen, bg: "bg-pastel-blue" },
           { label: "Batches", value: stats?.assigned_batches || 0, icon: GraduationCap, bg: "bg-pastel-purple" },
           { label: "Leads", value: stats?.total_leads || 0, icon: Users, bg: "bg-pastel-orange" },
-          // Counted off the same three buckets the Students tab renders, so the
-          // card and the sub-tabs can never disagree. The dashboard view's
-          // total_candidates missed candidates who paid a token fee but never
-          // got a students row.
+          // Counted from the full list represented by the Students sub-tabs,
+          // including leads still in the pipeline.
           {
             label: "Candidates",
-            value: tokenPaidRows.length + preAdmittedRows.length + admittedRows.length,
-            sub: `${tokenPaidRows.length} token paid · ${preAdmittedRows.length} pre-admitted · ${admittedRows.length} admitted`,
+            value: candidateRows.length,
+            sub: `${pipelineRows.length} in pipeline · ${tokenPaidRows.length} token paid · ${preAdmittedRows.length} pre-admitted · ${admittedRows.length} admitted`,
             icon: TrendingUp,
             bg: "bg-pastel-green",
           },
@@ -1662,6 +1723,10 @@ export default function AcademicPartnerPortal() {
             activeStage={leadFunnelStage}
             onStageClick={setLeadFunnelStage}
           />
+          <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+            <span>Showing {visibleLeads.length} of {leads.length} partner leads{leadFunnelStage ? ` · ${String(leadFunnelStage).replace(/_/g, " ")} filter` : ""}</span>
+            {leadFunnelStage && <Button size="sm" variant="outline" onClick={() => setLeadFunnelStage(null)}>Clear stage filter</Button>}
+          </div>
           <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
             <div className="overflow-x-auto">
             <table className="w-full min-w-[1180px] text-sm">
@@ -1897,10 +1962,13 @@ export default function AcademicPartnerPortal() {
 
         <TabsContent value="students" className="mt-4">
           <Tabs
-            defaultValue={tokenPaidRows.length > 0 ? "token_paid" : preAdmittedRows.length > 0 ? "pre_admitted" : "admitted"}
+            defaultValue={pipelineRows.length > 0 ? "pipeline" : tokenPaidRows.length > 0 ? "token_paid" : preAdmittedRows.length > 0 ? "pre_admitted" : "admitted"}
             className="w-full"
           >
             <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start overflow-x-auto mb-4">
+              <TabsTrigger value="pipeline" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-2 text-sm">
+                Pipeline ({pipelineRows.length})
+              </TabsTrigger>
               <TabsTrigger value="token_paid" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-2 text-sm">
                 Token Paid ({tokenPaidRows.length})
               </TabsTrigger>
@@ -1911,6 +1979,27 @@ export default function AcademicPartnerPortal() {
                 Admitted ({admittedRows.length})
               </TabsTrigger>
             </TabsList>
+
+            <TabsContent value="pipeline" className="mt-0">
+              <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
+                <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm">
+                  <thead><tr className="border-b bg-muted/50">
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Candidate</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Course</th>
+                    <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Stage</th>
+                    <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Actions</th>
+                  </tr></thead><tbody>
+                    {pipelineRows.map((row) => <tr key={row.key} className="border-b last:border-0">
+                      <td className="px-4 py-3"><div className="font-medium flex items-center gap-1.5">{row.name}<DirectBadge attributed={row.attributed} /></div><div className="text-xs text-muted-foreground">{row.phone}</div></td>
+                      <td className="px-4 py-3">{row.courseName}</td>
+                      <td className="px-4 py-3 text-center"><Badge className={`border-0 text-[10px] ${statusBadge(row.stage)}`}>{STAGE_LABELS[row.stage] || row.stage}</Badge></td>
+                      <td className="px-4 py-3 text-right"><PartnerCandidateActions variant="buttons" {...candidateActions(row)} /></td>
+                    </tr>)}
+                    {pipelineRows.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">No candidates currently in pipeline</td></tr>}
+                  </tbody>
+                </table></div>
+              </CardContent></Card>
+            </TabsContent>
 
             <TabsContent value="token_paid" className="mt-0">
               <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
@@ -2065,6 +2154,19 @@ export default function AcademicPartnerPortal() {
 
         <TabsContent value="fees" className="mt-4">
           <Card className="border-border/60 shadow-none overflow-hidden mb-4"><CardContent className="p-0">
+            <div className="border-b px-4 py-3"><h3 className="font-semibold">Confirmed Fee Collections</h3><p className="text-xs text-muted-foreground">Receipts recorded against partner-attributed candidates.</p></div>
+            <div className="overflow-x-auto"><table className="w-full min-w-[850px] text-sm">
+              <thead><tr className="border-b bg-muted/50">
+                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Candidate</th><th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Receipt</th><th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Date</th><th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Type / Mode</th><th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Amount</th><th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Status</th>
+              </tr></thead><tbody>
+                {leads.flatMap((lead) => (receiptsByLead.get(lead.id) || []).map((receipt) => ({ lead, receipt }))).map(({ lead, receipt }) => <tr key={receipt.id} className="border-b last:border-0">
+                  <td className="px-4 py-3 font-medium">{lead.name}</td><td className="px-4 py-3 font-mono text-xs">{receipt.receipt_no || receipt.transaction_ref || "—"}</td><td className="px-4 py-3 text-xs">{(receipt.payment_date || receipt.created_at) ? new Date(receipt.payment_date || receipt.created_at).toLocaleDateString("en-IN") : "—"}</td><td className="px-4 py-3 text-xs capitalize">{receipt.type.replace(/_/g, " ")} · {(receipt.payment_mode || "—").replace(/_/g, " ")}</td><td className="px-4 py-3 text-right font-semibold">{fmt(receipt.amount)}</td><td className="px-4 py-3 text-center"><Badge className={`border-0 text-[10px] ${statusBadge(receipt.status)}`}>{receipt.status}</Badge></td>
+                </tr>)}
+                {leads.every((lead) => !(receiptsByLead.get(lead.id) || []).length) && <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No confirmed fee receipts found</td></tr>}
+              </tbody>
+            </table></div>
+          </CardContent></Card>
+          <Card className="border-border/60 shadow-none overflow-hidden mb-4"><CardContent className="p-0">
             <table className="w-full text-sm">
               <thead><tr className="border-b bg-muted/50">
                 <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Student</th>
@@ -2150,6 +2252,23 @@ export default function AcademicPartnerPortal() {
         </TabsContent>
 
         <TabsContent value="payouts" className="mt-4">
+          <Card className="mb-4 border-border/60 shadow-none"><CardContent className="p-4">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div><h3 className="font-semibold">Academic Partner Bills</h3><p className="text-xs text-muted-foreground">Payouts use confirmed receipts and the active course or batch assignment rate.</p></div>
+              {canManagePartnerFinance && <div className="flex flex-wrap items-end gap-2"><label className="text-xs text-muted-foreground">Payout month<input type="month" value={billMonth} onChange={(event) => setBillMonth(event.target.value)} className="mt-1 block h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground" /></label><Button onClick={() => runPartnerBillAction("create")} disabled={!!billBusy || !billMonth}>{billBusy === "create" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Create draft bill</Button></div>}
+            </div>
+            <div className="mt-4 overflow-x-auto rounded-md border"><table className="w-full min-w-[780px] text-sm">
+              <thead><tr className="border-b bg-muted/50"><th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Period</th><th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Receipts</th><th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Bill amount</th><th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Status</th><th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Zoho bill</th><th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Action</th></tr></thead>
+              <tbody>{partnerBills.map((bill) => <tr key={bill.id} className="border-b last:border-0">
+                <td className="px-4 py-3">{new Date(`${bill.period_start}T00:00:00`).toLocaleDateString("en-IN")} – {new Date(`${bill.period_end}T00:00:00`).toLocaleDateString("en-IN")}</td><td className="px-4 py-3 text-right">{bill.payout_count}</td><td className="px-4 py-3 text-right font-semibold">{fmt(bill.amount)}</td><td className="px-4 py-3 text-center"><Badge className={`border-0 text-[10px] ${statusBadge(bill.status)}`}>{bill.status.replace(/_/g, " ")}</Badge></td><td className="px-4 py-3">{bill.zoho_bill_number || "—"}{bill.zoho_sync_error && <div className="max-w-[260px] text-xs text-destructive">{bill.zoho_sync_error}</div>}</td><td className="px-4 py-3 text-right whitespace-nowrap">
+                  {canManagePartnerFinance && bill.status === "draft" && <Button size="sm" variant="outline" disabled={!!billBusy} onClick={() => runPartnerBillAction("approve", bill.id)}>{billBusy === bill.id ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}Approve</Button>}
+                  {canManagePartnerFinance && bill.status === "approved" && <Button size="sm" disabled={!!billBusy} onClick={() => runPartnerBillAction("send", bill.id)}>{billBusy === bill.id ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}Send to Zoho</Button>}
+                  {bill.status === "synced_to_zoho" && <span className="text-xs text-muted-foreground">Sent</span>}
+                </td>
+              </tr>)}
+              {partnerBills.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No partner bills created yet</td></tr>}</tbody>
+            </table></div>
+          </CardContent></Card>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
             <Card className="shadow-none"><CardContent className="p-4 text-center"><p className="text-xl font-bold text-primary">{fmt(stats?.total_payout)}</p><p className="text-[11px] text-muted-foreground">Total Payout</p></CardContent></Card>
             <Card className="shadow-none"><CardContent className="p-4 text-center"><p className="text-xl font-bold text-warning">{fmt(stats?.pending_payout)}</p><p className="text-[11px] text-muted-foreground">Pending</p></CardContent></Card>

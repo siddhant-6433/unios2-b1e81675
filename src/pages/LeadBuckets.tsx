@@ -252,7 +252,7 @@ export default function LeadBuckets() {
 
   // Admin: assign to specific counsellor
   const isSuperAdmin = role === "super_admin";
-  const isAdminRole = role === "super_admin" || role === "admission_head" || role === "campus_admin" || role === "principal";
+  const isAdminRole = role === "super_admin" || role === "admission_head" || role === "campus_admin" || (role === "principal" || role === "vice_principal");
   const [counsellors, setCounsellors] = useState<Counsellor[]>([]);
   const [selectedCounsellor, setSelectedCounsellor] = useState<string>("");
 

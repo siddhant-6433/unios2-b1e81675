@@ -24,7 +24,7 @@ export function PendingApprovalsPanel() {
   const [items, setItems] = useState<PendingItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const canApprove = ["super_admin", "principal", "campus_admin", "admission_head"].includes(role || "");
+  const canApprove = ["super_admin", "principal", "vice_principal", "campus_admin", "admission_head"].includes(role || "");
 
   const fetch = async () => {
     if (!canApprove) {
@@ -42,7 +42,7 @@ export function PendingApprovalsPanel() {
     const filtered = (data || []).filter((item: any) => {
       if (item.kind === "pending_an") return false;
       if (role === "super_admin") return true;
-      if (role === "principal") return item.pending_role === "principal";
+      if ((role === "principal" || role === "vice_principal")) return item.pending_role === "principal";
       if (role === "admission_head") return item.pending_role === "principal";
       if (role === "campus_admin") return item.pending_role === "super_admin";
       return false;

@@ -73,6 +73,24 @@ describe("student financial loading", () => {
     expect(mock.filters).toContainEqual({ table: "fee_ledger", column: "student_id", value: "s1" });
   });
 
+  it("shows D.Pharma Year 1 tuition as one regular fee head when the ABVMU amount is zero", async () => {
+    mock.responses.set("fee_ledger", [ok([{
+      ...fee,
+      fee_codes: { code: "TUITION-Y1", name: "Year 1 Tuition" },
+      total_amount: 95000,
+      balance: 95000,
+    }])]);
+    render(<StudentFeePanel student={{
+      ...student,
+      lead_id: "dpharma-lead",
+      course_name: "Diploma in Pharmacy (D.Pharma)",
+    } as any} />);
+
+    expect(await screen.findByText("Year 1 Tuition")).toBeInTheDocument();
+    expect(screen.queryByText("ABVMU Deposit (Year 1)")).not.toBeInTheDocument();
+    expect(screen.getAllByText("₹95,000").length).toBeGreaterThan(0);
+  });
+
   it("shows receipt failures independently and retries a lead-less student's receipts", async () => {
     mock.responses.set("fee_ledger", [ok([fee])]);
     mock.responses.set("lead_payments", [Promise.resolve({ data: null, error: { message: "Receipts unavailable" } }), ok([{ id: "r1", status: "confirmed", type: "other", receipt_no: "SCHOOL-001", amount: 100 }])]);

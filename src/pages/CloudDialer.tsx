@@ -261,7 +261,7 @@ export default function CloudDialer() {
   const [showScheduleVisit, setShowScheduleVisit] = useState(false);
   const [showFeeProposal, setShowFeeProposal] = useState(false);
   // Same role set the lead page gates the proposal on.
-  const canCreateProposal = role === "super_admin" || role === "principal"
+  const canCreateProposal = role === "super_admin" || (role === "principal" || role === "vice_principal")
     || role === "counsellor" || role === "admission_head" || role === "campus_admin";
 
   // First-run coach-mark on the queue selector. Call lists are new, and the
