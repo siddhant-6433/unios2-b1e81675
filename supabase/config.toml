@@ -23,10 +23,15 @@ verify_jwt = false
 [functions.whatsapp-otp]
 verify_jwt = false
 
+
 [functions.ai-first-call]
 verify_jwt = false
 
 [functions.lead-ingest]
+verify_jwt = false
+
+# Public Mirai thank-you action; the handler validates the lead is Mirai-owned.
+[functions.mirai-admission-request]
 verify_jwt = false
 
 [functions.placement-report-request]

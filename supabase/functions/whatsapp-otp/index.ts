@@ -58,6 +58,45 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
+type OtpSender = { label: "mirai" | "nimt"; token: string; phoneNumberId: string };
+
+async function sendOtpTemplate(
+  sender: OtpSender,
+  recipient: string,
+  templateName: string,
+  otpCode: string,
+): Promise<{ response: Response; body: string }> {
+  const response = await fetch(
+    `https://graph.facebook.com/v21.0/${sender.phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${sender.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: recipient,
+        type: "template",
+        template: {
+          name: templateName,
+          language: { code: "en" },
+          components: [
+            { type: "body", parameters: [{ type: "text", text: otpCode }] },
+            {
+              type: "button",
+              sub_type: "url",
+              index: "0",
+              parameters: [{ type: "text", text: otpCode }],
+            },
+          ],
+        },
+      }),
+    },
+  );
+  return { response, body: await response.text() };
+}
+
 function normalizeLoginPhone(phone: unknown): string | null {
   if (typeof phone !== "string") return null;
   const trimmed = phone.trim();
@@ -289,7 +328,7 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const { action, phone, otp, intent_id, client_secret } = await req.json();
+    const { action, phone, otp, intent_id, client_secret, portal_id } = await req.json();
     const normalizedPhone = normalizeLoginPhone(phone);
 
     // ── Start WhatsApp sign-in intent ────────────────────────────────────────
@@ -478,20 +517,53 @@ Deno.serve(async (req) => {
 
     // ── Send OTP ──────────────────────────────────────────────────────────────
     if (action === "send") {
-      const whatsappToken = Deno.env.get("WHATSAPP_OTP_API_TOKEN") || Deno.env.get("WHATSAPP_API_TOKEN");
-      const phoneNumberId = Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID") || Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+      const nimtSender: OtpSender = {
+        label: "nimt",
+        token: Deno.env.get("WHATSAPP_OTP_API_TOKEN") || Deno.env.get("WHATSAPP_API_TOKEN") || "",
+        phoneNumberId: Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID") || Deno.env.get("WHATSAPP_PHONE_NUMBER_ID") || "",
+      };
       const otpTemplateName = Deno.env.get("WHATSAPP_OTP_TEMPLATE") || "unios2_login";
+      let miraiSender: OtpSender | null = null;
+      let miraiSenderFailure: Record<string, unknown> | null = null;
+
+      if (portal_id === "mirai") {
+        const { data: miraiChannels, error: channelError } = await adminClient
+          .from("whatsapp_channels")
+          .select("meta_phone_number_id, business_number, secret_token_name")
+          .eq("provider", "meta")
+          .eq("is_active", true);
+        if (channelError) {
+          console.warn("[whatsapp-otp] could not resolve Mirai sender; will use NIMT fallback:", channelError.message);
+          miraiSenderFailure = { reason: "channel_lookup_failed", message: channelError.message };
+        }
+        const channel = (miraiChannels || []).find((candidate: any) =>
+          candidate.meta_phone_number_id === "1110238142172240" ||
+          ["919220522282", "9220522282"].includes(String(candidate.business_number || "").replace(/\D/g, ""))
+        );
+        if (channel?.meta_phone_number_id) {
+          const tokenName = typeof channel.secret_token_name === "string" ? channel.secret_token_name : "";
+          const token = (tokenName ? Deno.env.get(tokenName) : null) || Deno.env.get("WHATSAPP_API_TOKEN") || "";
+          if (token) {
+            miraiSender = {
+              label: "mirai",
+              token,
+              phoneNumberId: channel.meta_phone_number_id,
+            };
+          } else {
+            miraiSenderFailure = { reason: "sender_token_missing" };
+          }
+        } else if (!channelError) {
+          miraiSenderFailure = { reason: "active_mirai_channel_not_found" };
+        }
+      }
 
       console.log("[whatsapp-otp] Secret diagnostics:", {
-        WHATSAPP_OTP_API_TOKEN: !!Deno.env.get("WHATSAPP_OTP_API_TOKEN"),
-        WHATSAPP_API_TOKEN: !!Deno.env.get("WHATSAPP_API_TOKEN"),
-        WHATSAPP_OTP_PHONE_NUMBER_ID: !!Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID"),
-        WHATSAPP_PHONE_NUMBER_ID: !!Deno.env.get("WHATSAPP_PHONE_NUMBER_ID"),
-        phoneNumberId_length: phoneNumberId?.length ?? 0,
+        nimtSenderConfigured: !!(nimtSender.token && nimtSender.phoneNumberId),
+        miraiSenderConfigured: !!(miraiSender?.token && miraiSender.phoneNumberId),
         templateName: otpTemplateName,
       });
 
-      if (!whatsappToken || !phoneNumberId) {
+      if ((!miraiSender || portal_id !== "mirai") && (!nimtSender.token || !nimtSender.phoneNumberId)) {
         return new Response(
           JSON.stringify({ error: "WhatsApp API not configured. Contact administrator." }),
           { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -547,42 +619,45 @@ Deno.serve(async (req) => {
       }
 
       const waPhone = normalizedPhone.replace(/[^0-9]/g, "");
-      console.log("[whatsapp-otp] Sending to:", waPhone, "template:", otpTemplateName, "phoneNumberId:", phoneNumberId);
+      let activeSender = miraiSender || nimtSender;
+      let waAttempt: { response: Response; body: string };
+      try {
+        console.log("[whatsapp-otp] Sending to:", waPhone, "template:", otpTemplateName, "sender:", activeSender.label, "phoneNumberId:", activeSender.phoneNumberId);
+        waAttempt = await sendOtpTemplate(activeSender, waPhone, otpTemplateName, otpCode);
+      } catch (sendError) {
+        console.error(`[whatsapp-otp] ${activeSender.label} sender request failed:`, getErrorMessage(sendError));
+        if (activeSender.label !== "mirai" || !nimtSender.token || !nimtSender.phoneNumberId) throw sendError;
+        miraiSenderFailure = { reason: "request_failed", message: getErrorMessage(sendError) };
+        activeSender = nimtSender;
+        waAttempt = await sendOtpTemplate(activeSender, waPhone, otpTemplateName, otpCode);
+      }
 
-      const waResponse = await fetch(
-        `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${whatsappToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            messaging_product: "whatsapp",
-            to: waPhone,
-            type: "template",
-            template: {
-              name: otpTemplateName,
-              language: { code: "en" },
-              components: [
-                {
-                  type: "body",
-                  parameters: [{ type: "text", text: otpCode }],
-                },
-                {
-                  type: "button",
-                  sub_type: "url",
-                  index: "0",
-                  parameters: [{ type: "text", text: otpCode }],
-                },
-              ],
-            },
-          }),
+      if (!waAttempt.response.ok && activeSender.label === "mirai" && nimtSender.token && nimtSender.phoneNumberId) {
+        console.warn("[whatsapp-otp] Mirai sender rejected OTP; trying NIMT fallback:", waAttempt.response.status, waAttempt.body);
+        const miraiErrorResult = parseJsonObject(waAttempt.body);
+        const miraiMetaError = isRecord(miraiErrorResult?.error) ? miraiErrorResult.error : null;
+        miraiSenderFailure = {
+          http_status: waAttempt.response.status,
+          meta_error: miraiMetaError ? {
+            type: miraiMetaError.type,
+            code: miraiMetaError.code,
+            error_subcode: miraiMetaError.error_subcode,
+            message: miraiMetaError.message,
+            fbtrace_id: miraiMetaError.fbtrace_id,
+          } : { message: "Meta returned an unparseable error response" },
+        };
+        activeSender = nimtSender;
+        try {
+          waAttempt = await sendOtpTemplate(activeSender, waPhone, otpTemplateName, otpCode);
+        } catch (sendError) {
+          console.error("[whatsapp-otp] NIMT fallback sender request failed:", getErrorMessage(sendError));
+          throw sendError;
         }
-      );
+      }
 
-      const waBody = await waResponse.text();
-      console.log("[whatsapp-otp] Meta API response:", waResponse.status, waBody);
+      const waResponse = waAttempt.response;
+      const waBody = waAttempt.body;
+      console.log("[whatsapp-otp] Meta API response:", waResponse.status, waBody, "sender:", activeSender.label);
 
       if (!waResponse.ok) {
         const parsedWaError = parseJsonObject(waBody);
@@ -617,13 +692,14 @@ Deno.serve(async (req) => {
         .update({
           wa_message_id: wamid || null,
           wa_status: wamid ? "accepted" : "accepted_without_message_id",
+          wa_status_error: miraiSenderFailure,
           wa_sent_at: new Date().toISOString(),
           wa_status_updated_at: new Date().toISOString(),
         })
         .eq("id", otpRecord.id);
 
       return new Response(
-        JSON.stringify({ success: true, wamid, wa_id: waContact?.wa_id, input: waContact?.input }),
+        JSON.stringify({ success: true, wamid, wa_id: waContact?.wa_id, input: waContact?.input, sender: activeSender.label }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

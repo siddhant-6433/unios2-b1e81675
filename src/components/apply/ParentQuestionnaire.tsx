@@ -15,17 +15,6 @@ interface Props {
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 const textareaCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 min-h-[80px] resize-y";
-const transportOptions = [
-  { value: "school_bus", label: "School Bus" },
-  { value: "self_drop", label: "Self Drop & Pick-up" },
-  { value: "carpool", label: "Carpool" },
-  { value: "not_decided", label: "Not Decided Yet" },
-];
-const mediumOptions = [
-  { value: "english", label: "English" },
-  { value: "hindi", label: "Hindi" },
-  { value: "bilingual", label: "Bilingual (English + Hindi)" },
-];
 // Fee-driving school mode. Values match src/lib/offerFeeTerms (SchoolFeeSelection)
 // so the admissions team's offer prefills from what the parent declares here.
 const attendanceModeOptions = [
@@ -69,9 +58,9 @@ export function ParentQuestionnaire({ data, onChange, onNext, onBack, saving, re
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Parent Questionnaire</h2>
+        <h2 className="text-lg font-semibold text-foreground">Your child’s learning journey</h2>
         <p className="text-sm text-muted-foreground">
-          Help us understand your child better. All fields are optional but recommended.
+          A few short questions help our admissions team understand your child and family. These answers are optional.
         </p>
       </div>
 
@@ -88,26 +77,6 @@ export function ParentQuestionnaire({ data, onChange, onNext, onBack, saving, re
           />
         ))}
       </div>
-
-      {/* Transport preference */}
-      <SelectField
-        label="Transport Preference"
-        value={String(schoolDetails.transport_preference || "")}
-        onValueChange={(value) => onChange({ school_details: { ...schoolDetails, transport_preference: value } })}
-        options={transportOptions}
-        placeholder="Select"
-        triggerClassName={inputCls}
-      />
-
-      {/* Medium of instruction preference */}
-      <SelectField
-        label="Preferred Medium of Instruction"
-        value={String(schoolDetails.medium_preference || "")}
-        onValueChange={(value) => onChange({ school_details: { ...schoolDetails, medium_preference: value } })}
-        options={mediumOptions}
-        placeholder="Select"
-        triggerClassName={inputCls}
-      />
 
       {/* Attendance mode — drives boarding/transport fees on the admission offer. */}
       <SelectField

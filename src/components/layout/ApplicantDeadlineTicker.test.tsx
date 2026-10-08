@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ApplicantDeadlineTicker } from "./ApplicantDeadlineTicker";
 import { PortalProvider } from "@/components/apply/PortalContext";
+import { currentMiraiAdmissionRound } from "@/lib/deadlineRollover";
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({ role: "super_admin" }),
@@ -77,7 +78,8 @@ describe("ApplicantDeadlineTicker", () => {
     );
 
     expect(screen.getByText("Mirai School")).toBeInTheDocument();
-    expect(screen.getByText("Round 2 Application Deadline for Admission: apply by 14th June 2026")).toBeInTheDocument();
+    expect(screen.getByText("Admissions 2027-28")).toBeInTheDocument();
+    expect(screen.getByText("Round 1 Application Deadline for Admission: apply by 20th October 2026")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Apply Now/i })).toHaveAttribute("href", "/apply/mirai");
     expect(screen.queryByText("BPT & BMRIT")).not.toBeInTheDocument();
     expect(screen.queryByText("UP-DELED")).not.toBeInTheDocument();
@@ -106,9 +108,24 @@ describe("ApplicantDeadlineTicker", () => {
     expect(screen.getByText("4d 23h 59m 59s")).toBeInTheDocument();
   });
 
-  it("moves school portals to Round 3 after two Round 2 extensions", () => {
+  it("moves Mirai through the six monthly 2027-28 application rounds", () => {
+    const dates = [
+      ["2026-10-06T12:00:00+05:30", 1, "2026-10-20"],
+      ["2026-10-21T00:00:00+05:30", 2, "2026-11-20"],
+      ["2026-11-21T00:00:00+05:30", 3, "2026-12-20"],
+      ["2026-12-21T00:00:00+05:30", 4, "2027-01-20"],
+      ["2027-01-21T00:00:00+05:30", 5, "2027-02-20"],
+      ["2027-02-21T00:00:00+05:30", 6, "2027-03-20"],
+    ] as const;
+    for (const [date, round, deadline] of dates) {
+      expect(currentMiraiAdmissionRound(new Date(date).getTime())).toEqual({ round, deadline });
+    }
+    expect(currentMiraiAdmissionRound(new Date("2027-03-21T00:00:00+05:30").getTime())).toBeNull();
+  });
+
+  it("shows the current Mirai round on the live portal ticker", () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-06-25T00:00:00+05:30"));
+    vi.setSystemTime(new Date("2026-10-06T12:00:00+05:30"));
 
     render(
       <MemoryRouter initialEntries={["/apply/mirai"]}>
@@ -119,9 +136,9 @@ describe("ApplicantDeadlineTicker", () => {
     );
 
     expect(screen.getByText("Mirai School")).toBeInTheDocument();
-    expect(screen.getByText("Round 3 Application Deadline for Admission: apply by 29th June 2026")).toBeInTheDocument();
-    expect(screen.queryByText(/^Application deadline/)).not.toBeInTheDocument();
+    expect(screen.getByText("Admissions 2027-28")).toBeInTheDocument();
+    expect(screen.getByText("Round 1 Application Deadline for Admission: apply by 20th October 2026")).toBeInTheDocument();
     expect(screen.queryByText(/CAHET/)).not.toBeInTheDocument();
-    expect(screen.getByText("4d 23h 59m 59s")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Apply Now/i })).toHaveAttribute("href", "/apply/mirai");
   });
 });

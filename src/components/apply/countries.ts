@@ -162,3 +162,16 @@ export function getNationalityOptions(): { value: string; label: string }[] {
 export function isIndianNationality(nationality: string | undefined | null): boolean {
   return !nationality || nationality === 'Indian';
 }
+
+/** Address postal labels depend on the selected country, not the applicant's nationality. */
+export function isIndianAddressCountry(country: string | undefined | null): boolean {
+  return !country?.trim() || country.trim().toLowerCase() === 'india';
+}
+
+export function getPostalCodeLabel(country: string | undefined | null): string {
+  if (isIndianAddressCountry(country)) return 'PIN Code';
+  const normalized = country?.trim().toLowerCase();
+  if (['united states', 'united states of america', 'us', 'usa'].includes(normalized || '')) return 'ZIP Code';
+  if (['united kingdom', 'uk', 'great britain'].includes(normalized || '')) return 'Postcode';
+  return 'Postal Code';
+}

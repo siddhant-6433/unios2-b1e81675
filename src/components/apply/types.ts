@@ -193,6 +193,7 @@ export function determineProgramCategory(courseCode: string, courseName: string)
   return 'undergraduate';
 }
 
-export function calculateFee(selections: CourseSelection[]): number {
+export function calculateFee(selections: CourseSelection[], portalId?: string): number {
+  if (portalId === "mirai") return selections.length ? 2200 : 0;
   return selections.reduce((total, s) => total + (FEE_MAP[s.program_category] ?? 1000), 0);
 }

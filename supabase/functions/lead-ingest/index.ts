@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { pickLeadForSchoolBrand, schoolLeadBrand } from "../_shared/schoolLeadBrand.ts";
+import { notifyMiraiAdmissions } from "../_shared/miraiNotifications.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -214,12 +215,15 @@ function parseMirai(body: any): MiraiParsedLead {
   // Mirai school waitlist form: parent_name, mobile_number, email, child_name, child_dob, looking_for
   const childAge = body.child_dob
     ? (Date.now() - new Date(body.child_dob).getTime()) / (365.25 * 24 * 3600 * 1000)
-    : null;
+    : Number.isFinite(Number(body.child_age)) ? Number(body.child_age) : null;
 
   // Suggest course code from age (matches MES-* course codes)
   let courseCode = "";
   let gradeLabel = "";
-  if (childAge !== null) {
+  if (body.course_code) {
+    courseCode = String(body.course_code).trim();
+    gradeLabel = String(body.grade || body.course_name || "").trim();
+  } else if (childAge !== null) {
     if (childAge < 2)        { courseCode = "MES-TOD";  gradeLabel = "Toddlers"; }
     else if (childAge < 3)   { courseCode = "MES-MON";  gradeLabel = "Montessori"; }
     else if (childAge < 4)   { courseCode = "MES-EYP1"; gradeLabel = "EYP 1 (Nursery)"; }
@@ -253,13 +257,56 @@ function parseMirai(body: any): MiraiParsedLead {
     course_name: gradeLabel || undefined,
     campus_name: "Mirai",
     notes: [
-      "Source: Mirai waitlist form",
+      "Source: Mirai admission enquiry",
+      body.form_id ? `Form: ${String(body.form_id).slice(0, 80)}` : "",
       body.child_dob ? `Child DOB: ${body.child_dob}` : "",
       childAge !== null ? `Age: ${childAge.toFixed(1)} years (suggested: ${gradeLabel})` : "",
+      body.current_school ? `Current school: ${String(body.current_school).slice(0, 200)}` : "",
+      body.academic_year ? `Academic year: ${String(body.academic_year).slice(0, 80)}` : "",
+      body.discovery_source ? `How they heard about Mirai: ${String(body.discovery_source).slice(0, 120)}` : "",
+      body.contact_consent === true ? "Contact consent: phone, WhatsApp and email" : "Contact consent: no",
       body.looking_for ? `Looking for: ${intentLabels[body.looking_for] || body.looking_for}` : "",
       body.whatsapp_consent === false ? "WhatsApp opt-out" : "WhatsApp consent: yes",
     ].filter(Boolean).join(" | "),
   };
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
+}
+
+async function sendMiraiEnquiryEmails(input: { name: string; email?: string; phone: string; leadId: string; notes?: string }) {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const staffEmail = Deno.env.get("MIRAI_ADMISSIONS_EMAIL");
+  if (!supabaseUrl || !serviceKey) return;
+  const send = async (to_email: string, custom_subject: string, custom_body: string) => {
+    const response = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+      body: JSON.stringify({ to_email, custom_subject, custom_body, lead_id: input.leadId }),
+    });
+    if (!response.ok) console.error("Mirai enquiry email failed:", response.status, await response.text());
+  };
+  const safeName = escapeHtml(input.name);
+  const emailTasks: Promise<void>[] = [];
+  if (input.email) {
+    emailTasks.push(send(
+      input.email,
+      "We received your Mirai admissions enquiry",
+      `<p>Dear ${safeName},</p><p>Thank you for enquiring about Mirai Experiential School. Our admissions team will contact you soon.</p><h3>What happens next</h3><ol><li>Join a webinar or speak with an admissions counsellor.</li><li>Explore a campus visit or an age-appropriate assessment.</li><li>Receive an update and guidance from our admissions team.</li></ol><p>You can continue to the application portal at <a href="https://uni.miraischool.in/apply/mirai">uni.miraischool.in/apply/mirai</a>.</p><p>Warmly,<br>Mirai Admissions</p>`,
+    ));
+  }
+  if (staffEmail) {
+    emailTasks.push(send(
+      staffEmail,
+      `New Mirai admission enquiry: ${input.name}`,
+      `<p>A new Mirai admission enquiry was submitted.</p><p><strong>Child:</strong> ${safeName}<br><strong>Parent phone:</strong> ${escapeHtml(input.phone)}<br><strong>Parent email:</strong> ${escapeHtml(input.email || "Not provided")}</p><p>${escapeHtml(input.notes || "")}</p><p><a href="https://uni.miraischool.in/admissions">Open admissions workspace</a></p>`,
+    ));
+  } else {
+    console.warn("MIRAI_ADMISSIONS_EMAIL is not configured; lead assignment notifications remain available in UniOs.");
+  }
+  await Promise.allSettled(emailTasks);
 }
 
 function parseWebsite(body: any): ParsedLead {
@@ -434,6 +481,34 @@ Deno.serve(async (req) => {
     // Parse using source-specific parser or generic
     const parser = PARSERS[source] || ((b: any) => parseGeneric(b, source));
     const parsed = parser(body);
+
+    if (parsed.source === "mirai_website" && body.form_id === "mirai-admission-enquiry-v1" && body.website) {
+      return new Response(JSON.stringify({ error: "Invalid enquiry submission." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (parsed.source === "mirai_website" && body.form_id === "mirai-admission-enquiry-v1" && body.contact_consent !== true) {
+      return new Response(JSON.stringify({ error: "Contact consent is required for a Mirai admissions enquiry." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (parsed.source === "mirai_website" && body.form_id === "mirai-admission-enquiry-v1") {
+      const age = Number(body.child_age);
+      if (!Number.isInteger(age) || age < 1 || age > 18 || !body.current_school || !body.academic_year || !body.grade || !body.discovery_source) {
+        return new Response(JSON.stringify({ error: "Please complete the required child and admissions details." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(body.email || ""))) {
+        return new Response(JSON.stringify({ error: "Enter a valid parent email address." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     // Validate required fields
     if (!parsed.name?.trim()) {
@@ -745,6 +820,20 @@ Deno.serve(async (req) => {
       type: "lead_created",
       description: `Lead captured via ${leadSource} API`,
     });
+
+    if (parsed.source === "mirai_website") {
+      try {
+        await notifyMiraiAdmissions(supabase, {
+          leadId: lead.id,
+          title: "New Mirai admission enquiry",
+          body: `${lead.name} · ${normPhone}`,
+          link: "/admissions",
+        });
+      } catch (notificationError) {
+        console.error("Mirai in-app enquiry notification failed:", notificationError);
+      }
+      await sendMiraiEnquiryEmails({ name: lead.name, email: parsed.email, phone: normPhone, leadId: lead.id, notes: parsed.notes });
+    }
 
     // For chat widget leads: schedule AI call after 10 minutes (after chat likely ends)
     if (skipAiCallSources.includes(leadSource) && await navyaAutoOutboundCallsEnabled(supabase)) {
