@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.1.0] - 2026-10-09
+
+### Added
+
+- Record HR employee exits with notice dates, last working day, reason, notice waiver, and clearance notes.
+- Document the HR hiring, onboarding, employee transfer, and production QA findings.
+
 ## [0.6.0.1] - 2026-10-09
 
 ### Fixed
