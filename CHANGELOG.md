@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0.1] - 2026-10-09
+
+### Fixed
+
+- Find older receipts by receipt number, student name, or admission number in Finance, while honoring campus and payment mode filters.
+
 ## [0.6.0.0] - 2026-10-08
 
 ### Added
