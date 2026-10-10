@@ -49,8 +49,15 @@ function makeMockFrom() {
         return builder;
       },
       select(columns: string) {
-        tableCalls[tableCalls.length - 1].select = columns;
-        return Promise.resolve({ data: [], error: null });
+        const last = tableCalls[tableCalls.length - 1];
+        if (last) last.select = columns;
+        return builder;
+      },
+      order() {
+        return builder;
+      },
+      limit() {
+        return builder;
       },
       then(onFulfilled: (value: { data: unknown[]; error: null }) => unknown, onRejected?: (reason: unknown) => unknown) {
         return Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected);
@@ -365,7 +372,8 @@ describe("recordCallDisposition — stage resolution per disposition", () => {
     { name: "do_not_contact → dnc", data: { disposition: "do_not_contact" }, expectedStage: "dnc" },
     { name: "ineligible without future session → ineligible", data: { disposition: "ineligible" }, expectedStage: "ineligible" },
     { name: "voicemail → no stage change (null)", data: { disposition: "voicemail" }, expectedStage: null },
-    { name: "wrong_number → no stage change (null)", data: { disposition: "wrong_number" }, expectedStage: null },
+    { name: "wrong_number → cold", data: { disposition: "wrong_number" }, expectedStage: "cold" },
+    { name: "course_not_listed → course_not_available", data: { disposition: "course_not_listed", requested_course_text: "B.Sc Aviation" }, expectedStage: "course_not_available" },
   ];
 
   for (const c of cases) {
@@ -379,6 +387,9 @@ describe("recordCallDisposition — stage resolution per disposition", () => {
       // Assert
       expect(rpcCalls).toHaveLength(1);
       expect(rpcCalls[0].params.p_new_stage).toBe(c.expectedStage);
+      if (c.data.disposition === "course_not_listed") {
+        expect(rpcCalls[0].params.p_requested_course_text).toBe("B.Sc Aviation");
+      }
     });
   }
 });

@@ -9,10 +9,9 @@ export type LeadStage = Database["public"]["Enums"]["lead_stage"];
 // files, which is how `waitlisted` and `cold` silently fell out of the funnel
 // (each copy drifted). This module is the one place stages are defined.
 //
-// NOTE: the generated TS enum (Database["public"]["Enums"]["lead_stage"]) lags
-// the live DB — it is missing `application_approved` and `priority_interested`.
-// ALL_LEAD_STAGES below is the authoritative list of the 21 live values; the
-// exhaustiveness unit test asserts every one maps to a bucket or leakage.
+// NOTE: the generated TS enum (Database["public"]["Enums"]["lead_stage"]) can lag
+// the live DB as stages are added. ALL_LEAD_STAGES below is authoritative;
+// the exhaustiveness unit test checks that each value maps to a bucket or leakage.
 // ============================================================================
 
 /** Every live `leads.stage` enum value (pg_enum order). Authoritative — do not
@@ -39,6 +38,7 @@ export const ALL_LEAD_STAGES = [
   "deferred",
   "application_approved",
   "priority_interested",
+  "course_not_available",
 ] as const;
 
 // ── Spine funnel buckets ────────────────────────────────────────────────────
@@ -81,7 +81,7 @@ export const STAGE_TO_BUCKET: Record<string, LeadFunnelStage> = {
 // "should this lead clutter the pipeline chart?" — `deferred` (revisit next
 // session) is funnel-leakage but NOT followup-terminal.
 export const FUNNEL_LEAKAGE_STAGES = [
-  "not_interested", "dnc", "rejected", "ineligible", "deferred", "cold",
+  "not_interested", "dnc", "rejected", "ineligible", "deferred", "cold", "course_not_available",
 ] as const;
 export type FunnelLeakageStage = typeof FUNNEL_LEAKAGE_STAGES[number];
 
@@ -92,6 +92,7 @@ export const FUNNEL_LEAKAGE_LABEL: Record<FunnelLeakageStage, string> = {
   ineligible:     "ineligible",
   deferred:       "deferred",
   cold:           "cold",
+  course_not_available: "course not available",
 };
 
 /** Raw lead_stage values for a funnel bucket — converts a funnel click into a
@@ -114,6 +115,7 @@ export const TERMINAL_LEAD_STAGES: LeadStage[] = [
   "rejected",
   "ineligible",
   "cold",
+  "course_not_available",
 ];
 
 export const isTerminalLeadStage = (s: string | null | undefined): boolean =>
@@ -140,6 +142,7 @@ export const STAGE_LABELS: Record<string, string> = {
   deferred: "Deferred (Next Session)",
   rejected: "Rejected",
   cold: "Cold",
+  course_not_available: "Course Not Available",
   waitlisted: "Waitlisted",
   application_fee_paid: "Application Fee Paid",
   application_approved: "Application Approved",
@@ -161,7 +164,7 @@ const stageIndex = (s: string) => {
 /** Forward-only auto-advance — never rolls a lead backwards or out of a
  *  terminal state. */
 export const shouldAutoAdvance = (currentStage: string, newStage: string) => {
-  if (["rejected", "not_interested", "ineligible", "dnc", "deferred"].includes(currentStage)) return false;
+  if (["rejected", "not_interested", "ineligible", "dnc", "deferred", "cold", "course_not_available"].includes(currentStage)) return false;
   return stageIndex(newStage) > stageIndex(currentStage);
 };
 

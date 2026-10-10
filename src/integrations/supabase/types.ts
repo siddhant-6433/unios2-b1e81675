@@ -38928,6 +38928,7 @@ export type Database = {
         | "deferred"
         | "application_approved"
         | "priority_interested"
+        | "course_not_available"
       library_digitization_status:
         | "captured"
         | "matched"
@@ -39175,6 +39176,7 @@ export const Constants = {
         "deferred",
         "application_approved",
         "priority_interested",
+        "course_not_available",
       ],
       library_digitization_status: [
         "captured",

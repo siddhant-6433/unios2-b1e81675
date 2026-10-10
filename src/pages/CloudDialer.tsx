@@ -10,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Phone, PhoneOff, Pause, Play, SkipForward, Clock,
+  Phone, PhoneOff, Pause, Play, SkipForward, Clock, Ban, FileQuestion,
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
   Calendar, AlertCircle, Volume2, Pencil, Check, X, Search,
   FileText, PhoneIncoming, ArrowRight, PhoneCall, ChevronDown,
@@ -42,7 +42,7 @@ import {
 import { PreviousWalkInDialog } from "@/components/visits/PreviousWalkInDialog";
 import { isBscNursingCourse } from "@/lib/bscNursing";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
-import { isLeadCallDisposition, resolveCallDispositionTransition, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { consecutiveNotAnswered, isLeadCallDisposition, resolveCallDispositionTransition, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import { loadWhatsAppTemplateCatalog } from "@/lib/whatsappTemplateCatalog";
 import { startCloudCall, cloudCallTarget } from "@/lib/startCloudCall";
@@ -91,6 +91,9 @@ const CONNECTED_DISPOSITIONS = [
   { value: "not_interested", label: "Not Interested", icon: XCircle, color: "bg-destructive/10 text-destructive border-destructive/30 hover:bg-destructive/5" },
   { value: "call_back", label: "Call Back", icon: Clock, color: "bg-info/10 text-info-foreground border-info/30 hover:bg-info/5" },
   { value: "ineligible", label: "Ineligible", icon: AlertCircle, color: "bg-primary/10 text-primary border-primary/25 hover:bg-primary/5" },
+  { value: "do_not_contact", label: "Do Not Contact", icon: Ban, color: "bg-destructive/10 text-destructive border-destructive/30 hover:bg-destructive/5" },
+  { value: "wrong_number", label: "Wrong Number", icon: PhoneOff, color: "bg-muted text-muted-foreground border-border hover:bg-muted/70" },
+  { value: "course_not_listed", label: "Course Not Listed", icon: FileQuestion, color: "bg-info/10 text-info-foreground border-info/30 hover:bg-info/5" },
   { value: "not_answered", label: "Not Answered", icon: PhoneMissed, color: "bg-warning/10 text-warning-foreground border-warning/30 hover:bg-warning/5" },
 ];
 
@@ -99,7 +102,7 @@ const CONNECTED_DISPOSITIONS = [
 // both write lead_followups for the same call, so when they disagreed the
 // lead's next-call time depended on which writer landed first.
 const FOLLOWUP_GAPS = [4, 24, 72]; // hours: 4h, 1 day, 3 days
-const MAX_AUTO_ATTEMPTS = 4; // after 4 unanswered attempts → mark inactive
+const MAX_AUTO_ATTEMPTS = 3; // after 3 consecutive unanswered attempts → cold
 
 const FOLLOWUP_TIME_SLOTS = ["09:00", "10:00", "11:00", "12:00", "14:00", "15:00", "16:00", "17:00"];
 
@@ -214,6 +217,7 @@ export default function CloudDialer() {
   // to call_logs.notes (surfaces as the "Notes" column in the Calling Report);
   // falls back to the auto "Cloud Dialer: <disposition>" summary when blank.
   const [callNote, setCallNote] = useState("");
+  const [requestedCourseText, setRequestedCourseText] = useState("");
   const [visitDate, setVisitDate] = useState("");
   const [visitTime, setVisitTime] = useState("10:00");
   const [futureSession, setFutureSession] = useState("2027-28");
@@ -758,6 +762,7 @@ export default function CloudDialer() {
       toast({ title: "Updated", description: field === "name" ? "Contact name updated." : "Course saved for this call." });
       return;
     }
+
     if (field === "name") {
       await supabase.from("leads").update({ name: value } as any).eq("id", currentLead.id);
       setQueue(prev => prev.map((l, i) => i === currentIdx ? { ...l, name: value } : l));
@@ -1019,9 +1024,22 @@ export default function CloudDialer() {
   const applyDispositionTransitionForCurrentLead = async (disposition: string) => {
     if (!currentLead || !isLeadCallDisposition(disposition)) return;
 
+    const { data: recentCalls } = await supabase.from("call_logs")
+      .select("disposition")
+      .eq("lead_id", currentLead.id)
+      .order("called_at", { ascending: false })
+      .limit(10);
+
+    // This flow persists the selected disposition before resolving the stage,
+    // so exclude that just-saved row from the prior-attempt streak.
+    const priorCalls = recentCalls?.[0]?.disposition === disposition
+      ? recentCalls.slice(1)
+      : recentCalls || [];
+
     const transition = resolveCallDispositionTransition({
       currentStage: currentLead.stage,
       disposition,
+      unansweredStreak: consecutiveNotAnswered(priorCalls),
     });
     if (!transition.newStage) return;
 
@@ -1044,6 +1062,7 @@ export default function CloudDialer() {
     disposition: string,
     duration: number,
     notes: string,
+    requestedCourse?: string,
   ) => {
     const callUuid = callIdRef.current ?? crypto.randomUUID();
     if (isContactQueueLead(lead)) {
@@ -1089,12 +1108,22 @@ export default function CloudDialer() {
       p_recording_url: null,
       p_call_source: "cloud_dialer",
     });
+    if (disposition === "course_not_listed" && requestedCourse?.trim()) {
+      await supabase.from("call_logs")
+        .update({ requested_course_text: requestedCourse.trim() } as any)
+        .eq("cloud_call_uuid", callUuid);
+    }
   };
 
   // ── Finalize a pre-selected disposition after call ends ─────────────────
 
   const finalizeDisposition = async (disposition: string, duration: number) => {
     if (!currentLead) return;
+    if (disposition === "course_not_listed" && !requestedCourseText.trim()) {
+      toast({ title: "Course name required", description: "Enter the course the lead asked for in plain text.", variant: "destructive" });
+      setCallState(prev => ({ ...prev, status: "ended" }));
+      return;
+    }
     if (asksCnetAppeared && !cnetAppeared) {
       toast({ title: "CNET required", description: "Mark whether the B.Sc Nursing lead appeared for CNET first.", variant: "destructive" });
       setCallState(prev => ({ ...prev, status: "ended" }));
@@ -1110,7 +1139,7 @@ export default function CloudDialer() {
     // save lands on the same row as the voice-agent's bridge-hangup webhook
     // (whichever fired first). Without this, the counsellor's pick + notes
     // create a duplicate row alongside the auto "Cloud Call [hash]" row.
-    await persistDialerCallLog(currentLead, disposition, duration, composeCallNote(disposition));
+    await persistDialerCallLog(currentLead, disposition, duration, composeCallNote(disposition), requestedCourseText);
 
     const isContact = isContactQueueLead(currentLead);
     if (!isContact) {
@@ -1146,6 +1175,10 @@ export default function CloudDialer() {
 
   const markDisposition = async (disposition: string) => {
     if (!currentLead) return;
+    if (disposition === "course_not_listed" && !requestedCourseText.trim()) {
+      toast({ title: "Course name required", description: "Enter the course the lead asked for in plain text.", variant: "destructive" });
+      return;
+    }
     if (asksCnetAppeared && !cnetAppeared) {
       toast({ title: "CNET required", description: "Mark whether the B.Sc Nursing lead appeared for CNET first.", variant: "destructive" });
       return;
@@ -1156,7 +1189,7 @@ export default function CloudDialer() {
     }
 
     // Log to call_logs via the merge RPC — see finalizeDisposition for why.
-    await persistDialerCallLog(currentLead, disposition, callState.elapsed, composeCallNote(disposition));
+    await persistDialerCallLog(currentLead, disposition, callState.elapsed, composeCallNote(disposition), requestedCourseText);
 
     const isContact = isContactQueueLead(currentLead);
     if (!isContact) {
@@ -1276,6 +1309,7 @@ export default function CloudDialer() {
     preDispositionRef.current = null;
     cancellingRef.current = false;
     setCallNote("");
+    setRequestedCourseText("");
     toast({ title, description: "No disposition recorded and no call metrics changed." });
   };
 
@@ -1293,6 +1327,13 @@ export default function CloudDialer() {
       return;
     }
 
+    if (["not_interested", "ineligible", "do_not_contact", "wrong_number", "course_not_listed", "cold"].includes(disposition)) {
+      setFollowupDate("");
+      setFollowupTime("");
+      setAutoNextTimer(10);
+      return;
+    }
+
     if (!followupCanBeRescheduled) {
       setFollowupDate("");
       setFollowupTime("");
@@ -1306,17 +1347,20 @@ export default function CloudDialer() {
       return;
     }
 
-    // After MAX_AUTO_ATTEMPTS unanswered attempts → mark inactive, no followup
-    if (isAutoDisp && attempt >= MAX_AUTO_ATTEMPTS) {
-      const transition = resolveLeadTransitionCommand({
-        currentStage: currentLead.stage,
-        command: "classifyInactive",
-      });
-      await applyResolvedLeadTransition(supabase as any, { leadId: currentLead.id, transition });
+    const { data: recentAttempts } = await supabase.from("call_logs")
+      .select("disposition")
+      .eq("lead_id", currentLead.id)
+      .order("called_at", { ascending: false })
+      .limit(10);
+    const unansweredStreak = consecutiveNotAnswered(recentAttempts || []);
+
+    // The third consecutive unanswered outcome is parked as Cold by the
+    // shared transition policy and starts its separate revival follow-up.
+    if (isAutoDisp && unansweredStreak >= MAX_AUTO_ATTEMPTS) {
       setFollowupDate("");
       setFollowupTime("");
       setAutoNextTimer(10);
-      toast({ title: "Marked Inactive", description: `${currentLead.name} — ${attempt} unanswered attempts. Removed from followups.` });
+      toast({ title: "Marked Cold", description: `${currentLead.name} — ${unansweredStreak} consecutive unanswered attempts. Parked for revival.` });
       return;
     }
 
@@ -1381,7 +1425,7 @@ export default function CloudDialer() {
 
   const moveToNext = async () => {
     // Save followup if there's a date (skip for not_interested and inactive)
-    if (currentLead && !isContactQueueLead(currentLead) && followupDate && allowPostDispositionFollowup && callState.disposition !== "not_interested") {
+    if (currentLead && !isContactQueueLead(currentLead) && followupDate && allowPostDispositionFollowup && !["not_interested", "ineligible", "do_not_contact", "wrong_number", "course_not_listed", "cold"].includes(callState.disposition || "")) {
       const scheduledAt = new Date(`${followupDate}T${followupTime || "10:00"}:00`);
       await supabase.from("lead_followups").insert({
         lead_id: currentLead.id,
@@ -1417,6 +1461,7 @@ export default function CloudDialer() {
     preDispositionRef.current = null;
     setAllowPostDispositionFollowup(true);
     setCallNote("");
+    setRequestedCourseText("");
     setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
 
     // Refresh the list banner only — refetching the queue itself here would
@@ -1826,6 +1871,16 @@ export default function CloudDialer() {
                     placeholder="Call note (optional) — saved with the disposition"
                     className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm resize-y"
                   />
+                  {callState.disposition === "course_not_listed" && (
+                    <input
+                      type="text"
+                      value={requestedCourseText}
+                      onChange={e => setRequestedCourseText(e.target.value)}
+                      placeholder="Course requested (e.g. B.Sc Aviation)"
+                      aria-label="Course requested by lead"
+                      className="w-full rounded-lg border border-info/30 bg-background px-3 py-2 text-sm"
+                    />
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     {CONNECTED_DISPOSITIONS.map(d => (
                       <button key={d.value} onClick={() => dispoOnClick(d.value)}
@@ -2416,6 +2471,16 @@ export default function CloudDialer() {
                         placeholder="Call note (optional) — saved with the disposition"
                         className="mb-2 w-full rounded-lg border border-input bg-background px-3 py-2 text-xs resize-y"
                       />
+                      {callState.disposition === "course_not_listed" && (
+                        <input
+                          type="text"
+                          value={requestedCourseText}
+                          onChange={e => setRequestedCourseText(e.target.value)}
+                          placeholder="Course requested (e.g. B.Sc Aviation)"
+                          aria-label="Course requested by lead"
+                          className="mb-2 w-full rounded-lg border border-info/30 bg-background px-3 py-2 text-xs"
+                        />
+                      )}
                       <div className="flex flex-wrap gap-1.5">
                         {CONNECTED_DISPOSITIONS.map(d => (
                           <button key={d.value}
