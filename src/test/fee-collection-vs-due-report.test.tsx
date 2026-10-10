@@ -140,6 +140,28 @@ beforeEach(() => {
 });
 
 describe("FeeCollectionVsDueReport", () => {
+  it("shows the unverified DAOTT partner reconciliation without adding its amounts to KPIs", async () => {
+    mocks.rpc.mockImplementation(async (fn: string) => fn === "fee_collection_vs_due_report"
+      ? { data: { ...payload, lines: [
+          { ...payload.lines[0], course_id: "daott-a", course_name: "DAOTT - GN", due_amount: 40000, collected_amount: 15000, balance: 25000 },
+          { ...payload.lines[2], course_id: "daott-b", course_name: "Diploma of Anesthesia & OT Technology (D.AOTT)", student_id: "s3", name: "Bina Rai", admission_no: "AN-3", fee_ledger_id: "l3", due_amount: 10000, collected_amount: 0, balance: 10000 },
+        ] }, error: null }
+      : { data: { statuses: [
+          { student_id: "s1", student_status: "active" },
+          { student_id: "s3", student_status: "active" },
+        ] }, error: null });
+
+    render(<FeeCollectionVsDueReport />);
+
+    expect(await screen.findByText("DAOTT partner reconciliation reference")).toBeInTheDocument();
+    for (const name of ["Anamika", "Muskan", "Swati Kumari", "Rajesh Saini", "Gagan Bedi"]) {
+      expect(screen.getByText(name)).toBeInTheDocument();
+    }
+    expect(screen.getByText("Total Collected").parentElement).toHaveTextContent("₹15,000");
+    expect(screen.getAllByText("Diploma of Anesthesia & OT Technology (D.AOTT)").length).toBeGreaterThan(0);
+    expect(screen.queryByText("DAOTT - GN")).not.toBeInTheDocument();
+  });
+
   it("loads till-date scope and sections students by programme-batch", async () => {
     render(<FeeCollectionVsDueReport />);
 

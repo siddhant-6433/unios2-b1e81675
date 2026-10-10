@@ -16,7 +16,7 @@ interface FeedbackRow {
   pending: number | null;
 }
 
-const SHOWN_ROLES = ["super_admin", "admission_head", "campus_admin", "principal", "counsellor"];
+const SHOWN_ROLES = ["super_admin", "admission_head", "campus_admin", "principal", "vice_principal", "counsellor"];
 
 function weightedAverage(rows: FeedbackRow[]): string {
   const totalResponses = rows.reduce((sum, row) => sum + Number(row.total_responses || 0), 0);

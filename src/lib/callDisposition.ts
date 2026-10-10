@@ -15,7 +15,7 @@
 import type { CallDispositionData } from "@/components/admissions/CallDispositionDialog";
 import { referLeadsToPartner } from "@/lib/leadReferral";
 
-import { resolveCallDispositionTransition } from "@/lib/leadTransitions";
+import { consecutiveNotAnswered, resolveCallDispositionTransition } from "@/lib/leadTransitions";
 export { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance } from "@/lib/leadStages";
 
 const DISPOSITION_LABELS: Record<string, string> = {
@@ -61,7 +61,9 @@ type SupabaseTableBuilder = PromiseLike<SupabaseWriteResult> & {
   update: (payload: Record<string, unknown>) => SupabaseTableBuilder;
   insert: (payload: Record<string, unknown> | Record<string, unknown>[]) => PromiseLike<SupabaseWriteResult>;
   eq: (column: string, value: unknown) => SupabaseTableBuilder;
-  select: (columns: string) => PromiseLike<SupabaseWriteResult>;
+  select: (columns: string) => SupabaseTableBuilder;
+  order: (column: string, options: { ascending: boolean }) => SupabaseTableBuilder;
+  limit: (count: number) => PromiseLike<SupabaseWriteResult>;
 };
 
 type DispositionSupabaseClient = {
@@ -320,10 +322,20 @@ export async function recordCallDisposition(args: RecordCallDispositionArgs): Pr
   const callActivityDesc = `Call: ${label}${durationStr}${data.notes ? ` — ${data.notes}` : ""}`;
   const callNotes = data.notes || `${label}${loggedFromLabel ? ` (logged from ${loggedFromLabel})` : ""}`;
 
+  let recentCalls: { disposition: string | null }[] = [];
+  if (supabase.from) {
+    const result = await supabase.from("call_logs")
+      .select("disposition")
+      .eq("lead_id", leadId)
+      .order("called_at", { ascending: false })
+      .limit(10);
+    recentCalls = (result.data || []) as { disposition: string | null }[];
+  }
   const transition = resolveCallDispositionTransition({
     currentStage: lead.stage,
     disposition: data.disposition,
     futureEligibleSession: data.future_eligible_session,
+    unansweredStreak: consecutiveNotAnswered(recentCalls || []),
   });
   // newStage === null means "no stage change" (the RPC then skips that write).
   const newStage = transition.newStage;

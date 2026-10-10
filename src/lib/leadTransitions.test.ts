@@ -73,7 +73,7 @@ describe("resolveCallDispositionTransition", () => {
   });
 
   it("does not change stage for neutral phone outcomes", () => {
-    for (const disposition of ["busy", "voicemail", "wrong_number"] as const) {
+    for (const disposition of ["busy", "voicemail"] as const) {
       expect(resolveCallDispositionTransition({
         currentStage: "new_lead",
         disposition,
@@ -82,6 +82,36 @@ describe("resolveCallDispositionTransition", () => {
         newStage: null,
       });
     }
+  });
+
+  it("keeps the first two unanswered attempts active and parks the third as cold", () => {
+    for (const disposition of ["not_answered", "busy", "voicemail"] as const) {
+      expect(resolveCallDispositionTransition({
+        currentStage: "new_lead",
+        disposition,
+        unansweredStreak: 1,
+      }).newStage).toBe(disposition === "not_answered" ? "counsellor_call" : null);
+      expect(resolveCallDispositionTransition({
+        currentStage: "counsellor_call",
+        disposition,
+        unansweredStreak: 2,
+      })).toMatchObject({
+        name: "classifyInactive",
+        newStage: "cold",
+        activityDescription: "Stage changed to Cold after three consecutive unanswered calls",
+      });
+    }
+  });
+
+  it("parks wrong numbers as Cold and routes unlisted courses to Course Not Available", () => {
+    expect(resolveCallDispositionTransition({
+      currentStage: "counsellor_call",
+      disposition: "wrong_number",
+    })).toMatchObject({ name: "classifyInactive", newStage: "cold" });
+    expect(resolveCallDispositionTransition({
+      currentStage: "counsellor_call",
+      disposition: "course_not_listed",
+    })).toMatchObject({ name: "adminOverrideStage", newStage: "course_not_available" });
   });
 });
 
@@ -213,7 +243,7 @@ describe("cold disposition", () => {
   it("parks the lead in cold from any stage, without the auto-advance gate", () => {
     for (const currentStage of ["new_lead", "counsellor_call", "visit_scheduled", "offer_sent"]) {
       expect(resolveCallDispositionTransition({ currentStage, disposition: "cold" })).toEqual({
-        name: "recordDispositionCold",
+        name: "classifyInactive",
         currentStage,
         newStage: "cold",
         activityDescription: "Stage changed to Cold after repeated unanswered calls",

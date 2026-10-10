@@ -8,7 +8,7 @@ const studentsRead = readFileSync("src/lib/studentsRead.ts", "utf8");
 
 describe("campus assignment scoping", () => {
   it("only lets org-wide roles select all campuses", () => {
-    expect(campusContext).toContain("const ORG_WIDE_CAMPUS_ROLES = new Set([\"super_admin\", \"admission_head\", \"principal\"])");
+    expect(campusContext).toContain("const ORG_WIDE_CAMPUS_ROLES = new Set([\"super_admin\", \"admission_head\", \"principal\", \"vice_principal\"])");
     expect(campusContext).toContain("const canSelectAllCampuses = role !== null && ORG_WIDE_CAMPUS_ROLES.has(role)");
     expect(campusContext).toContain('if (id === "all" && !canSelectAllCampuses) return;');
     expect(campusContext).toContain("visibleCampuses = matches");

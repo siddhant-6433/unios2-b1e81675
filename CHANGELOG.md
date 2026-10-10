@@ -2,6 +2,81 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0.0] - 2026-10-10
+
+### Fixed
+
+- Restrict application-fee repair audits to assigned campuses, preserve repair snapshots when a student is deleted, and archive duplicate receipt allocations when consolidating ledger heads.
+
+## [0.6.2.0] - 2026-10-10
+
+### Changed
+
+- Keep reached leads with the counsellor who handled the call and remove them from pending call-list work while preserving list history.
+- Retry unanswered, busy, and voicemail outcomes up to three consecutive attempts before parking the lead as Cold.
+- Map wrong numbers to Cold and unavailable course requests to Course Not Available, recording the requested course name as plain text.
+- Align call outcomes and stage updates across Cloud Dialer and lead call flows.
+
+## [0.6.1.0] - 2026-10-09
+
+### Added
+
+- Record HR employee exits with notice dates, last working day, reason, notice waiver, and clearance notes.
+- Document the HR hiring, onboarding, employee transfer, and production QA findings.
+
+## [0.6.0.1] - 2026-10-09
+
+### Fixed
+
+- Find older receipts by receipt number, student name, or admission number in Finance, while honoring campus and payment mode filters.
+
+## [0.6.0.0] - 2026-10-08
+
+### Added
+
+- Let families send Mirai admission enquiries and request a call or campus tour, with confirmation and admissions-team follow-up.
+- Guide Mirai applicants through five stages, with Mirai-branded screens, saved progress and WhatsApp OTP delivery from Mirai with NIMT fallback.
+- Show Mirai age guidance as of 31 July for the selected intake, and keep 2027–28 as the active Mirai session.
+- Show Mirai application deadlines in six rolling rounds from October through March.
+
+### Changed
+
+- Adapt school application fields for nationality, address country, parent employment status and optional child email; remove redundant transport and instruction-medium preferences.
+
+### Fixed
+
+- Preserve Mirai parent, child, grade, intake and attribution details through lead ingestion, and calculate the Mirai application fee from its portal configuration.
+
+## [0.5.0.0] - 2026-10-07
+
+### Fixed
+
+- Show D.Pharma Year 1 tuition as the regular college fee without an ABVMU deposit across finance, applicant, and student fee views.
+
+## [0.4.0.1] - 2026-10-07
+
+### Changed
+
+- See course names for leads, students and applications in header search results.
+
+## [0.4.0.0] - 2026-10-06
+
+### Added
+
+- Notify super admins when student or lead refund drafts are created, with a link that opens and highlights the refund in Finance.
+
+## [0.3.0.2] - 2026-10-06
+
+### Fixed
+
+- Route Ghaziabad Campus 2 B.Ed and D.El.Ed applications to NIMT when stale Mirai branding is present.
+
+## [0.3.0.1] - 2026-10-06
+
+### Fixed
+
+- Keep the Admin Panel's Invite User dialog visible in the viewport when opening it from a scrolled page.
+
 ## [0.3.0.0] - 2026-10-05
 
 ### Added

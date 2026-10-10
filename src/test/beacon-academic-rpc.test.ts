@@ -19,6 +19,7 @@ const MIGRATIONS = [
   "supabase/migrations/20260929055340_beacon_class_teachers_assign_and_change.sql",
   "supabase/migrations/20260930153158_beacon_report_content_and_bulk_print.sql",
   "supabase/migrations/20260930163537_beacon_aggregate_weights_and_release_overview.sql",
+  "supabase/migrations/20261008131123_cbse_half_yearly_ut_best_and_co_scholastic_grades.sql",
 ];
 const SUBJECTS_SEED = MIGRATIONS[1];
 
@@ -277,6 +278,33 @@ async function createUnitExam(policyId: string, name: string, options: { categor
   return created.id;
 }
 
+async function completeExam(examId: string, scores: Record<string, Record<string, number>[]>, coGrades?: { student_id: string; art_grade: string; moral_values_grade: string }[]) {
+  await asUser(ID.admin);
+  let version = (await action(examId, "open", 1, {})).version;
+  const ws = await workspace(examId);
+  for (const paper of ws.papers) {
+    const teacher = paper.subject_id === ID.math ? ID.mathTeacher : ID.scienceTeacher;
+    await asUser(teacher);
+    version = (await action(examId, "save_marks", version, { paper_id: paper.id, rows: scores[paper.subject_id].map((row, index) => ({ student_id: index === 0 ? ID.student1 : ID.student2, status: "present", scores: row })) })).version;
+    version = (await action(examId, "lock_paper", version, { paper_id: paper.id })).version;
+  }
+  if (coGrades) {
+    await asUser(ID.office);
+    const saved = await db.query<{ r: { id: string; version: number } }>("select public.cbse_save_co_scholastic_grades($1::uuid,$2::integer,$3::jsonb) as r", [examId, version, JSON.stringify(coGrades)]);
+    version = saved.rows[0].r.version;
+  }
+  await asUser(ID.classTeacher);
+  version = (await action(examId, "student_details", version, { rows: [
+    { student_id: ID.student1, attendance_present: 120, attendance_working_days: 124, remarks: "Good progress." },
+    { student_id: ID.student2, attendance_present: 115, attendance_working_days: 124, remarks: "Keep practising." },
+  ] })).version;
+  version = (await action(examId, "submit_class_review", version, {})).version;
+  version = (await action(examId, "submit_principal_review", version, { remarks: "Verified." })).version;
+  await asUser(ID.admin);
+  version = (await action(examId, "approve", version, { remarks: "Approved." })).version;
+  return version;
+}
+
 beforeAll(async () => {
   db = new PGlite();
   await seed();
@@ -323,26 +351,26 @@ describe("Beacon academic RPC migration", () => {
     // A teacher cannot enter another subject's paper.
     await asUser(ID.scienceTeacher);
     await rejects(
-      () => action(examId, "save_marks", version, { paper_id: mathPaper.id, rows: [{ student_id: ID.student1, status: "present", scores: { theory: 70, internal: 18 } }] }),
+      () => action(examId, "save_marks", version, { paper_id: mathPaper.id, rows: [{ student_id: ID.student1, status: "present", scores: { marks: 18 } }] }),
       /not assigned to this paper/i,
     );
 
     // Missing is not zero: a blank component blocks locking, an explicit 0 does not.
     await asUser(ID.mathTeacher);
     version = (await action(examId, "save_marks", version, { paper_id: mathPaper.id, rows: [
-      { student_id: ID.student1, status: "present", scores: { theory: 66, internal: 18 } },
-      { student_id: ID.student2, status: "present", scores: { theory: 20 } },
+      { student_id: ID.student1, status: "present", scores: { marks: 17 } },
+      { student_id: ID.student2, status: "present", scores: {} },
     ] })).version;
     await rejects(() => action(examId, "lock_paper", version, { paper_id: mathPaper.id }), /every required component before locking/i);
     version = (await action(examId, "save_marks", version, { paper_id: mathPaper.id, rows: [
-      { student_id: ID.student1, status: "present", scores: { theory: 66, internal: 18 } },
-      { student_id: ID.student2, status: "present", scores: { theory: 20, internal: 0 } },
+      { student_id: ID.student1, status: "present", scores: { marks: 17 } },
+      { student_id: ID.student2, status: "present", scores: { marks: 10 } },
     ] })).version;
     version = (await action(examId, "lock_paper", version, { paper_id: mathPaper.id })).version;
 
     await asUser(ID.scienceTeacher);
     version = (await action(examId, "save_marks", version, { paper_id: sciencePaper.id, rows: [
-      { student_id: ID.student1, status: "present", scores: { theory: 72, internal: 20 } },
+      { student_id: ID.student1, status: "present", scores: { marks: 18 } },
       { student_id: ID.student2, status: "absent", scores: {} },
     ] })).version;
     version = (await action(examId, "lock_paper", version, { paper_id: sciencePaper.id })).version;
@@ -373,9 +401,9 @@ describe("Beacon academic RPC migration", () => {
 
     // Snapshot reflects the CBSE grade bands and the missing-vs-zero rule.
     const maths = student1.snapshot.subjects.find((entry: SnapshotSubject) => entry.code === "MAT");
-    expect(maths.obtained).toBe(84);
-    expect(maths.max).toBe(100);
-    expect(maths.percentage).toBe(84);
+    expect(maths.obtained).toBe(17);
+    expect(maths.max).toBe(20);
+    expect(maths.percentage).toBe(85);
     expect(maths.grade).toBe("A2");
     expect(maths.passed).toBe(true);
     const science2 = student2.snapshot.subjects.find((entry: SnapshotSubject) => entry.code === "SCI");
@@ -419,6 +447,50 @@ describe("Beacon academic RPC migration", () => {
     expect(reports[0].status).toBe("available");
     const exceptionPayload = await downloadPayload(student2.id);
     expect(exceptionPayload.snapshot.revision).toBe(1);
+  });
+
+  it("builds a 100-mark Half Yearly report from the better UT and captures co-scholastic grades", async () => {
+    const policyId = await createPolicy(ID.classX, "Class X Half Yearly policy", rules());
+    await approvePolicy(policyId);
+    const ut1 = await createUnitExam(policyId, "Unit Test 1", { sequence: 1 });
+    await completeExam(ut1, {
+      [ID.math]: [{ marks: 16 }, { marks: 13 }],
+      [ID.science]: [{ marks: 12 }, { marks: 9 }],
+    });
+    const ut2 = await createUnitExam(policyId, "Unit Test 2", { sequence: 2 });
+    await completeExam(ut2, {
+      [ID.math]: [{ marks: 18 }, { marks: 11 }],
+      [ID.science]: [{ marks: 17 }, { marks: 15 }],
+    });
+
+    const halfYearly = await createUnitExam(policyId, "Half Yearly", { category: "half_yearly", sources: [ut1, ut2] });
+    await asUser(ID.parent1);
+    await rejects(
+      () => db.query("select public.cbse_save_co_scholastic_grades($1::uuid,1,$2::jsonb)", [halfYearly, JSON.stringify([{ student_id: ID.student1, art_grade: "A1", moral_values_grade: "A1" }])]),
+      /not authorised/i,
+    );
+
+    await completeExam(halfYearly, {
+      [ID.math]: [{ half_yearly: 64, notebook: 4, sea: 5 }, { half_yearly: 55, notebook: 3, sea: 4 }],
+      [ID.science]: [{ half_yearly: 70, notebook: 5, sea: 3 }, { half_yearly: 62, notebook: 4, sea: 4 }],
+    }, [
+      { student_id: ID.student1, art_grade: "A1", moral_values_grade: "C1" },
+      { student_id: ID.student2, art_grade: "B1", moral_values_grade: "B2" },
+    ]);
+
+    const report = await db.query<{ snapshot: ReportSnapshot }>("select snapshot from cbse_reports where exam_id=$1 and student_id=$2 and revision=1", [halfYearly, ID.student1]);
+    const math = report.rows[0].snapshot.subjects.find(subject => subject.code === "MAT")!;
+    expect(math.components.find(component => component.key === "best_unit_test")?.score).toBe(9);
+    expect(math.obtained).toBe(82);
+    expect(math.max).toBe(100);
+    expect(math.percentage).toBe(82);
+    expect(report.rows[0].snapshot.co_scholastic_grades).toEqual({ art: "A1", moral_values: "C1" });
+
+    await asUser(ID.admin);
+    const ut2Version = await db.query<{ version: number }>("select version from cbse_exams where id=$1", [ut2]);
+    await action(ut2, "reopen", ut2Version.rows[0].version, { remarks: "Correct UT-2 marks." });
+    const dependent = await db.query<{ status: string }>("select status from cbse_reports where exam_id=$1 and student_id=$2 and revision=1", [halfYearly, ID.student1]);
+    expect(dependent.rows[0].status).toBe("withdrawn");
   });
 
   it("restricts workspaces and marks entry to assigned staff", async () => {
@@ -469,8 +541,8 @@ describe("Beacon academic RPC migration", () => {
 
     await asUser(ID.mathTeacher);
     version = (await action(examId, "save_marks", version, { paper_id: mathPaper.id, rows: [
-      { student_id: ID.student1, status: "present", scores: { theory: 50, internal: 10 } },
-      { student_id: ID.student2, status: "present", scores: { theory: 40, internal: 8 } },
+      { student_id: ID.student1, status: "present", scores: { marks: 15 } },
+      { student_id: ID.student2, status: "present", scores: { marks: 12 } },
     ] })).version;
     version = (await action(examId, "lock_paper", version, { paper_id: mathPaper.id })).version;
     await asUser(ID.classTeacher);
@@ -500,14 +572,14 @@ describe("Beacon academic RPC migration", () => {
     const papers = (await workspace(unitExam)).papers as { id: string; subject_id: string }[];
     await asUser(ID.mathTeacher);
     version = (await action(unitExam, "save_marks", version, { paper_id: papers.find((paper) => paper.subject_id === ID.math)!.id, rows: [
-      { student_id: ID.student1, status: "present", scores: { theory: 64, internal: 16 } },
-      { student_id: ID.student2, status: "present", scores: { theory: 48, internal: 12 } },
+      { student_id: ID.student1, status: "present", scores: { marks: 16 } },
+      { student_id: ID.student2, status: "present", scores: { marks: 12 } },
     ] })).version;
     version = (await action(unitExam, "lock_paper", version, { paper_id: papers.find((paper) => paper.subject_id === ID.math)!.id })).version;
     await asUser(ID.scienceTeacher);
     version = (await action(unitExam, "save_marks", version, { paper_id: papers.find((paper) => paper.subject_id === ID.science)!.id, rows: [
-      { student_id: ID.student1, status: "present", scores: { theory: 60, internal: 15 } },
-      { student_id: ID.student2, status: "present", scores: { theory: 40, internal: 10 } },
+      { student_id: ID.student1, status: "present", scores: { marks: 15 } },
+      { student_id: ID.student2, status: "present", scores: { marks: 10 } },
     ] })).version;
     version = (await action(unitExam, "lock_paper", version, { paper_id: papers.find((paper) => paper.subject_id === ID.science)!.id })).version;
     await asUser(ID.classTeacher);
@@ -580,13 +652,13 @@ describe("Beacon academic RPC migration", () => {
     // mathsTeacher holds the teacher role but is not this paper's assigned teacher.
     await asUser(ID.mathTeacher);
     version = (await action(examId, "save_marks", version, { paper_id: sciencePaper.id, rows: [
-      { student_id: ID.student1, status: "present", scores: { theory: 60, internal: 12 } },
-      { student_id: ID.student2, status: "present", scores: { theory: 50, internal: 10 } },
+      { student_id: ID.student1, status: "present", scores: { marks: 15 } },
+      { student_id: ID.student2, status: "present", scores: { marks: 13 } },
     ] })).version;
     await asUser(ID.principal);
     version = (await action(examId, "save_marks", version, { paper_id: sciencePaper.id, rows: [
-      { student_id: ID.student1, status: "present", scores: { theory: 62, internal: 13 } },
-      { student_id: ID.student2, status: "present", scores: { theory: 52, internal: 11 } },
+      { student_id: ID.student1, status: "present", scores: { marks: 16 } },
+      { student_id: ID.student2, status: "present", scores: { marks: 14 } },
     ] })).version;
     expect(version).toBeGreaterThan(1);
   });
@@ -648,8 +720,8 @@ describe("Beacon academic RPC migration", () => {
     expect(officeWs.capabilities.enter).toBe(true);
     expect(officeWs.papers.find((paper) => paper.id === mathPaper.id)!.can_enter).toBe(true);
     version = (await action(examId, "save_marks", version, { paper_id: mathPaper.id, rows: [
-      { student_id: ID.student1, status: "present", scores: { theory: 55, internal: 12 } },
-      { student_id: ID.student2, status: "present", scores: { theory: 45, internal: 9 } },
+      { student_id: ID.student1, status: "present", scores: { marks: 14 } },
+      { student_id: ID.student2, status: "present", scores: { marks: 11 } },
     ] })).version;
     version = (await action(examId, "lock_paper", version, { paper_id: mathPaper.id })).version;
     const locked = await db.query<{ locked_at: string | null }>("select locked_at from cbse_papers where id=$1", [mathPaper.id]);

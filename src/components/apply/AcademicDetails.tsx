@@ -115,7 +115,7 @@ function getYearOptions(dobYear?: number, maxYear?: number, minYear?: number): n
 }
 
 /* ── Per-Course Eligibility Card ─────────────────────────── */
-function EligibilityCards({ results, isSchool }: { results: CourseEligibilityResult[]; isSchool?: boolean }) {
+function EligibilityCards({ results, isSchool, isMirai }: { results: CourseEligibilityResult[]; isSchool?: boolean; isMirai?: boolean }) {
   if (!results.length) return null;
 
   return (
@@ -138,7 +138,9 @@ function EligibilityCards({ results, isSchool }: { results: CourseEligibilityRes
                 </div>
                 {isSchool && (
                   <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${hasAgeError ? 'bg-destructive/10 text-destructive border border-destructive/20' : 'bg-primary/10 text-primary border border-primary/20'}`}>
-                    {hasAgeError ? (
+                    {isMirai ? (
+                      <><Info className="h-3.5 w-3.5" /> Age guidance only</>
+                    ) : hasAgeError ? (
                       <>
                         <XCircle className="h-3.5 w-3.5" /> Not eligible for selected class
                       </>
@@ -171,7 +173,13 @@ function EligibilityCards({ results, isSchool }: { results: CourseEligibilityRes
               </div>
               
               {/* Show the detailed age error message if it exists */}
-              {isSchool && cr.dobResult && (
+              {isSchool && isMirai && (
+                <div className="ml-6 mt-2 flex items-start gap-1.5 text-muted-foreground">
+                  <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  <span className="text-xs">IB programme age guidance: PYP 3–12 years; MYP 11–16 years. These are indicative ranges; Mirai admissions confirms grade placement.</span>
+                </div>
+              )}
+              {isSchool && !isMirai && cr.dobResult && (
                 <div className="ml-6 mt-2 p-2 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive">
                   <p className="font-semibold mb-1">Eligibility Issue:</p>
                   {cr.dobResult.message}
@@ -1042,7 +1050,10 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
 
       {/* Per-course eligibility cards */}
       {rulesLoaded && perCourseResults.length > 0 && (
-        <EligibilityCards results={perCourseResults} />
+        <EligibilityCards
+          results={perCourseResults}
+          isMirai={(data.course_selections || []).some((selection) => `${selection.campus_name} ${selection.course_name}`.toLowerCase().includes("mirai"))}
+        />
       )}
 
       <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>

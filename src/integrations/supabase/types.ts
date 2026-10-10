@@ -38854,6 +38854,7 @@ export type Database = {
         | "super_admin"
         | "campus_admin"
         | "principal"
+        | "vice_principal"
         | "admission_head"
         | "counsellor"
         | "accountant"
@@ -38927,6 +38928,7 @@ export type Database = {
         | "deferred"
         | "application_approved"
         | "priority_interested"
+        | "course_not_available"
       library_digitization_status:
         | "captured"
         | "matched"
@@ -39097,6 +39099,7 @@ export const Constants = {
         "super_admin",
         "campus_admin",
         "principal",
+        "vice_principal",
         "admission_head",
         "counsellor",
         "accountant",
@@ -39173,6 +39176,7 @@ export const Constants = {
         "deferred",
         "application_approved",
         "priority_interested",
+        "course_not_available",
       ],
       library_digitization_status: [
         "captured",

@@ -145,13 +145,15 @@ Deno.serve(async (req) => {
         .map((c: any) => c?.course_id)
         .filter((id: any) => typeof id === "string" && UUID_RE.test(id)),
     ));
-    let isMiraiInstitution = false;
+    let isMiraiInstitution: boolean | undefined;
     if (courseIds.length) {
       const { data: courseRows } = await db.from("courses")
         .select("id, departments:department_id ( institution_id )")
         .in("id", courseIds);
-      isMiraiInstitution = (courseRows || [])
-        .some((c: any) => c.departments?.institution_id === MIRAI_INSTITUTION_ID);
+      if (courseRows?.length) {
+        isMiraiInstitution = courseRows
+          .some((c: any) => c.departments?.institution_id === MIRAI_INSTITUTION_ID);
+      }
     }
 
     const portal = resolveApplyPortal(lead, applications || [], { isMiraiInstitution });

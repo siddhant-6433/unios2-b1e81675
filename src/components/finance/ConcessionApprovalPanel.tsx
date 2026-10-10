@@ -29,7 +29,7 @@ export function ConcessionApprovalPanel() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<string | null>(null);
 
-  const isPrincipal = role === "principal";
+  const isPrincipal = (role === "principal" || role === "vice_principal");
   const isSuperAdmin = role === "super_admin";
 
   useEffect(() => { fetchConcessions(); }, []);

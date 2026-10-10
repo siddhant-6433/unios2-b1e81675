@@ -23,10 +23,15 @@ verify_jwt = false
 [functions.whatsapp-otp]
 verify_jwt = false
 
+
 [functions.ai-first-call]
 verify_jwt = false
 
 [functions.lead-ingest]
+verify_jwt = false
+
+# Public Mirai thank-you action; the handler validates the lead is Mirai-owned.
+[functions.mirai-admission-request]
 verify_jwt = false
 
 [functions.placement-report-request]
@@ -308,4 +313,8 @@ verify_jwt = false
 static_files = ["./functions/beacon-report-pdf/assets/*"]
 
 [functions.apply-job]
+verify_jwt = false
+
+# Staff JWT and role are validated inside the academic partner bill sync handler.
+[functions.zoho-academic-partner-bill-sync]
 verify_jwt = false

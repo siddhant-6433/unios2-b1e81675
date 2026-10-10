@@ -95,7 +95,7 @@ describe("principal campus context", () => {
 
   it("treats a principal as not filtered by the campus dropdown", () => {
     expect(campusContext).toContain(
-      'const ORG_WIDE_CAMPUS_ROLES = new Set(["super_admin", "admission_head", "principal"])',
+      'const ORG_WIDE_CAMPUS_ROLES = new Set(["super_admin", "admission_head", "principal", "vice_principal"])',
     );
   });
 });

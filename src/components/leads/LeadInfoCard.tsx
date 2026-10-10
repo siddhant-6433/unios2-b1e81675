@@ -15,6 +15,7 @@ const STAGE_LABELS: Record<string, string> = {
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
   token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
   not_interested: "Not Interested", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)", cold: "Cold",
+  course_not_available: "Course Not Available",
 };
 
 // Pipeline stages can only be reached via their proper workflow (call log, visit
@@ -22,6 +23,7 @@ const STAGE_LABELS: Record<string, string> = {
 // portal). Locking them out of the manual dropdown keeps stage history honest.
 const AUTO_ONLY_STAGES = new Set([
   "counsellor_call",
+  "course_not_available",
   "visit_scheduled",
   "interview",
   "offer_sent",

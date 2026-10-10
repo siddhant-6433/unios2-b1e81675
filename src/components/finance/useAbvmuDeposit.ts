@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { isGnmCourseName } from "@/lib/examRegistration";
+import { resolveAbvmuDepositAmount } from "@/lib/abvmuDeposit";
 
 // Finance/cashier roles allowed to record the ABVMU remittance receipt (mirrors the
 // server-side guard in settle_abvmu_deposit_claim).
@@ -66,7 +67,6 @@ export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: (
       ]);
       if (!alive) return;
       const status = statusRes?.data || {};
-      setDepositAmount(Math.max(0, Number(status.abvmu_deposit_amount || 0)));
       setApprovedCredit(Math.max(0, Number(status.abvmu_approved_credit || 0)));
       setFirstYearDue(Math.max(0, Number(status.full_first_year_amount_due || 0)));
       const pct = Number(status.lump_sum_pct);
@@ -88,6 +88,7 @@ export function useAbvmuDeposit(leadId: string | null | undefined, onChanged?: (
       const courseName = Array.isArray(lead.courses)
         ? lead.courses[0]?.name
         : lead.courses?.name;
+      setDepositAmount(resolveAbvmuDepositAmount(courseName, status.abvmu_deposit_amount));
       setChallanOptional(isGnmCourseName(courseName));
       setLoading(false);
     })();

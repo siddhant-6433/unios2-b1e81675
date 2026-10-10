@@ -26,6 +26,15 @@ describe("apply portal course fee calculation", () => {
     expect(calculateFee([selection("unknown")])).toBe(1000);
   });
 
+  it("charges Mirai a flat ₹2,200 application fee regardless of selected grades", () => {
+    expect(calculateFee([selection("school", "PYP 5 (Grade V)")], "mirai")).toBe(2200);
+    expect(calculateFee([
+      selection("school", "PYP 5 (Grade V)"),
+      selection("school", "MYP 1 (Grade VI)"),
+    ], "mirai")).toBe(2200);
+    expect(calculateFee([selection("school", "Grade V")], "nimt")).toBe(500);
+  });
+
   it("charges DAOTT the standard 1000 application fee", () => {
     expect(determineProgramCategory("DAOTT-GN", "Diploma of Anesthesia & OT Technology (D.AOTT)")).toBe("undergraduate");
     expect(calculateFee([selection("undergraduate", "Diploma of Anesthesia & OT Technology (D.AOTT)")])).toBe(1000);

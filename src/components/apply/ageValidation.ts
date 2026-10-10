@@ -33,7 +33,7 @@ export const NIMT_BEACON_GRADES: GradeAgeRule[] = [
   { grade: "Grade X", keywords: ["grade x", "grade 10", "class 10", "class x"], minAge: 14, maxAge: 16 },
 ];
 
-// Mirai School: Full 10 grade structure with June 1 cutoff and flexible rules (except Grade I)
+// Mirai age ranges are informational guidance only; grade placement is decided by admissions.
 export const MIRAI_GRADES: GradeAgeRule[] = [
   { grade: "Toddlers", keywords: ["toddler"], minAge: 1.6, maxAge: 2.6 },
   { grade: "Montessori", keywords: ["montessori"], minAge: 2, maxAge: 3.5 },
@@ -79,7 +79,24 @@ export function getSchoolGradeSortRank(
   courseCode: string,
   portalId: "nimt" | "beacon" | "mirai",
 ): number {
-  const rules = portalId === "mirai" ? MIRAI_GRADES : NIMT_BEACON_GRADES;
+  if (portalId === "mirai") {
+    const name = courseName.toLowerCase();
+    const code = courseCode.toUpperCase();
+    if (/\bTOD\b/.test(code) || /\btoddlers?\b/.test(name)) return 0;
+    if (/\bMON\b/.test(code) || /\bmontessori\b/.test(name)) return 1;
+
+    // Use explicit IB programme labels/codes. Roman numeral substring matches
+    // (for example "Grade VI" starting with "Grade V") put MYP ahead of PYP 5.
+    const programme = code.match(/\b(EYP|PYP|MYP)\s*([1-9]\d*)\b/)
+      || name.toUpperCase().match(/\b(EYP|PYP|MYP)\s*([1-9]\d*)\b/);
+    if (programme) {
+      const groupRank = programme[1] === "EYP" ? 100 : programme[1] === "PYP" ? 200 : 300;
+      return groupRank + Number(programme[2]);
+    }
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  const rules = NIMT_BEACON_GRADES;
   const nameAndCode = `${courseName} ${courseCode}`.toLowerCase();
   const idx = rules.findIndex((r) => r.keywords.some((kw) => nameAndCode.includes(kw)));
   return idx >= 0 ? idx : Number.MAX_SAFE_INTEGER;
@@ -96,12 +113,22 @@ export function validateAge(
   admissionYear?: number
 ): AgeValidationResult {
   const isMirai = portalId === "mirai";
-  const cutoffMonth = isMirai ? 5 : 6;
-  const cutoffDay = isMirai ? 1 : 31;
-  const cutoffLabel = isMirai ? "June 1" : "July 31";
+  const cutoffMonth = 6;
+  const cutoffDay = 31;
+  const cutoffLabel = `July 31, ${admissionYear || new Date().getFullYear()}`;
 
   const age = calculateAgeAsOfCutoff(dob, admissionYear, cutoffMonth, cutoffDay);
   if (age < 0) return { eligible: true, enforcement: "guidance", message: "", ageAsOfJuly31: 0, matchedGrade: null };
+
+  if (isMirai) {
+    return {
+      eligible: true,
+      enforcement: "guidance",
+      message: `Age ${age} years as of ${cutoffLabel}. IB programme age guidance: PYP 3–12, MYP 11–16; final grade placement is confirmed by Mirai admissions.`,
+      ageAsOfJuly31: age,
+      matchedGrade: null,
+    };
+  }
 
   const rules = isMirai ? MIRAI_GRADES : NIMT_BEACON_GRADES;
   const nameAndCode = (courseName + " " + courseCode).toLowerCase();

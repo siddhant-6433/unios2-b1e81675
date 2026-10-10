@@ -90,7 +90,7 @@ const relativeTime = (iso: string | null) => {
 
 export function CallListProgressPanel() {
   const { role } = useAuth();
-  const canSee = ["super_admin", "principal", "admission_head", "campus_admin"].includes(role || "");
+  const canSee = ["super_admin", "principal", "vice_principal", "admission_head", "campus_admin"].includes(role || "");
   // Team leaders also get rows back from the RPC (scoped to their own members),
   // so let the query run and let an empty result hide the panel.
   const { data: lists = [], isLoading } = useCallListOverview({ enabled: role !== "counsellor" });

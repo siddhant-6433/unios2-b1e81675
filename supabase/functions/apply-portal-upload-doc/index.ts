@@ -144,7 +144,7 @@ async function canUseSupabaseStorageTarget(req: Request, admin: any): Promise<bo
   if (error || !data?.user?.id) return false;
 
   const { data: role } = await admin.rpc("get_user_role", { _user_id: data.user.id });
-  return ["super_admin", "principal", "counsellor"].includes(String(role || ""));
+  return ["super_admin", "principal", "vice_principal", "counsellor"].includes(String(role || ""));
 }
 
 Deno.serve(async (req) => {

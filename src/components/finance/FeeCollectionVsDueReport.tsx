@@ -32,6 +32,7 @@ import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { feeTermLabel } from "@/lib/feeTermLabels";
 import { useFeeStructureMetaByCourse } from "@/hooks/useFeeStructureMeta";
 import { indiaTodayDate } from "@/lib/indiaDateTime";
+import { buildDaottReconciliationExportRows, DAOTT_RECONCILIATION_SOURCE, DAOTT_UNVERIFIED_CANDIDATES, isDaottCourseName } from "@/lib/daottPartnerReconciliation";
 import {
   COLLECTION_VS_DUE_SCOPES,
   aggregateKpis,
@@ -134,6 +135,9 @@ export function FeeCollectionVsDueReport() {
         const statusByStudent = await fetchReportStudentArchiveStatuses(studentIds);
         setLines(reportLines.map((line) => ({
           ...line,
+          course_name: isDaottCourseName(line.course_name)
+            ? "Diploma of Anesthesia & OT Technology (D.AOTT)"
+            : line.course_name,
           student_status: statusByStudent.get(line.student_id) || "unknown",
         })));
       } catch (statusError) {
@@ -244,6 +248,7 @@ export function FeeCollectionVsDueReport() {
     const rows = scope !== "collected" && view === "summary"
       ? buildSummaryExportRows(reportLines, feeMetaByCourse)
       : buildDetailedExportRows(fmt === "pdf" ? pdfSelectedLines : reportLines, feeMetaByCourse);
+    if (hasDaottRows && scope !== "collected") rows.push(...buildDaottReconciliationExportRows());
     if (rows.length === 0) {
       toast({ title: "Nothing to export" });
       return;
@@ -298,6 +303,7 @@ export function FeeCollectionVsDueReport() {
           subtitle,
           brand,
           metaByCourse: feeMetaByCourse,
+          partnerReferenceCandidates: hasDaottRows ? DAOTT_UNVERIFIED_CANDIDATES : undefined,
         });
       } else {
         await exportRowsPdf(rows, "Fee Collection vs Due", prefix, {
@@ -323,6 +329,7 @@ export function FeeCollectionVsDueReport() {
   const studentCount = kpis.students;
   const rowCount = scope !== "collected" && view === "summary" ? studentCount : reportLines.length;
   const collectedMode = scope === "collected";
+  const hasDaottRows = reportLines.some((line) => isDaottCourseName(line.course_name));
 
   return (
     <div className="space-y-4">
@@ -409,6 +416,42 @@ export function FeeCollectionVsDueReport() {
           </>
         )}
       </div>
+
+      {hasDaottRows && scope !== "collected" && (
+        <Card className="border-amber-300/70 bg-amber-50/40 shadow-none">
+          <CardContent className="space-y-3 p-4">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">DAOTT partner reconciliation reference</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                The attached Finance export ({fmtDate(DAOTT_RECONCILIATION_SOURCE.financeExportDate)}) has {DAOTT_RECONCILIATION_SOURCE.financeExportCandidateCount} candidates; the partner roster ({fmtDate(DAOTT_RECONCILIATION_SOURCE.partnerReportDate)}) has {DAOTT_RECONCILIATION_SOURCE.partnerCandidateCount}. These five partner records are absent from the Finance export. Reference amounts below are unverified and excluded from every Finance total.
+              </p>
+            </div>
+            <div className="overflow-x-auto rounded-lg border border-border/60 bg-background">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
+                  <th className="px-3 py-2">Partner candidate</th>
+                  <th className="px-3 py-2">Partner admission no.</th>
+                  <th className="px-3 py-2 text-right">Sep reference amount</th>
+                  <th className="px-3 py-2">Verification</th>
+                </tr></thead>
+                <tbody>
+                  {DAOTT_UNVERIFIED_CANDIDATES.map((candidate) => (
+                    <tr key={candidate.name} className="border-b last:border-0">
+                      <td className="px-3 py-2 font-medium">{candidate.name}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{candidate.partnerAdmissionNo || "Not issued"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{inr(candidate.referenceAmount)}</td>
+                      <td className="px-3 py-2 text-xs text-amber-800">Unverified · {candidate.note || "Not in Oct 6 Finance export"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              The Finance export also includes Prince Nagar, whom the partner PDF lists as cancelled rather than in the active fee ledger. Partner PDF totals need review: its summary says {inr(DAOTT_RECONCILIATION_SOURCE.partnerSummaryTotal)}, its outcome says {inr(DAOTT_RECONCILIATION_SOURCE.partnerLedgerTotalReported)}, and its 23 detailed fee amounts sum to {inr(DAOTT_RECONCILIATION_SOURCE.partnerLedgerTotalCalculated)}. Gagan Bedi’s partner admission number also appears against cancelled candidate Aman Patel.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <MonthlyChartCard lines={reportLines} />
 

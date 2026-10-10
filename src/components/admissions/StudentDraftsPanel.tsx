@@ -27,7 +27,7 @@ interface Props {
 
 const STEP_LABELS = ["Student Details", "Parent / Guardian", "Programme & Session"];
 
-export function StudentDraftsPanel({ refreshKey, onResume, adminRoles = ["super_admin", "campus_admin", "principal", "admission_head"] }: Props) {
+export function StudentDraftsPanel({ refreshKey, onResume, adminRoles = ["super_admin", "campus_admin", "principal", "vice_principal", "admission_head"] }: Props) {
   const { user, role } = useAuth();
   const [drafts, setDrafts] = useState<StudentDraft[]>([]);
   const [loading, setLoading] = useState(false);

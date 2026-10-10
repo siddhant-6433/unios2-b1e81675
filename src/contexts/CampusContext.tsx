@@ -22,7 +22,7 @@ const NO_ASSIGNED_CAMPUS_ID = "00000000-0000-0000-0000-000000000000";
 // campus filter by callers that do `selectedCampusId !== "all"`. Passing the
 // sentinel UUID through produced queries like `campus_id = '000...0'`, which
 // match nothing and blanked the whole CRM for an unassigned admission head.
-const ORG_WIDE_CAMPUS_ROLES = new Set(["super_admin", "admission_head", "principal"]);
+const ORG_WIDE_CAMPUS_ROLES = new Set(["super_admin", "admission_head", "principal", "vice_principal"]);
 
 interface CampusContextType {
   campuses: Campus[];

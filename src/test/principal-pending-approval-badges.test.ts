@@ -15,6 +15,6 @@ describe("principal pending approval badges", () => {
   it("keeps the home pending approvals panel aligned with the inbox authorization", () => {
     expect(pendingApprovalsPanel).toContain('"pending_an"');
     expect(pendingApprovalsPanel).toContain('if (item.kind === "pending_an") return false;');
-    expect(pendingApprovalsPanel).toContain('if (role === "principal") return item.pending_role === "principal";');
+    expect(pendingApprovalsPanel).toContain('if ((role === "principal" || role === "vice_principal")) return item.pending_role === "principal";');
   });
 });

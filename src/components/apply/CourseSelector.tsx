@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { CourseSelection, determineProgramCategory, calculateFee } from "./types";
 import { usePortal } from "./PortalContext";
 import { pickLeadForPortal } from "./portalConfig";
-import { filterCoursesByAge, validateAge, AgeValidationResult, getSchoolGradeSortRank } from "./ageValidation";
+import { calculateAgeAsOfCutoff, filterCoursesByAge, validateAge, AgeValidationResult, getSchoolGradeSortRank } from "./ageValidation";
 
 interface Props {
   phone: string;
@@ -60,6 +60,15 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
   const [selectedSchool, setSelectedSchool] = useState('');
   const [showErrors, setShowErrors] = useState(false);
 
+  const selectedAdmissionYear = useMemo(() => {
+    const selectedName = sessions.find((session) => session.id === selectedSession)?.name || sessions[0]?.name;
+    const year = selectedName?.match(/\b(20\d{2})\b/)?.[1];
+    return year ? Number(year) : new Date().getFullYear();
+  }, [sessions, selectedSession]);
+  const childAgeAsOfSession = childDob && isSchoolPortal
+    ? calculateAgeAsOfCutoff(childDob, selectedAdmissionYear, 6, 31)
+    : null;
+
   useEffect(() => {
     Promise.all([
       supabase.from("admission_sessions").select("id, name").eq("is_active", true).order("name"),
@@ -103,8 +112,8 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
   // Apply age filtering for school portals
   const filteredCourses = useMemo(() => {
     if (!isSchoolPortal || !childDob) return portalFilteredCourses;
-    return filterCoursesByAge(portalFilteredCourses, childDob, portal.id);
-  }, [portalFilteredCourses, childDob, isSchoolPortal, portal.id]);
+    return filterCoursesByAge(portalFilteredCourses, childDob, portal.id, selectedAdmissionYear);
+  }, [portalFilteredCourses, childDob, isSchoolPortal, portal.id, selectedAdmissionYear]);
 
   // For school portals: unique school (institution) options from filtered courses
   const schoolOptions = useMemo(() => {
@@ -193,16 +202,16 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
   // Get age validation for selected courses
   const getSelectionValidation = (s: CourseSelection): AgeValidationResult | null => {
     if (!isSchoolPortal || !childDob) return null;
-    return validateAge(childDob, s.course_name, "", portal.id);
+    return validateAge(childDob, s.course_name, "", portal.id, selectedAdmissionYear);
   };
 
-  const estimatedFee = calculateFee(selections);
+  const estimatedFee = calculateFee(selections, portal.id);
   const today = new Date();
   const childDobFromYear = today.getFullYear() - 32;
   const childDobToYear = today.getFullYear() - 3;
 
   // Check if any selection has strict age block
-  const hasStrictBlock = selections.some(s => {
+  const hasStrictBlock = portal.id !== "mirai" && selections.some(s => {
     const v = getSelectionValidation(s);
     return v && !v.eligible && v.enforcement === "strict";
   });
@@ -220,13 +229,19 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
     }
     setSaving(true);
 
-    const { data: existingLeads } = await supabase
-      .from("leads")
-      .select("id, campus_id, portal_brand, lead_institution_type, is_mirror")
-      .eq("phone", phone)
-      .eq("is_mirror", false)
-      .order("created_at", { ascending: false })
-      .limit(5);
+    // Applicant sessions use the anon key and cannot read the CRM leads table.
+    // The application insert trigger and security-definer RPC link Mirai leads.
+    let existingLeads: any[] = [];
+    if (portal.id !== "mirai") {
+      const { data } = await supabase
+        .from("leads")
+        .select("id, campus_id, portal_brand, lead_institution_type, is_mirror")
+        .eq("phone", phone)
+        .eq("is_mirror", false)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      existingLeads = data || [];
+    }
     const existingLead = pickLeadForPortal(existingLeads, portal.id);
 
     onComplete(selectedSession, selections, existingLead?.id || null);
@@ -264,7 +279,9 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
           {childDob && (
             <p className="text-xs text-muted-foreground mt-1">
               <Info className="h-3 w-3 inline mr-1" />
-              Age eligibility is calculated as of July 31st of the admission year.
+              {portal.id === "mirai"
+                ? <>Age: {childAgeAsOfSession} years as of 31 July {selectedAdmissionYear}. IB programme guidance: PYP 3–12 years; MYP 11–16 years. These are indicative programme ranges; Mirai admissions confirms grade placement.</>
+                : `Age eligibility is calculated as of July 31, ${selectedAdmissionYear}.`}
             </p>
           )}
         </div>
@@ -316,7 +333,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
                 return {
                   value: course.id,
                   disabled: selections.some(s => s.course_id === course.id) || !!ineligible,
-                  label: `${course.name}${ageInfo && !ageInfo.eligible ? ` (Age: ${ageInfo.ageAsOfJuly31}y - ${ageInfo.enforcement === "strict" ? "ineligible" : "guidance"})` : ""}`,
+                  label: `${course.name}${portal.id !== "mirai" && ageInfo && !ageInfo.eligible ? ` (Age: ${ageInfo.ageAsOfJuly31}y - ${ageInfo.enforcement === "strict" ? "ineligible" : "guidance"})` : ""}`,
                 };
               }),
             }))}

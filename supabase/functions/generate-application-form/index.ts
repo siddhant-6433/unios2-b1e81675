@@ -125,13 +125,7 @@ function getAdmissionYear(app: any, sessionName?: string | null): number {
 
 function getAgeCutoff(app: any, admissionYear: number): { month: number; day: number; label: string } {
   if (app.program_category === "school") {
-    const selections = Array.isArray(app.course_selections) ? app.course_selections : [];
-    const isMirai = selections.some((s: any) =>
-      `${s.campus_name || ""} ${s.course_name || ""}`.toLowerCase().includes("mirai")
-    );
-    return isMirai
-      ? { month: 5, day: 1, label: `June 1, ${admissionYear}` }
-      : { month: 6, day: 31, label: `July 31, ${admissionYear}` };
+    return { month: 6, day: 31, label: `July 31, ${admissionYear}` };
   }
 
   return { month: 11, day: 31, label: `December 31, ${admissionYear}` };
@@ -179,8 +173,11 @@ function computeMismatches(app: any, rules: any[], sessionName?: string | null):
   const gradWarnings: string[] = [];
   const entranceWarnings: string[] = [];
 
+  const isMiraiApplication = Array.isArray(app.course_selections) && app.course_selections.some((s: any) =>
+    `${s.campus_name || ""} ${s.course_name || ""}`.toLowerCase().includes("mirai")
+  );
   rules.forEach(r => {
-    if (candidateAge != null) {
+    if (candidateAge != null && !isMiraiApplication) {
       if (r.min_age != null && candidateAge < r.min_age) {
         ageWarnings.push(`Below minimum age as of ${ageCutoff.label} (${candidateAge} < ${r.min_age}).`);
       }
@@ -1256,10 +1253,18 @@ async function buildApplicationPdfInline(
     ctx.y -= 18;
   }
 
+  const isMiraiApplication = Array.isArray(app.course_selections) && app.course_selections.some((s: any) =>
+    `${s.campus_name || ""} ${s.course_name || ""}`.toLowerCase().includes("mirai")
+  );
+  const pdfAdmissionYear = getAdmissionYear(app, sessionName);
+  const pdfAgeCutoff = getAgeCutoff(app, pdfAdmissionYear);
+  const pdfCandidateAge = ageInYearsAtCutoff(app.dob, pdfAdmissionYear, pdfAgeCutoff.month, pdfAgeCutoff.day);
   const personalPairs = [
     { label: "Full Name",       value: norm(app.full_name) },
     { label: "Gender",          value: norm(app.gender) },
     { label: "Date of Birth",   value: fmtDate(app.dob) },
+    ...(isMiraiApplication && pdfCandidateAge != null ? [{ label: `Age as of ${pdfAgeCutoff.label}`, value: `${pdfCandidateAge} years` }] : []),
+    ...(isMiraiApplication ? [{ label: "IB programme age guidance", value: "PYP: 3–12 years; MYP: 11–16 years (indicative)" }] : []),
     { label: "Category",        value: norm(app.category) },
     { label: "Nationality",     value: norm(app.nationality) },
     { label: "Aadhaar Number",  value: norm(app.aadhaar) },

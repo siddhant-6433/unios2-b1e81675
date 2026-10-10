@@ -1,6 +1,7 @@
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 import type { FeeStructureMetadata } from "@/lib/feeTermLabels";
 import type { PdfBrand } from "@/lib/pdfExport";
+import type { DaottUnverifiedCandidate } from "@/lib/daottPartnerReconciliation";
 import {
   filterLinesForPdfSelection,
   groupByProgrammeBatch,
@@ -18,6 +19,7 @@ export type CollectionVsDuePdfOptions = {
   title?: string;
   subtitle?: string;
   metaByCourse: Record<string, FeeStructureMetadata>;
+  partnerReferenceCandidates?: DaottUnverifiedCandidate[];
 };
 
 const inr = (n: number) => Number(n || 0).toLocaleString("en-IN");
@@ -681,6 +683,50 @@ export async function exportCollectionVsDuePdf(
   };
 
   drawOverallTotals();
+
+  if (opts.partnerReferenceCandidates?.length) {
+    doc.addPage();
+    let y = margin;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(20);
+    doc.text(brand?.org || "NIMT Educational Institutions", margin, y + 4.5);
+    doc.text("DAOTT Partner Reconciliation Reference", pageW - margin, y + 4.5, { align: "right" });
+    y += 12;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(110);
+    doc.text("Historical amounts are unverified and excluded from all fee totals.", margin, y);
+    y += 7;
+    const columns = [
+      { label: "Candidate", x: margin, width: 50 },
+      { label: "Partner admission no.", x: margin + 52, width: 45 },
+      { label: "Sep reference amount", x: margin + 100, width: 36 },
+      { label: "Verification note", x: margin + 140, width: usableW - 140 },
+    ];
+    const drawRow = (values: string[], fill: boolean) => {
+      const wrapped = values.map((value, index) => doc.splitTextToSize(value, columns[index].width - 3) as string[]);
+      const height = Math.max(8, ...wrapped.map((parts) => parts.length * 3.5 + 3));
+      if (fill) {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(margin, y, usableW, height, "F");
+      }
+      doc.setDrawColor(220);
+      doc.line(margin, y + height, pageW - margin, y + height);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(25);
+      wrapped.forEach((parts, index) => doc.text(parts, columns[index].x + 1.5, y + 4));
+      y += height;
+    };
+    drawRow(columns.map((column) => column.label), true);
+    opts.partnerReferenceCandidates.forEach((candidate, index) => drawRow([
+      candidate.name,
+      candidate.partnerAdmissionNo || "Not issued",
+      `₹${inr(candidate.referenceAmount)}`,
+      candidate.note || "Not present in the 6 Oct Finance export; verify before recording",
+    ], index % 2 === 1));
+  }
 
   doc.save(`${opts.filePrefix}-${new Date().toISOString().slice(0, 10)}.pdf`);
   return { count: totalRows, parts: parts.length };

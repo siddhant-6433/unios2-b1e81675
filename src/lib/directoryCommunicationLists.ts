@@ -46,7 +46,7 @@ export function canAccessDirectoryAudience(
     return true;
   }
   return audience === "consultants" &&
-    ["principal", "counsellor"].includes(role || "") &&
+    ["principal", "vice_principal", "counsellor"].includes(role || "") &&
     permissions.includes("consultants:view");
 }
 

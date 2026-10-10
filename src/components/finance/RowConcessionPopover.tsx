@@ -71,8 +71,8 @@ export function RowConcessionPopover({ fee, onDone }: Props) {
 
   const isSuperAdmin = role === "super_admin";
   // Reduce matches edit_fee_concession server policy.
-  const canEdit = ["principal", "office_assistant", "office_admin", "counsellor", "super_admin", "accountant"].includes(role || "");
-  const canRemove = ["principal", "office_assistant", "office_admin", "counsellor", "super_admin"].includes(role || "");
+  const canEdit = ["principal", "vice_principal", "office_assistant", "office_admin", "counsellor", "super_admin", "accountant"].includes(role || "");
+  const canRemove = ["principal", "vice_principal", "office_assistant", "office_admin", "counsellor", "super_admin"].includes(role || "");
   const total = Number(fee.total_amount || 0);
   const hasLedgerConcession = Number(fee.concession || 0) > 0;
   const amount = !value ? 0 : effectiveAmount(type, Number(value), total);

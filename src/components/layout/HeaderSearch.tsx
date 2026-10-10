@@ -14,6 +14,7 @@ export interface HeaderSearchResult {
   id: string;
   name: string;
   phone: string;
+  courseName?: string;
   identifier?: string;
   identifierLabel?: string;
   stage?: string;
@@ -41,6 +42,56 @@ export function headerSearchIdentity(row: {
   if (row.application_id) return { identifier: row.application_id, identifierLabel: "App" };
   if (row.pre_admission_no) return { identifier: row.pre_admission_no, identifierLabel: "PAN" };
   return {};
+}
+
+export function headerSearchCourseFromRelation(courses?: { name?: string | null } | null) {
+  return courses?.name?.trim() || undefined;
+}
+
+export function headerSearchCoursesFromSelections(selections: unknown) {
+  if (!Array.isArray(selections)) return undefined;
+  const names = [...new Set(selections
+    .map((selection: any) => typeof selection?.course_name === "string" ? selection.course_name.trim() : "")
+    .filter(Boolean))];
+  return names.join(", ") || undefined;
+}
+
+export function headerSearchLeadResult(lead: any, isSecondary = false): HeaderSearchResult {
+  return {
+    type: "lead", id: lead.id, name: formatPersonName(lead.name), phone: lead.phone,
+    ...headerSearchIdentity(lead),
+    courseName: headerSearchCourseFromRelation(lead.courses),
+    stage: lead.stage,
+    ownerName: lead.counsellor_profile?.display_name || undefined,
+    leadId: lead.id,
+    isSecondary,
+  };
+}
+
+export function headerSearchApplicationResult(application: any, isSecondary = false): HeaderSearchResult {
+  return {
+    type: "application",
+    id: application.id,
+    name: application.full_name ? formatPersonName(application.full_name) : "(no name)",
+    phone: application.phone || "",
+    identifier: application.application_id,
+    identifierLabel: "App",
+    courseName: headerSearchCoursesFromSelections(application.course_selections),
+    status: application.status,
+    leadId: application.lead_id,
+    isSecondary,
+  };
+}
+
+export function headerSearchStudentResult(student: any): HeaderSearchResult {
+  return {
+    type: "student", id: student.id, name: formatPersonName(student.name), phone: student.phone || "",
+    ...headerSearchIdentity(student),
+    courseName: headerSearchCourseFromRelation(student.courses),
+    status: student.status,
+    leadId: student.lead_id || undefined,
+    photoUrl: student.photo_url || undefined,
+  };
 }
 
 // Compare people across leads/students/applications by their most stable keys.
@@ -105,6 +156,11 @@ export function HeaderSearchHit({
             <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0">{r.identifierLabel}: {r.identifier}</Badge>
           )}
         </div>
+        {r.courseName && (
+          <p className="mt-0.5 truncate text-[10px] text-muted-foreground" title={r.courseName}>
+            {r.courseName}
+          </p>
+        )}
       </div>
       {r.stage && (
         <Badge className="text-[9px] border-0 bg-muted shrink-0">{stageLabels[r.stage] || r.stage}</Badge>
@@ -156,14 +212,14 @@ export function HeaderSearch() {
     setLoading(true);
 
     const [leadsRes, studentsRes, applicationsRes] = await Promise.all([
-      supabase.from("leads").select("id, name, phone, application_id, pre_admission_no, admission_no, stage, counsellor_profile:counsellor_id(display_name)")
+      supabase.from("leads").select("id, name, phone, application_id, pre_admission_no, admission_no, stage, courses:course_id(name), counsellor_profile:counsellor_id(display_name)")
         .or(`phone.ilike.%${q}%,name.ilike.%${q}%,application_id.ilike.%${q}%,pre_admission_no.ilike.%${q}%,admission_no.ilike.%${q}%,email.ilike.%${q}%`)
         .eq("is_mirror", false)
         .limit(8),
-      supabase.from("students").select("id, name, phone, admission_no, pre_admission_no, status, photo_url, lead_id")
+      supabase.from("students").select("id, name, phone, admission_no, pre_admission_no, status, photo_url, lead_id, courses:course_id(name)")
         .or(`phone.ilike.%${q}%,name.ilike.%${q}%,admission_no.ilike.%${q}%,pre_admission_no.ilike.%${q}%,email.ilike.%${q}%`)
         .limit(5),
-      supabase.from("applications").select("id, application_id, lead_id, full_name, phone, status")
+      supabase.from("applications").select("id, application_id, lead_id, full_name, phone, status, course_selections")
         .ilike("application_id", `%${q}%`)
         .limit(5),
     ]);
@@ -182,35 +238,17 @@ export function HeaderSearch() {
 
     const all: HeaderSearchResult[] = [];
     (leadsRes.data || []).forEach((l: any) => {
-      all.push({
-        type: "lead", id: l.id, name: formatPersonName(l.name), phone: l.phone,
-        ...headerSearchIdentity(l),
-        stage: l.stage,
-        ownerName: l.counsellor_profile?.display_name || undefined,
-        leadId: l.id,
-        isSecondary: matchesStudent(l.phone, l.admission_no, l.pre_admission_no),
-      });
+      all.push(headerSearchLeadResult(l, matchesStudent(l.phone, l.admission_no, l.pre_admission_no)));
     });
     // Applications surfaced separately so an app lookup works even if the lead row
     // doesn't have application_id populated yet. Skip ones we already showed via leads.
     const seenLeadAppIds = new Set((leadsRes.data || []).map((l: any) => l.application_id).filter(Boolean));
     (applicationsRes.data || []).forEach((a: any) => {
       if (seenLeadAppIds.has(a.application_id)) return;
-      all.push({
-        type: "application", id: a.id, name: a.full_name ? formatPersonName(a.full_name) : "(no name)", phone: a.phone || "",
-        identifier: a.application_id, identifierLabel: "App",
-        status: a.status, leadId: a.lead_id,
-        isSecondary: matchesStudent(a.phone),
-      });
+      all.push(headerSearchApplicationResult(a, matchesStudent(a.phone)));
     });
     (studentsRes.data || []).forEach((s: any) => {
-      all.push({
-        type: "student", id: s.id, name: formatPersonName(s.name), phone: s.phone || "",
-        ...headerSearchIdentity(s),
-        status: s.status,
-        leadId: s.lead_id || undefined,
-        photoUrl: s.photo_url || undefined,
-      });
+      all.push(headerSearchStudentResult(s));
     });
 
     // Fill photos for rows without one from the lead's latest application (one

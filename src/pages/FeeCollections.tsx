@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 import { matchesCampus } from "@/lib/campusFilter";
 import { formatCompactINR } from "@/lib/formatCompactINR";
 import { getLeadRefundActionRows } from "@/lib/leadRefundActions";
+import { applyReceiptQueryFilters } from "@/lib/financeReceiptSearch";
 import {
   indiaDayEndExclusiveIso,
   indiaDayStartIso,
@@ -55,6 +56,7 @@ const FeeCollections = ({
   const [payments, setPayments] = useState<any[]>([]);
   const [consultantManagedIds, setConsultantManagedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const fetchRequestId = useRef(0);
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [refundLead, setRefundLead] = useState<RefundLead | null>(null);
   const { selectedCampusId } = useCampus();
@@ -67,11 +69,8 @@ const FeeCollections = ({
   const rangeFrom = embedded ? (fromDate || "") : dateFilter;
   const rangeTo = embedded ? (toDate || "") : dateFilter;
 
-  useEffect(() => {
-    fetchPayments();
-  }, [selectedCampusId, rangeFrom, rangeTo]);
-
-  const fetchPayments = async () => {
+  const fetchPayments = useCallback(async () => {
+    const requestId = ++fetchRequestId.current;
     setLoading(true);
     // IST half-open bounds — same window finance_summary uses, not a naive
     // UTC midnight-to-midnight string that shifted evening IST receipts
@@ -79,14 +78,16 @@ const FeeCollections = ({
     let query = supabase
       .from("v_all_payments" as any)
       .select("*")
-      .order("paid_at", { ascending: false })
-      .limit(500);
+      .order("paid_at", { ascending: false });
     if (rangeFrom) query = query.gte("paid_at", indiaDayStartIso(rangeFrom)!);
     if (rangeTo) query = query.lt("paid_at", indiaDayEndExclusiveIso(rangeTo)!);
+    query = applyReceiptQueryFilters(query, search, selectedCampusId, modeFilter);
+    query = query.limit(500);
 
     // v_all_payments unifies pre-AN lead_payments + post-AN payments; render
     // code expects {students,profiles} sub-objects so we reshape after fetch.
     const { data } = await query;
+    if (requestId !== fetchRequestId.current) return;
 
     if (data) {
       const raw = data as any[];
@@ -97,6 +98,7 @@ const FeeCollections = ({
           .from("profiles")
           .select("id, display_name")
           .in("id", recorderIds);
+        if (requestId !== fetchRequestId.current) return;
         (profs || []).forEach((pr: any) => { profMap[pr.id] = pr.display_name; });
       }
       setPayments(raw.map((p) => ({
@@ -111,6 +113,7 @@ const FeeCollections = ({
         const { data: flags } = await (supabase.from("v_student_fee_visibility") as any)
           .select("student_id, effective_hidden")
           .in("student_id", studentIds);
+        if (requestId !== fetchRequestId.current) return;
         setConsultantManagedIds(new Set(
           ((flags || []) as any[]).filter((f) => f.effective_hidden).map((f) => f.student_id),
         ));
@@ -119,7 +122,11 @@ const FeeCollections = ({
       }
     }
     setLoading(false);
-  };
+  }, [rangeFrom, rangeTo, search, modeFilter, selectedCampusId]);
+
+  useEffect(() => {
+    fetchPayments();
+  }, [fetchPayments]);
 
   const filtered = useMemo(() => {
     let result = payments;
@@ -129,8 +136,8 @@ const FeeCollections = ({
     if (modeFilter !== "all") {
       result = result.filter((p: any) => p.payment_mode === modeFilter);
     }
-    if (search) {
-      const q = search.toLowerCase();
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
       result = result.filter((p: any) =>
         (p.students?.name || "").toLowerCase().includes(q) ||
         (p.students?.admission_no || "").toLowerCase().includes(q) ||

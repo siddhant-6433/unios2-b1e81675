@@ -271,16 +271,16 @@ export default function AdminApplicationView() {
   const { toast } = useToast();
 
   const { role, hasPermission } = useAuth();
-  const canApproveApplication = role === "super_admin" || role === "principal";
-  const canUploadDocuments = role === "super_admin" || role === "principal" || role === "counsellor";
-  const canManageOffer = role === "super_admin" || role === "principal" || role === "counsellor" ||
+  const canApproveApplication = role === "super_admin" || (role === "principal" || role === "vice_principal");
+  const canUploadDocuments = role === "super_admin" || (role === "principal" || role === "vice_principal") || role === "counsellor";
+  const canManageOffer = role === "super_admin" || (role === "principal" || role === "vice_principal") || role === "counsellor" ||
     role === "admission_head" || role === "campus_admin";
   const canEditProgram = canManageOffer;
   const isSuperAdmin = role === "super_admin";
   const isCounsellor = role === "counsellor";
   const canAssignExternalOwner =
     isSuperAdmin
-    || role === "principal"
+    || (role === "principal" || role === "vice_principal")
     || hasPermission("leads:assign_external_owner")
     || (role === "counsellor" && hasPermission("consultants:view"));
   const { courseOptions, loading: courseOptionsLoading } = useCourseCampusLink();

@@ -57,7 +57,6 @@ const Attendance           = lazy(() => import("./pages/Attendance"));
 const MyClasses            = lazy(() => import("./pages/MyClasses"));
 const Timetable            = lazy(() => import("./pages/Timetable"));
 const MyHr                 = lazy(() => import("./pages/MyHr"));
-const SchoolReportCards    = lazy(() => import("./pages/ReportCards"));
 const BeaconAcademics      = lazy(() => import("./pages/BeaconAcademics"));
 const Finance              = lazy(() => import("./pages/Finance"));
 const Login                = lazy(() => import("./pages/Login"));
@@ -354,7 +353,7 @@ const App = () => (
                           Admins and team leaders keep the standalone pages (bulk reassign
                           lives there and counsellors can't see it anyway). */}
                       <Route path="/fresh-leads" element={<RedirectRole roles={["counsellor"]} to="/cloud-dialer"><RequirePermission module="leads" action="view"><FreshLeads /></RequirePermission></RedirectRole>} />
-                      <Route path="/visit-monitor" element={<RequireRole roles={["super_admin", "principal", "admission_head"]}><VisitMonitor /></RequireRole>} />
+                      <Route path="/visit-monitor" element={<RequireRole roles={["super_admin", "principal", "vice_principal", "admission_head"]}><VisitMonitor /></RequireRole>} />
                       <Route path="/visit-center" element={<RequirePermission module="leads" action="view"><VisitCenter /></RequirePermission>} />
                       <Route path="/call-log" element={<RequirePermission module="call_log" action="view"><CallLog /></RequirePermission>} />
                       <Route path="/ai-call-log" element={<RequirePermission module="call_log" action="view"><AiCallLog /></RequirePermission>} />
@@ -381,7 +380,6 @@ const App = () => (
                       {/* Academics — teacher / school coordinator */}
                       <Route path="/my-classes" element={<RequirePermission module="students" action="view"><MyClasses /></RequirePermission>} />
                       <Route path="/timetable" element={<RequirePermission module="timetable" action="view"><Timetable /></RequirePermission>} />
-                      <Route path="/report-cards" element={<RequirePermission module="marks" action="view"><SchoolReportCards /></RequirePermission>} />
                       <Route path="/beacon-academics" element={<RequirePermission module="marks" action="view"><BeaconAcademics /></RequirePermission>} />
 
                       {/* HR self-service — every staff role, and the whole app for non_teaching */}

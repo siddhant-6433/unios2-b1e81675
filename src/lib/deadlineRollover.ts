@@ -15,6 +15,20 @@ const GENERAL_ADMISSION_WINDOWS_PER_ROUND = 3;
 const INITIAL_APPLICATION_DEADLINE_END_MS = new Date(`${INITIAL_APPLICATION_DEADLINE}T23:59:59+05:30`).getTime();
 const INITIAL_CAHET_DEADLINE_END_MS = new Date(INITIAL_CAHET_DEADLINE_ISO).getTime();
 
+export const MIRAI_ADMISSION_ROUNDS = [
+  { round: 1, deadline: "2026-10-20" },
+  { round: 2, deadline: "2026-11-20" },
+  { round: 3, deadline: "2026-12-20" },
+  { round: 4, deadline: "2027-01-20" },
+  { round: 5, deadline: "2027-02-20" },
+  { round: 6, deadline: "2027-03-20" },
+] as const;
+
+/** The active Mirai 2027–28 application round, using the end of each IST day. */
+export function currentMiraiAdmissionRound(now = Date.now()) {
+  return MIRAI_ADMISSION_ROUNDS.find(({ deadline }) => now <= new Date(`${deadline}T23:59:59.999+05:30`).getTime()) || null;
+}
+
 export function isAfterInitialDeadline(now = Date.now()): boolean {
   return now > INITIAL_APPLICATION_DEADLINE_END_MS;
 }

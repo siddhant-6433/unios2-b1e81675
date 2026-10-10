@@ -23,7 +23,7 @@ export function ConsultantVoiceMessagesPanel() {
   const [messages, setMessages] = useState<VoiceMessage[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const canSee = ["super_admin", "principal", "admission_head", "campus_admin"].includes(role || "");
+  const canSee = ["super_admin", "principal", "vice_principal", "admission_head", "campus_admin"].includes(role || "");
 
   const fetchMessages = async () => {
     if (!canSee) { setLoading(false); return; }

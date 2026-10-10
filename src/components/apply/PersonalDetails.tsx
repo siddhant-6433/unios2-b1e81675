@@ -7,7 +7,7 @@ import { maskPhone } from "@/lib/maskContact";
 import { DatePickerField, SelectField, TextField } from "@/components/ui/state-fields";
 import { ApplicationData } from "./types";
 import { validateDobEligibility, fetchEligibilityRules, EligibilityRule } from "./eligibilityRules";
-import { getNationalityOptions, isIndianNationality, COUNTRIES } from "./countries";
+import { getNationalityOptions, isIndianNationality, isIndianAddressCountry, getPostalCodeLabel, COUNTRIES } from "./countries";
 import { INDIAN_STATES } from "./indianStates";
 
 interface Props {
@@ -18,6 +18,7 @@ interface Props {
   readOnly?: boolean;
   /** When true, the locked phone field is shown as 981****892 (CRM staff views). */
   maskPhoneDisplay?: boolean;
+  isMirai?: boolean;
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
@@ -29,10 +30,12 @@ const categoryOptions = ["General", "OBC", "SC", "ST", "EWS"].map((value) => ({ 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PIN_RE = /^\d{6}$/;
 
-export function PersonalDetails({ data, onChange, onNext, saving, readOnly, maskPhoneDisplay }: Props) {
+export function PersonalDetails({ data, onChange, onNext, saving, readOnly, maskPhoneDisplay, isMirai }: Props) {
   const address = data.address || {};
   const isSchool = data.program_category === 'school';
   const isIndian = isIndianNationality(data.nationality);
+  const isIndianAddress = isIndianAddressCountry(address.country);
+  const postalCodeLabel = getPostalCodeLabel(address.country);
   const today = new Date();
   const dobFromYear = today.getFullYear() - 80;
   const dobToYear = today.getFullYear() - 3;
@@ -54,13 +57,13 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly, mask
     gender: !data.gender,
     dob: !data.dob,
     nationality: !data.nationality,
-    category: !data.category,
-    email: !data.email || !EMAIL_RE.test(data.email),
+    category: isIndian && !data.category,
+    email: !data.email ? !isSchool : !EMAIL_RE.test(data.email),
     line1: !address.line1?.trim(),
     city: !address.city?.trim(),
     state: !address.state?.trim(),
     country: !address.country?.trim(),
-    pin: isIndian ? !PIN_RE.test((address.pin_code || '').trim()) : !address.pin_code?.trim(),
+    pin: isIndianAddress ? !PIN_RE.test((address.pin_code || '').trim()) : !address.pin_code?.trim(),
   };
   const hasMissing = Object.values(missing).some(Boolean);
 
@@ -73,12 +76,12 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly, mask
     dob: "Date of Birth",
     nationality: "Nationality",
     category: "Category",
-    email: data.email && !EMAIL_RE.test(data.email) ? "Email (invalid format)" : "Email",
+    email: data.email && !EMAIL_RE.test(data.email) ? "Email (invalid format)" : isSchool ? "Email (optional)" : "Email",
     line1: "Address Line",
     city: "City",
     state: "State",
     country: "Country",
-    pin: isIndian ? "PIN Code (6 digits)" : "PIN / ZIP Code",
+    pin: isIndianAddress ? `${postalCodeLabel} (6 digits)` : postalCodeLabel,
   };
   const missingLabels: string[] = (Object.keys(missing) as Array<keyof typeof missing>)
     .filter(k => missing[k])
@@ -117,7 +120,7 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly, mask
         <TextField
           label="Full Name"
           required
-          description="Enter your name exactly as it appears on your Class 10 Marksheet."
+          description={isMirai ? "Enter your child's full name as shown on official records." : "Enter your name exactly as it appears on your Class 10 Marksheet."}
           value={data.full_name || ""}
           onValueChange={(value) => onChange({ full_name: value })}
           error={showErrors && missing.full_name ? "Full name is required." : undefined}
@@ -164,22 +167,25 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly, mask
                 nationality: nat,
                 aadhaar: nat === 'Indian' ? data.aadhaar : '',
                 passport_number: nat !== 'Indian' ? data.passport_number : '',
+                category: nat === 'Indian' ? data.category : '',
               });
           }}
           options={NATIONALITIES}
           error={showErrors && missing.nationality ? "Nationality is required." : undefined}
           triggerClassName={inputCls}
         />
-        <SelectField
-          label="Category"
-          required
-          value={data.category || ""}
-          onValueChange={(value) => onChange({ category: value })}
-          options={categoryOptions}
-          placeholder="Select"
-          error={showErrors && missing.category ? "Category is required." : undefined}
-          triggerClassName={inputCls}
-        />
+        {isIndian && (
+          <SelectField
+            label="Category"
+            required
+            value={data.category || ""}
+            onValueChange={(value) => onChange({ category: value })}
+            options={categoryOptions}
+            placeholder="Select"
+            error={showErrors && missing.category ? "Category is required." : undefined}
+            triggerClassName={inputCls}
+          />
+        )}
         {/* Conditional: Aadhaar for Indian, Passport for others */}
         {isIndian ? (
           <TextField
@@ -212,8 +218,8 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly, mask
           )}
         </div>
         <TextField
-          label="Email"
-          required
+          label={isSchool ? "Email (optional)" : "Email"}
+          required={!isSchool}
           type="email"
           value={data.email || ""}
           onValueChange={(value) => onChange({ email: value })}
@@ -301,11 +307,11 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly, mask
           triggerClassName={inputCls}
         />
         <TextField
-          label="PIN Code"
+          label={postalCodeLabel}
           required
           value={address.pin_code || ""}
-          onValueChange={(value) => onChange({ address: { ...address, pin_code: value.replace(/\D/g, '').slice(0, 6) } })}
-          error={showErrors && missing.pin ? (isIndian ? "Enter a valid 6-digit PIN code." : "PIN / ZIP code is required.") : undefined}
+          onValueChange={(value) => onChange({ address: { ...address, pin_code: isIndianAddress ? value.replace(/\D/g, '').slice(0, 6) : value } })}
+          error={showErrors && missing.pin ? (isIndianAddress ? "Enter a valid 6-digit PIN code." : `${postalCodeLabel} is required.`) : undefined}
           inputClassName={inputCls}
         />
       </div>

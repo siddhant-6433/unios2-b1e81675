@@ -389,7 +389,7 @@ export default function Applications() {
   const canRecordOffline = ["super_admin", "accountant", "office_admin"].includes(role || "");
   const canManageApplicationLists = role === "super_admin" || role === "admission_head";
   const canViewCourseBreakup = canManageApplicationLists;
-  const canExportApplications = isSuperAdmin || role === "principal";
+  const canExportApplications = isSuperAdmin || (role === "principal" || role === "vice_principal");
   const [apps, setApps] = useState<AppRow[]>([]);
   const [offlinePaymentApp, setOfflinePaymentApp] = useState<AppRow | null>(null);
   const [offlineReceiptApp, setOfflineReceiptApp] = useState<AppRow | null>(null);

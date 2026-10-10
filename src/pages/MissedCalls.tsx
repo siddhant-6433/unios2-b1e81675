@@ -95,7 +95,7 @@ export default function MissedCalls() {
   const [dispositionEnded, setDispositionEnded] = useState(false);
 
   const isCounsellor = role === "counsellor";
-  const canViewAll = role === "super_admin" || role === "admission_head" || role === "campus_admin" || role === "principal";
+  const canViewAll = role === "super_admin" || role === "admission_head" || role === "campus_admin" || (role === "principal" || role === "vice_principal");
 
   const refresh = async () => {
     setLoading(true);
