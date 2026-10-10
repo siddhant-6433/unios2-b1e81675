@@ -18,6 +18,8 @@ CREATE TABLE public.fee_ledger_duplicate_repairs (
 
 ALTER TABLE public.fee_ledger_duplicate_repairs ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Finance can view application fee duplicate repairs"
+  ON public.fee_ledger_duplicate_repairs;
 CREATE POLICY "Finance can view application fee duplicate repairs"
   ON public.fee_ledger_duplicate_repairs FOR SELECT TO authenticated USING (
     public.has_role(auth.uid(), 'super_admin') OR
