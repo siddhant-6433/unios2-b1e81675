@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.2.0] - 2026-10-10
+
+### Changed
+
+- Keep reached leads with the counsellor who handled the call and remove them from pending call-list work while preserving list history.
+- Retry unanswered, busy, and voicemail outcomes up to three consecutive attempts before parking the lead as Cold.
+- Map wrong numbers to Cold and unavailable course requests to Course Not Available, recording the requested course name as plain text.
+- Align call outcomes and stage updates across Cloud Dialer and lead call flows.
+
 ## [0.6.1.0] - 2026-10-09
 
 ### Added

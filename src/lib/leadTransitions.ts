@@ -5,6 +5,7 @@ export type LeadCallDisposition =
   | "not_interested"
   | "ineligible"
   | "not_answered"
+  | "no_answer"
   | "wrong_number"
   | "call_back"
   | "do_not_contact"
@@ -18,6 +19,7 @@ const LEAD_CALL_DISPOSITIONS = [
   "not_interested",
   "ineligible",
   "not_answered",
+  "no_answer",
   "wrong_number",
   "call_back",
   "do_not_contact",
@@ -31,7 +33,7 @@ export const isLeadCallDisposition = (disposition: string): disposition is LeadC
   (LEAD_CALL_DISPOSITIONS as readonly string[]).includes(disposition);
 
 /** Dispositions that mean "we never reached the lead on this attempt". */
-const UNANSWERED_DISPOSITIONS = new Set(["not_answered", "busy", "voicemail"]);
+const UNANSWERED_DISPOSITIONS = new Set(["not_answered", "no_answer", "busy", "voicemail"]);
 
 /**
  * Length of the most recent unbroken run of unanswered calls, newest first.
@@ -126,11 +128,33 @@ const keepCurrentStage = (currentStage: string): LeadTransitionCommand => ({
 });
 
 export function resolveCallDispositionTransition(
-  args: ResolveCallDispositionTransitionArgs,
+  args: ResolveCallDispositionTransitionArgs & { unansweredStreak?: number },
 ): LeadTransitionCommand {
-  const { currentStage, disposition, futureEligibleSession = null } = args;
+  const { currentStage, disposition, futureEligibleSession = null, unansweredStreak = 0 } = args;
 
-  if (disposition === "interested" || disposition === "call_back" || disposition === "not_answered") {
+  if (["busy", "voicemail"].includes(disposition)) {
+    if (unansweredStreak >= 2) {
+      return {
+        name: "classifyInactive",
+        currentStage,
+        newStage: "cold",
+        activityDescription: "Stage changed to Cold after three consecutive unanswered calls",
+        futureEligibleSession: null,
+      };
+    }
+    return keepCurrentStage(currentStage);
+  }
+
+  if (["interested", "call_back", "not_answered", "no_answer"].includes(disposition)) {
+    if (["not_answered", "no_answer"].includes(disposition) && unansweredStreak >= 2) {
+      return {
+        name: "classifyInactive",
+        currentStage,
+        newStage: "cold",
+        activityDescription: "Stage changed to Cold after three consecutive unanswered calls",
+        futureEligibleSession: null,
+      };
+    }
     const name =
       disposition === "interested"
         ? "recordDispositionInterested"
@@ -164,9 +188,29 @@ export function resolveCallDispositionTransition(
     };
   }
 
+  if (disposition === "wrong_number") {
+    return {
+      name: "classifyInactive",
+      currentStage,
+      newStage: "cold",
+      activityDescription: "Stage changed to Cold — phone number is invalid or belongs to someone else",
+      futureEligibleSession: null,
+    };
+  }
+
+  if (disposition === "course_not_listed") {
+    return {
+      name: "adminOverrideStage",
+      currentStage,
+      newStage: "course_not_available",
+      activityDescription: "Stage changed to Course Not Available",
+      futureEligibleSession: null,
+    };
+  }
+
   if (disposition === "cold") {
     return {
-      name: "recordDispositionCold",
+      name: "classifyInactive",
       currentStage,
       newStage: "cold",
       activityDescription: "Stage changed to Cold after repeated unanswered calls",
