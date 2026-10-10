@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0.0] - 2026-10-10
+
+### Fixed
+
+- Restrict application-fee repair audits to assigned campuses, preserve repair snapshots when a student is deleted, and archive duplicate receipt allocations when consolidating ledger heads.
+
 ## [0.6.2.0] - 2026-10-10
 
 ### Changed
