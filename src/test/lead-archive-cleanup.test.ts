@@ -6,7 +6,7 @@ import { beforeAll, afterAll, describe, expect, it } from "vitest";
 let db: PGlite;
 const uid = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
 const cutoff = "2026-10-05T08:00:00Z";
-type Preview = { cutoff: string; digest: string; items: { lead_id: string; action: string; reason: string; destination: string | null }[] };
+type Preview = { cutoff: string; digest: string; items: { lead_id: string; action: string; reason: string; destination: string | null; fingerprint: string }[] };
 async function rpc<T>(sql: string, args: unknown[] = []): Promise<T> {
   return (await db.query<{ result: T }>(`SELECT ${sql} AS result`, args)).rows[0].result;
 }
@@ -72,7 +72,10 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
       SELECT set_config('test.user','${uid(11)}',false),set_config('test.admin','true',false);
     `);
     await db.exec(readMigration("lead_archive_cleanup"));
-    await db.exec(readMigration("lead_archive_cleanup"));
+    const legacy = readMigration("lead_archive_cleanup").split("CREATE OR REPLACE FUNCTION public.lead_cleanup_classify", 2)[1].split("CREATE OR REPLACE FUNCTION public.preview_lead_cleanup", 1)[0];
+    await db.exec("CREATE OR REPLACE FUNCTION public.lead_cleanup_classify_legacy" + legacy);
+    await db.exec(readMigration("optimize_lead_cleanup_preview"));
+    await db.exec(readMigration("optimize_lead_cleanup_preview"));
   }, 30000);
   afterAll(async () => { await db?.close(); });
 
@@ -115,6 +118,69 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
     expect(byId.has(uid(116))).toBe(false);
     expect(byId.get(uid(117))?.action).toBe("review");
     expect(byId.get(uid(121))?.action).toBe("archive");
+  });
+
+  it("keeps exact classifications and audit fingerprints while avoiding per-lead preview helpers", async () => {
+    const before = (await db.query("SELECT * FROM lead_cleanup_classify_legacy($1)", [cutoff])).rows;
+    const after = (await db.query("SELECT * FROM lead_cleanup_classify($1)", [cutoff])).rows;
+    const classifications = (rows: typeof before) => rows.map(({ fingerprint: _fingerprint, ...row }) => row);
+    expect(classifications(after)).toEqual(classifications(before));
+    expect(after.every(row => typeof row.fingerprint === "string" && row.fingerprint.length === 32)).toBe(true);
+    const mismatches = await db.query(`SELECT s.lead_id FROM lead_cleanup_snapshots(ARRAY(SELECT id FROM leads)) s
+      WHERE s.snapshot IS DISTINCT FROM lead_cleanup_snapshot(s.lead_id)`);
+    expect(mismatches.rows).toHaveLength(0);
+    expect((await db.query(`SELECT p.lead_id FROM lead_cleanup_protections(ARRAY(SELECT id FROM leads)) p
+      WHERE p.reason IS DISTINCT FROM lead_cleanup_protection(p.lead_id)`)).rows).toHaveLength(0);
+    await db.exec("BEGIN");
+    try {
+      // Counting calls exposes the original N-per-lead snapshot/protection work
+      // without depending on machine speed or an artificial timing threshold.
+      await db.exec(`ALTER FUNCTION lead_cleanup_snapshot(uuid,uuid) RENAME TO test_original_snapshot;
+        CREATE FUNCTION lead_cleanup_snapshot(_lead_id uuid,_exclude_list uuid DEFAULT NULL) RETURNS jsonb
+        LANGUAGE plpgsql STABLE AS $$ BEGIN
+          PERFORM set_config('test.snapshot_calls',(coalesce(nullif(current_setting('test.snapshot_calls',true),''),'0')::int+1)::text,true);
+          RETURN test_original_snapshot(_lead_id,_exclude_list); END $$;
+        ALTER FUNCTION lead_cleanup_protection(uuid) RENAME TO test_original_protection;
+        CREATE FUNCTION lead_cleanup_protection(_lead_id uuid) RETURNS text LANGUAGE plpgsql STABLE AS $$ BEGIN
+          PERFORM set_config('test.protection_calls',(coalesce(nullif(current_setting('test.protection_calls',true),''),'0')::int+1)::text,true);
+          RETURN test_original_protection(_lead_id); END $$;
+        SELECT set_config('test.snapshot_calls','0',true),set_config('test.protection_calls','0',true);`);
+      await preview();
+      expect(await rpc("current_setting('test.snapshot_calls')")).toBe("0");
+      expect(await rpc("current_setting('test.protection_calls')")).toBe("0");
+      // The previous classifier invokes those helpers once per lead (or more),
+      // proving this regression detects the workload responsible for timeouts.
+      await db.query("SELECT * FROM lead_cleanup_classify_legacy($1)", [cutoff]);
+      expect(Number(await rpc("current_setting('test.snapshot_calls')"))).toBeGreaterThan(0);
+      expect(Number(await rpc("current_setting('test.protection_calls')"))).toBeGreaterThan(0);
+      await db.exec("SELECT set_config('test.snapshot_calls','0',true),set_config('test.protection_calls','0',true)");
+      const plan = await preview();
+      const run = await prepare(plan);
+      expect(await rpc("current_setting('test.snapshot_calls')")).toBe("0");
+      expect((await db.query("SELECT count(*)::int n FROM lead_cleanup_items WHERE run_id=$1", [run])).rows[0].n).toBe(plan.items.length);
+      expect((await db.query(`SELECT count(*)::int n FROM lead_cleanup_items i WHERE run_id=$1
+        AND i.before_state IS DISTINCT FROM test_original_snapshot(i.lead_id)`, [run])).rows[0].n).toBe(0);
+    } finally { await db.exec("ROLLBACK"); }
+  });
+
+  it("invalidates the reviewed preview when completed history changes and keeps helpers private", async () => {
+    await db.exec("BEGIN");
+    try {
+      const p = await preview();
+      await db.query("INSERT INTO lead_notes(lead_id,content) VALUES($1,'Completed-work audit edit')", [uid(100)]);
+      const changed = await preview();
+      expect(changed.digest).not.toBe(p.digest);
+      expect(changed.items.find(i => i.lead_id === uid(100))?.fingerprint).not.toBe(p.items.find(i => i.lead_id === uid(100))?.fingerprint);
+      await expect(prepare(p)).rejects.toThrow(/Preview changed/);
+    } finally { await db.exec("ROLLBACK"); }
+    for (const fn of ["lead_cleanup_snapshots(uuid[],uuid)","lead_cleanup_fingerprints(uuid[])","lead_cleanup_protections(uuid[])"]) {
+      for (const role of ["anon","authenticated"]) {
+        expect(await rpc("has_function_privilege($1,$2,'EXECUTE')", [role,fn])).toBe(false);
+      }
+    }
+    for (const fn of ["preview_lead_cleanup", "prepare_lead_cleanup"]) {
+      expect((await db.query("SELECT proconfig FROM pg_proc WHERE proname=$1", [fn])).rows[0].proconfig).toContain("statement_timeout=55s");
+    }
   });
 
   it("rejects ambiguous staff and unauthorized preview without mutating leads", async () => {
