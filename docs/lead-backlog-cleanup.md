@@ -1,6 +1,6 @@
 # Lead backlog cleanup
 
-Super admins can open **Lead Lists → Archive old leads**. Deployment alone does
+Super admins can open **Marketing → Lists → Archive old leads**. Deployment alone does
 not archive or reassign records; the administrator must review and apply a
 preview. Cleanup never deletes leads or sends messages.
 
@@ -73,3 +73,12 @@ Tests execute its PostgreSQL functions through PGlite, including migration rerun
 stale previews, admission links, cutoff behavior, rollback conflicts, small-batch
 resumption and injected transaction failure. UI tests cover review gating, stale
 preview errors and saved-run resumption.
+
+## Preview performance
+
+The preview collects related histories and admission protection in bulk and hashes
+every complete row for change detection. Preparation saves full rollback snapshots
+in one insert rather than running one history query per lead. Only the protected
+preview/preparation RPCs have a bounded 55-second timeout; ordinary staff queries
+retain their existing limits. An older preview must be refreshed after deploying
+`optimize_lead_cleanup_preview`, because its fingerprint format changes.
