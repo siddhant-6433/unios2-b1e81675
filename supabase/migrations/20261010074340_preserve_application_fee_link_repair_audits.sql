@@ -1,3 +1,4 @@
+-- keep-migration-version: already recorded on production schema_migrations.
 -- preserve application fee link repair audits
 -- Repair snapshots are accounting evidence and must survive student deletion.
 ALTER TABLE public.application_fee_duplicate_link_repairs

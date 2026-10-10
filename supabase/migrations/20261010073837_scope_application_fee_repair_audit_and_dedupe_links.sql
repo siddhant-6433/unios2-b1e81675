@@ -1,3 +1,4 @@
+-- keep-migration-version: already recorded on production schema_migrations.
 -- Keep application-fee repair snapshots campus-scoped and audit the removal of
 -- duplicate allocations created when links were consolidated onto one head.
 
