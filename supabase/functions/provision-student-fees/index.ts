@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { isServiceCaller } from "../_shared/service-auth.ts";
+import { dedupeNewFeeHeads } from "../_shared/dedupe-application-fee-heads.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -415,9 +416,9 @@ async function provisionStudent(
     (existingFull || []).map((e: any) => `${e.fee_code_id}::${e.term}`)
   );
 
-  const newRows = rows.filter(
-    (r: any) => !existingSet.has(`${r.fee_code_id}::${r.term}`)
-  );
+  // Application fee heads are one-time charges. Deduplicate repeated source
+  // items within this batch as well as rows already present in the ledger.
+  const newRows = dedupeNewFeeHeads(rows, existingSet);
 
   // 8a. Credit confirmed token payments to new year_N rows sequentially.
   // Rule: apply token to Year-1 first; any remainder goes to Year-2, then Year-3, etc.
