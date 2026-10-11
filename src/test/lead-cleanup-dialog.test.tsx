@@ -47,6 +47,15 @@ describe("lead cleanup review controls", () => {
     fireEvent.click(screen.getByText("Refresh this preview"));
     await waitFor(() => expect(mocks.rpc).toHaveBeenLastCalledWith("preview_lead_cleanup", { _cutoff: preview.cutoff }));
   });
+  it("identifies preparation timeouts and never starts apply after failed preparation", async () => {
+    mocks.rpc.mockImplementation(async (name: string) => name === "prepare_lead_cleanup" ? { data: null, error: { message: "canceling statement due to statement timeout" } } : { data: preview, error: null });
+    mount(); fireEvent.click(screen.getByText("Archive old leads"));
+    fireEvent.click(await screen.findByText("Build read-only preview"));
+    await screen.findByText("Apply reviewed cleanup");
+    fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(screen.getByText("Apply reviewed cleanup"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Preparation failed; no cleanup was applied: canceling statement due to statement timeout");
+    expect(mocks.rpc.mock.calls.some(([name]) => name === "apply_lead_cleanup")).toBe(false);
+  });
   it("recovers a saved interrupted run and resumes the existing snapshot", async () => {
     mocks.runs = [{ id: "run-1", cutoff: preview.cutoff, status: "applying" }];
     mocks.rpc.mockImplementation(async (name: string) => ({ data: name === "lead_cleanup_report" ? { ...report, run: { ...report.run, status: "applying" } } : { remaining: 0, processed: 1 }, error: null }));

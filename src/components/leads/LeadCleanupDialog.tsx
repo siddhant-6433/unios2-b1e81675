@@ -12,7 +12,10 @@ type Report = { mirai_balanced: boolean; run: Run; counts: Record<string, number
 
 async function cleanupRpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.rpc(name as never, args as never);
-  if (error) throw error;
+  if (error) {
+    const operation = ({ preview_lead_cleanup: "Preview failed", prepare_lead_cleanup: "Preparation failed; no cleanup was applied", apply_lead_cleanup: "Cleanup batch failed", rollback_lead_cleanup: "Rollback batch failed", lead_cleanup_report: "Report failed" } as Record<string, string>)[name] || "Cleanup request failed";
+    throw new Error(`${operation}: ${error.message}`);
+  }
   return data as T;
 }
 
