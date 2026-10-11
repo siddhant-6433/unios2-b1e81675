@@ -39,6 +39,8 @@ CREATE TABLE public.application_fee_duplicate_link_repairs (
 );
 
 ALTER TABLE public.application_fee_duplicate_link_repairs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Finance can view application fee duplicate link repairs"
+  ON public.application_fee_duplicate_link_repairs;
 CREATE POLICY "Finance can view application fee duplicate link repairs"
   ON public.application_fee_duplicate_link_repairs FOR SELECT TO authenticated
   USING (
