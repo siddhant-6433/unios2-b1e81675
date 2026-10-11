@@ -2,7 +2,8 @@
 
 Super admins can open **Marketing → Lists → Archive old leads**. Deployment alone does
 not archive or reassign records; the administrator must review and apply a
-preview. Cleanup never deletes leads or sends messages.
+preview. Cleanup never deletes leads or sends messages. Apply and rollback suppress activity
+automation hooks while writing cleanup audit notes.
 
 ## Rules
 
@@ -33,7 +34,8 @@ The policy takes effect with the first applied batch; preview itself is read-onl
 2. Confirm the preview checkbox, then apply. A changed preview cannot be prepared.
 3. Preparation saves full history snapshots for mutable records and lead metadata
    and complete preview fingerprints for protected/review-only records; excluded records are never applied or rolled back.
-   Each 100-record batch is atomic. Admission protection and complete lead/task/
+   Each batch of up to 25 records is atomic. Archive-list totals are reconciled once
+   per batch rather than recounting the membership table after every inserted/deleted lead. Admission protection and complete lead/task/
    calling/assignment snapshots are checked again. Changed records are skipped.
 4. Closing the dialog or pressing Pause stops after the current batch. Reopen a
    recent run and Resume to process the existing approved snapshot.

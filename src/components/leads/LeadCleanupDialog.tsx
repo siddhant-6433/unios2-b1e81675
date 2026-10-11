@@ -57,7 +57,7 @@ export function LeadCleanupDialog({ onChanged }: { onChanged: () => void }) {
   async function process(id: string, rollback = false) {
     pause.current = false;
     do {
-      const result = await cleanupRpc<{ remaining: number }>(rollback ? "rollback_lead_cleanup" : "apply_lead_cleanup", { _run_id: id, _limit: 100 });
+      const result = await cleanupRpc<{ remaining: number }>(rollback ? "rollback_lead_cleanup" : "apply_lead_cleanup", { _run_id: id, _limit: 25 });
       await readReport(id);
       onChanged();
       if (result.remaining === 0) break;

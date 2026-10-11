@@ -34,7 +34,7 @@ describe("lead cleanup review controls", () => {
     fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(apply);
     await screen.findByText("Open marketing archive list");
     expect(mocks.rpc).toHaveBeenCalledWith("prepare_lead_cleanup", { _cutoff: preview.cutoff, _expected_digest: preview.digest });
-    expect(mocks.rpc).toHaveBeenCalledWith("apply_lead_cleanup", { _run_id: "run-1", _limit: 100 });
+    expect(mocks.rpc).toHaveBeenCalledWith("apply_lead_cleanup", { _run_id: "run-1", _limit: 25 });
   });
   it("shows stale-preview errors without applying and keeps the fixed cutoff on refresh", async () => {
     mocks.rpc.mockImplementation(async (name: string) => name === "prepare_lead_cleanup" ? { data: null, error: { message: "Preview changed. Review a fresh preview before applying" } } : { data: preview, error: null });
@@ -62,7 +62,7 @@ describe("lead cleanup review controls", () => {
     mount(); fireEvent.click(screen.getByText("Archive old leads"));
     fireEvent.click(await screen.findByText(/· applying/));
     fireEvent.click(await screen.findByText("Resume cleanup"));
-    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith("apply_lead_cleanup", { _run_id: "run-1", _limit: 100 }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith("apply_lead_cleanup", { _run_id: "run-1", _limit: 25 }));
     expect(mocks.rpc.mock.calls.some(([name]) => name === "prepare_lead_cleanup")).toBe(false);
   });
 });

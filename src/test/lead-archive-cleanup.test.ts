@@ -47,7 +47,7 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
       CREATE TABLE payment_links(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),lead_id uuid REFERENCES leads);
       CREATE TABLE lead_followups(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),lead_id uuid REFERENCES leads,user_id uuid,scheduled_at timestamptz DEFAULT now(),
         status text DEFAULT 'pending',type text DEFAULT 'call',completed_at timestamptz,notes text);
-      CREATE TABLE lead_lists(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text,description text,source text,purpose text,list_type text,created_by uuid REFERENCES profiles,member_count integer DEFAULT 0);
+      CREATE TABLE lead_lists(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text,description text,source text,purpose text,list_type text,created_by uuid REFERENCES profiles,member_count integer DEFAULT 0,updated_at timestamptz DEFAULT now());
       CREATE TABLE lead_list_members(list_id uuid REFERENCES lead_lists,lead_id uuid REFERENCES leads,assigned_to uuid REFERENCES profiles,assigned_at timestamptz,work_status text DEFAULT 'pending',PRIMARY KEY(list_id,lead_id));
       CREATE TABLE whatsapp_scheduled_sends(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),lead_id uuid REFERENCES leads,status text DEFAULT 'pending',error text,sent_at timestamptz);
       CREATE TABLE ai_call_queue(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),lead_id uuid REFERENCES leads,status text DEFAULT 'pending',error_message text);
@@ -57,6 +57,16 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
       CREATE TABLE lead_assignment_history(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),lead_id uuid,assigned_to uuid,previous_counsellor_id uuid,assigned_by_profile_id uuid,assigned_by_user_id uuid,assignment_source text,bucket_name text,lead_stage_at_assignment text);
       CREATE TABLE lead_notes(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),lead_id uuid REFERENCES leads,content text);
       CREATE TABLE lead_activities(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),lead_id uuid,user_id uuid,type text,description text);
+      CREATE FUNCTION lead_lists_refresh_member_count_ins() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
+      CREATE FUNCTION lead_lists_refresh_member_count_del() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
+      CREATE TRIGGER test_list_count_insert AFTER INSERT ON lead_list_members REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION lead_lists_refresh_member_count_ins();
+      CREATE TRIGGER test_list_count_delete AFTER DELETE ON lead_list_members REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION lead_lists_refresh_member_count_del();
+      CREATE SCHEMA vault; CREATE TABLE vault.decrypted_secrets(name text,decrypted_secret text);
+      INSERT INTO vault.decrypted_secrets VALUES('SUPABASE_URL','https://example.test'),('CRON_SECRET','fixture');
+      CREATE SCHEMA net; CREATE TABLE net.request_queue(id bigint GENERATED ALWAYS AS IDENTITY,body jsonb);
+      CREATE FUNCTION net.http_post(url text,headers jsonb,body jsonb) RETURNS bigint LANGUAGE sql AS $$ INSERT INTO net.request_queue(body) VALUES(body) RETURNING id $$;
+      CREATE FUNCTION fn_automation_on_activity() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;
+      CREATE TRIGGER trg_automation_on_activity AFTER INSERT ON lead_activities FOR EACH ROW EXECUTE FUNCTION fn_automation_on_activity();
       CREATE TABLE marketing_contacts(phone text,email text,opted_out boolean);
       CREATE FUNCTION get_unassigned_leads_bucket() RETURNS SETOF public.leads LANGUAGE sql STABLE AS $$ SELECT * FROM public.leads WHERE counsellor_id IS NULL $$;
       CREATE FUNCTION cloud_dialer_campaign_queue() RETURNS SETOF public.leads LANGUAGE sql STABLE AS $$ SELECT * FROM public.leads $$;
@@ -80,6 +90,8 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
     await db.exec(readMigration("distinguish_default_lead_progress_from_started_applications"));
     await db.exec(readMigration("snapshot_only_actionable_cleanup_candidates"));
     await db.exec(readMigration("snapshot_only_actionable_cleanup_candidates"));
+    await db.exec(readMigration("bound_cleanup_batches_and_suppress_outreach"));
+    await db.exec(readMigration("bound_cleanup_batches_and_suppress_outreach"));
   }, 30000);
   afterAll(async () => { await db?.close(); });
 
@@ -182,7 +194,7 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
         expect(await rpc("has_function_privilege($1,$2,'EXECUTE')", [role,fn])).toBe(false);
       }
     }
-    for (const fn of ["preview_lead_cleanup", "prepare_lead_cleanup"]) {
+    for (const fn of ["preview_lead_cleanup", "prepare_lead_cleanup", "apply_lead_cleanup", "rollback_lead_cleanup"]) {
       expect((await db.query("SELECT proconfig FROM pg_proc WHERE proname=$1", [fn])).rows[0].proconfig).toContain("statement_timeout=55s");
     }
   });
@@ -402,6 +414,32 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
           expect(item.before_state).toEqual(await rpc("lead_cleanup_snapshot($1)", [item.lead_id]));
         }
       }
+    } finally { await db.exec("ROLLBACK"); }
+  });
+
+  it("caps apply/rollback batches at 25 and suppresses cleanup activity outreach", async () => {
+    await db.exec("BEGIN");
+    try {
+      for (let n = 300; n < 330; n++) await lead(n);
+      await db.query("INSERT INTO lead_activities(lead_id,type,description) VALUES($1,'note','Normal staff note')", [uid(300)]);
+      expect(await rpc("(SELECT count(*)::int FROM net.request_queue)")).toBe(1);
+      await db.query("INSERT INTO lead_lists(id,name,created_by) VALUES($1,'Normal list',$2)", [uid(900),uid(1)]);
+      await db.query("INSERT INTO lead_list_members(list_id,lead_id) VALUES($1,$2)", [uid(900),uid(300)]);
+      expect(await rpc("(SELECT member_count FROM lead_lists WHERE id=$1)", [uid(900)])).toBe(1);
+      const plan = await preview(); const run = await prepare(plan);
+      const pendingBefore = await rpc<number>("(SELECT count(*)::int FROM lead_cleanup_items WHERE run_id=$1 AND status='pending')", [run]);
+      await rpc("apply_lead_cleanup($1,500)", [run]);
+      const pendingAfter = await rpc<number>("(SELECT count(*)::int FROM lead_cleanup_items WHERE run_id=$1 AND status='pending')", [run]);
+      expect(pendingBefore-pendingAfter).toBe(25);
+      expect(await rpc("(SELECT count(*)::int FROM lead_lists l WHERE member_count IS DISTINCT FROM (SELECT count(*)::int FROM lead_list_members m WHERE m.list_id=l.id))")).toBe(0);
+      expect(await rpc("(SELECT count(*)::int FROM net.request_queue)")).toBe(1);
+      while ((await rpc<{ remaining: number }>("apply_lead_cleanup($1,500)", [run])).remaining > 0) { /* process saved candidates */ }
+      const appliedBefore = await rpc<number>("(SELECT count(*)::int FROM lead_cleanup_items WHERE run_id=$1 AND status='applied')", [run]);
+      await rpc("rollback_lead_cleanup($1,500)", [run]);
+      const appliedAfter = await rpc<number>("(SELECT count(*)::int FROM lead_cleanup_items WHERE run_id=$1 AND status='applied')", [run]);
+      expect(appliedBefore-appliedAfter).toBe(25);
+      expect(await rpc("(SELECT count(*)::int FROM lead_lists l WHERE member_count IS DISTINCT FROM (SELECT count(*)::int FROM lead_list_members m WHERE m.list_id=l.id))")).toBe(0);
+      expect(await rpc("(SELECT count(*)::int FROM net.request_queue)")).toBe(1);
     } finally { await db.exec("ROLLBACK"); }
   });
 
