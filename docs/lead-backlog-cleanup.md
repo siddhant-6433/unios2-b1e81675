@@ -31,7 +31,9 @@ The policy takes effect with the first applied batch; preview itself is read-onl
 
 1. Build and download the preview. Review protected/review records and assignments.
 2. Confirm the preview checkbox, then apply. A changed preview cannot be prepared.
-3. Each 100-record batch is atomic. Admission protection and complete lead/task/
+3. Preparation saves full history snapshots for mutable records and lead metadata
+   and complete preview fingerprints for protected/review-only records; excluded records are never applied or rolled back.
+   Each 100-record batch is atomic. Admission protection and complete lead/task/
    calling/assignment snapshots are checked again. Changed records are skipped.
 4. Closing the dialog or pressing Pause stops after the current batch. Reopen a
    recent run and Resume to process the existing approved snapshot.

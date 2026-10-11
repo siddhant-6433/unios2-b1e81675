@@ -78,6 +78,8 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
     await db.exec(readMigration("optimize_lead_cleanup_preview"));
     await db.exec(readMigration("distinguish_default_lead_progress_from_started_applications"));
     await db.exec(readMigration("distinguish_default_lead_progress_from_started_applications"));
+    await db.exec(readMigration("snapshot_only_actionable_cleanup_candidates"));
+    await db.exec(readMigration("snapshot_only_actionable_cleanup_candidates"));
   }, 30000);
   afterAll(async () => { await db?.close(); });
 
@@ -161,7 +163,7 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
       expect(await rpc("current_setting('test.snapshot_calls')")).toBe("0");
       expect((await db.query("SELECT count(*)::int n FROM lead_cleanup_items WHERE run_id=$1", [run])).rows[0].n).toBe(plan.items.length);
       expect((await db.query(`SELECT count(*)::int n FROM lead_cleanup_items i WHERE run_id=$1
-        AND i.before_state IS DISTINCT FROM test_original_snapshot(i.lead_id)`, [run])).rows[0].n).toBe(0);
+        AND i.action IN ('archive','retain','bucket') AND i.before_state IS DISTINCT FROM test_original_snapshot(i.lead_id)`, [run])).rows[0].n).toBe(0);
     } finally { await db.exec("ROLLBACK"); }
   });
 
@@ -370,6 +372,36 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
       await lead(177, { created_at: cutoff, counsellor_id: uid(4), application_id: uid(200) });
       expect((await db.query("SELECT counsellor_id FROM leads WHERE id=$1", [uid(177)])).rows[0]).toEqual({ counsellor_id: uid(4) });
       expect(await rpc("has_function_privilege('authenticated','lead_cleanup_has_application_progress(jsonb)','EXECUTE')")).toBe(false);
+    } finally { await db.exec("ROLLBACK"); }
+  });
+
+  it("snapshots only mutable histories and saves protected lead metadata without copying their history", async () => {
+    await db.exec("BEGIN");
+    try {
+      await db.exec(`ALTER FUNCTION lead_cleanup_snapshots(uuid[],uuid) RENAME TO test_bulk_snapshots;
+        CREATE FUNCTION lead_cleanup_snapshots(_lead_ids uuid[],_exclude_list uuid DEFAULT NULL)
+        RETURNS TABLE(lead_id uuid,snapshot jsonb) LANGUAGE plpgsql STABLE AS $$ BEGIN
+          PERFORM set_config('test.snapshot_ids',array_to_json(_lead_ids)::text,true);
+          RETURN QUERY SELECT * FROM test_bulk_snapshots(_lead_ids,_exclude_list); END $$;`);
+      await lead(180, { course_id: uid(40) });
+      await lead(181, { application_id: uid(200) });
+      const plan = await preview();
+      const mutable = plan.items.filter(i => ["archive", "retain", "bucket"].includes(i.action));
+      const run = await prepare(plan);
+      const snapshotted = JSON.parse(await rpc<string>("current_setting('test.snapshot_ids')"));
+      expect(snapshotted.sort()).toEqual(mutable.map(i => i.lead_id).sort());
+      const items = (await db.query<{ lead_id: string; action: string; status: string; before_state: Record<string, unknown> }>("SELECT * FROM lead_cleanup_items WHERE run_id=$1", [run])).rows;
+      expect(items).toHaveLength(plan.items.length);
+      for (const item of items) {
+        if (["protected", "review"].includes(item.action)) {
+          expect(item.status).toBe(item.action);
+          expect(Object.keys(item.before_state).sort()).toEqual(["lead", "preview_fingerprint"]);
+          expect(item.before_state.lead).toEqual(await rpc("(SELECT jsonb_build_object('id',id,'stage',stage,'counsellor_id',counsellor_id,'assigned_at',assigned_at,'archived_at',archived_at,'archive_reason',archive_reason,'cleanup_run_id',cleanup_run_id) FROM leads WHERE id=$1)", [item.lead_id]));
+          expect(item.before_state.preview_fingerprint).toBe(plan.items.find(i => i.lead_id === item.lead_id)?.fingerprint);
+        } else {
+          expect(item.before_state).toEqual(await rpc("lead_cleanup_snapshot($1)", [item.lead_id]));
+        }
+      }
     } finally { await db.exec("ROLLBACK"); }
   });
 
