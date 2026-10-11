@@ -35,7 +35,7 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
         stage text DEFAULT 'new_lead',counsellor_id uuid REFERENCES profiles,assigned_at timestamptz,first_contact_at timestamptz,application_id uuid,admission_no text,pre_admission_no text,
         legacy_admission_no text,legacy_pre_admission_no text,admitted_at timestamptz,applied_at timestamptz,person_role text DEFAULT 'lead',
         token_amount numeric,jd_category text,course_id uuid REFERENCES courses,campus_id uuid,portal_brand text,lead_institution_type text DEFAULT 'college',is_mirror boolean DEFAULT false,
-        mirror_lead_id uuid,source_lead_id uuid,application_progress jsonb,shared_with_nimt boolean DEFAULT true,notes text);
+        mirror_lead_id uuid,source_lead_id uuid,application_progress jsonb DEFAULT '{"personal_details":false,"education_details":false,"application_fee_paid":false,"documents_uploaded":false}'::jsonb,shared_with_nimt boolean DEFAULT true,notes text);
       CREATE FUNCTION fn_lead_assignment_tracker() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
         IF OLD.counsellor_id IS DISTINCT FROM NEW.counsellor_id AND NEW.counsellor_id IS NOT NULL THEN NEW.assigned_at:=now(); NEW.first_contact_at:=NULL; END IF;
         IF NEW.counsellor_id IS NULL AND OLD.counsellor_id IS NOT NULL THEN NEW.assigned_at:=NULL; END IF;
@@ -76,6 +76,8 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
     await db.exec("CREATE OR REPLACE FUNCTION public.lead_cleanup_classify_legacy" + legacy);
     await db.exec(readMigration("optimize_lead_cleanup_preview"));
     await db.exec(readMigration("optimize_lead_cleanup_preview"));
+    await db.exec(readMigration("distinguish_default_lead_progress_from_started_applications"));
+    await db.exec(readMigration("distinguish_default_lead_progress_from_started_applications"));
   }, 30000);
   afterAll(async () => { await db?.close(); });
 
@@ -340,6 +342,34 @@ describe("reversible lead backlog cleanup (real PostgreSQL functions)", () => {
       expect(p.items.find(i => i.lead_id === uid(161))?.action).toBe("protected");
       expect(p.items.find(i => i.lead_id === uid(162))?.reason).toBe("active_call");
       expect(p.items.find(i => i.lead_id === uid(163))?.reason).toBe("payment");
+    } finally { await db.exec("ROLLBACK"); }
+  });
+
+  it("classifies production default progress as untouched while preserving real admission protection", async () => {
+    await db.exec("BEGIN");
+    try {
+      await lead(170, { course_id: uid(40) });
+      await lead(171, { course_id: uid(40) });
+      await db.query("INSERT INTO applications(lead_id) VALUES($1)", [uid(171)]);
+      await lead(172, { course_id: uid(40), application_progress: { personal_details: true, education_details: false, application_fee_paid: false, documents_uploaded: false } });
+      await lead(173, { application_progress: { unknown_step: false } });
+      await lead(174, { stage: "application_in_progress" });
+      await lead(175);
+      await db.query("INSERT INTO lead_payments(lead_id,amount) VALUES($1,1)", [uid(175)]);
+      const plan = await preview();
+      expect(plan.items.find(i => i.lead_id === uid(170))?.destination).toBe(uid(1));
+      for (const n of [171, 172, 173, 174, 175]) {
+        expect(plan.items.find(i => i.lead_id === uid(n))?.action).toBe("protected");
+      }
+      expect((await db.query(`SELECT p.lead_id FROM lead_cleanup_protections(ARRAY(SELECT id FROM leads)) p
+        WHERE p.reason IS DISTINCT FROM lead_cleanup_protection(p.lead_id)`)).rows).toHaveLength(0);
+      const run = await prepare(plan);
+      await db.query("INSERT INTO lead_cleanup_policy(singleton,cutoff,run_id) VALUES(true,$1,$2) ON CONFLICT(singleton) DO UPDATE SET cutoff=excluded.cutoff,run_id=excluded.run_id", [cutoff,run]);
+      await lead(176, { created_at: cutoff, counsellor_id: uid(4) });
+      expect((await db.query("SELECT counsellor_id FROM leads WHERE id=$1", [uid(176)])).rows[0]).toEqual({ counsellor_id: null });
+      await lead(177, { created_at: cutoff, counsellor_id: uid(4), application_id: uid(200) });
+      expect((await db.query("SELECT counsellor_id FROM leads WHERE id=$1", [uid(177)])).rows[0]).toEqual({ counsellor_id: uid(4) });
+      expect(await rpc("has_function_privilege('authenticated','lead_cleanup_has_application_progress(jsonb)','EXECUTE')")).toBe(false);
     } finally { await db.exec("ROLLBACK"); }
   });
 
