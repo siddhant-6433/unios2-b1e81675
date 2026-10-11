@@ -8,7 +8,9 @@ preview. Cleanup never deletes leads or sends messages.
 
 One cutoff is frozen at the first preview. Refreshing retains that cutoff.
 Application links (including drafts), students, admission identifiers/stages,
-non-lead person roles, payment records and payment links are protected. Normalized
+non-lead person roles, payment records and payment links are protected. The known
+application-progress default with all four flags false is an untouched prospect;
+any completed flag or unknown progress shape remains protected. Normalized
 applicant/student/parent-phone matches, mirror relationships, private partner
 leads, active calls and ambiguous classifications are left for review.
 
