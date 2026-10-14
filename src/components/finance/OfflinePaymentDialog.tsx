@@ -73,6 +73,35 @@ const BANK_OPTIONS = [
   "IndusInd Bank", "IDFC First Bank", "Other",
 ];
 
+type DuplicatePaymentDetails = {
+  receipt_no?: string | null;
+  candidate_name?: string | null;
+  admission_no?: string | null;
+  course_name?: string | null;
+} | null;
+
+async function lookupDuplicatePayment(reference: string): Promise<DuplicatePaymentDetails> {
+  const { data, error } = await (supabase.rpc as any)("lookup_confirmed_payment_reference", {
+    _reference: reference,
+  });
+  if (error || !data) return null;
+  return (Array.isArray(data) ? data[0] : data) || null;
+}
+
+function duplicatePaymentDescription(reference: string, details: DuplicatePaymentDetails): string {
+  const fields = [
+    details?.receipt_no && `Receipt: ${details.receipt_no}`,
+    details?.candidate_name && `Candidate: ${details.candidate_name}`,
+    details?.admission_no && `Admission No./PAN: ${details.admission_no}`,
+    details?.course_name && `Course: ${details.course_name}`,
+  ].filter(Boolean);
+
+  return [
+    `Reference ${reference} is already attached to a confirmed payment${fields.length ? ` (${fields.join(" · ")})` : ""}.`,
+    "Ask a finance admin to review it before recording this payment again.",
+  ].join(" ");
+}
+
 type ChargeHead = { id: string; fee_code_id: string; code: string; name: string; amount: number };
 
 interface Props {
@@ -349,9 +378,10 @@ export function OfflinePaymentDialog({
           .limit(1)
           .maybeSingle();
         if (exact?.id) {
+          const details = await lookupDuplicatePayment(ref) || { receipt_no: exact.receipt_no };
           toast({
-            title: "This transaction is already receipted",
-            description: `Reference ${ref} is already recorded${exact.receipt_no ? ` on receipt ${exact.receipt_no}` : ""}. Recording it again would issue a second receipt for the same money.`,
+            title: "Payment reference already recorded",
+            description: duplicatePaymentDescription(ref, details),
             variant: "destructive",
           });
           return;
@@ -435,6 +465,15 @@ export function OfflinePaymentDialog({
     setSubmitting(false);
 
     if (error) {
+      if (error.message.includes("lead_payments_confirmed_gateway_ref_uidx")) {
+        const details = await lookupDuplicatePayment(txnRef.trim());
+        toast({
+          title: "Payment reference already recorded",
+          description: duplicatePaymentDescription(txnRef.trim(), details),
+          variant: "destructive",
+        });
+        return;
+      }
       toast({ title: "Could not record payment", description: error.message, variant: "destructive" });
       return;
     }
