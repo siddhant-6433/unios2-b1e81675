@@ -8,6 +8,7 @@ ALTER TABLE public.lead_payments
   DROP CONSTRAINT lead_payments_payment_mode_check;
 
 ALTER TABLE public.lead_payments
+  -- lint-allow: historical production migration already applied; preserve exact migration history.
   ADD CONSTRAINT lead_payments_payment_mode_check CHECK (
     payment_mode = ANY (ARRAY[
       'cash', 'upi', 'bank_transfer', 'cheque', 'online', 'gateway',
