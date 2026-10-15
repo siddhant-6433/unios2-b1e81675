@@ -15,12 +15,17 @@ import { useNavigate } from "react-router-dom";
 import { matchesCampus } from "@/lib/campusFilter";
 import { formatCompactINR } from "@/lib/formatCompactINR";
 import { getLeadRefundActionRows } from "@/lib/leadRefundActions";
-import { applyReceiptQueryFilters } from "@/lib/financeReceiptSearch";
+import { applyReceiptQueryFilters, type ReceiptCursor } from "@/lib/financeReceiptSearch";
+import { RepairReceiptLinkDialog } from "@/components/finance/RepairReceiptLinkDialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   indiaDayEndExclusiveIso,
   indiaDayStartIso,
   indiaTodayDate,
 } from "@/lib/indiaDateTime";
+import { useSearchParams } from "react-router-dom";
+
+const PAGE_SIZE = 100;
 
 const modeBadge: Record<string, string> = {
   online: "bg-pastel-blue", gateway: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
@@ -50,15 +55,21 @@ const FeeCollections = ({
   toDate?: string;
 }) => {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
+  const [searchParams] = useSearchParams();
+  const receiptRef = searchParams.get("receipt_ref")?.trim() || "";
+  const [search, setSearch] = useState(() => receiptRef);
   const [dateFilter, setDateFilter] = useState(indiaTodayDate());
   const [modeFilter, setModeFilter] = useState("all");
   const [payments, setPayments] = useState<any[]>([]);
   const [consultantManagedIds, setConsultantManagedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasOlderPage, setHasOlderPage] = useState(false);
+  const [paging, setPaging] = useState<{ filterKey: string; cursors: (ReceiptCursor | null)[] } | null>(null);
   const fetchRequestId = useRef(0);
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [refundLead, setRefundLead] = useState<RefundLead | null>(null);
+  const [repairPayment, setRepairPayment] = useState<any | null>(null);
   const { selectedCampusId } = useCampus();
   const { can } = usePermissions();
   const canCreateFinance = can("finance", "create");
@@ -68,29 +79,51 @@ const FeeCollections = ({
   // own day picker.
   const rangeFrom = embedded ? (fromDate || "") : dateFilter;
   const rangeTo = embedded ? (toDate || "") : dateFilter;
+  const exactReference = receiptRef && search.trim() === receiptRef ? receiptRef : "";
+  const filterKey = JSON.stringify([rangeFrom, rangeTo, search, exactReference, modeFilter, selectedCampusId]);
+  const currentCursors = paging?.filterKey === filterKey ? paging.cursors : [null];
+  const currentCursor = currentCursors[currentCursors.length - 1];
+  const canGoNewer = currentCursors.length > 1;
+
+  useEffect(() => {
+    if (receiptRef) setSearch(receiptRef);
+  }, [receiptRef]);
 
   const fetchPayments = useCallback(async () => {
     const requestId = ++fetchRequestId.current;
     setLoading(true);
+    setLoadError(null);
+    try {
     // IST half-open bounds — same window finance_summary uses, not a naive
     // UTC midnight-to-midnight string that shifted evening IST receipts
     // onto a different calendar day than the header card.
     let query = supabase
       .from("v_all_payments" as any)
       .select("*")
-      .order("paid_at", { ascending: false });
+      .order("paid_at", { ascending: false, nullsFirst: false })
+      .order("id", { ascending: false })
+      .order("source", { ascending: false });
     if (rangeFrom) query = query.gte("paid_at", indiaDayStartIso(rangeFrom)!);
     if (rangeTo) query = query.lt("paid_at", indiaDayEndExclusiveIso(rangeTo)!);
-    query = applyReceiptQueryFilters(query, search, selectedCampusId, modeFilter);
-    query = query.limit(500);
+    query = applyReceiptQueryFilters(query, search, selectedCampusId, modeFilter, currentCursor, exactReference);
+    query = query.limit(PAGE_SIZE + 1);
 
     // v_all_payments unifies pre-AN lead_payments + post-AN payments; render
     // code expects {students,profiles} sub-objects so we reshape after fetch.
-    const { data } = await query;
+    const { data, error } = await query;
     if (requestId !== fetchRequestId.current) return;
+    if (error) {
+      setPayments([]);
+      setHasOlderPage(false);
+      setLoadError(error.message || "Please try again.");
+      return;
+    }
 
     if (data) {
-      const raw = data as any[];
+      const rows = data as any[];
+      const hasMore = rows.length > PAGE_SIZE;
+      const raw = rows.slice(0, PAGE_SIZE);
+      setHasOlderPage(hasMore);
       const recorderIds = [...new Set(raw.map((p) => p.recorded_by).filter(Boolean))];
       const profMap: Record<string, string> = {};
       if (recorderIds.length > 0) {
@@ -120,9 +153,20 @@ const FeeCollections = ({
       } else {
         setConsultantManagedIds(new Set());
       }
+    } else {
+      setPayments([]);
+      setHasOlderPage(false);
     }
-    setLoading(false);
-  }, [rangeFrom, rangeTo, search, modeFilter, selectedCampusId]);
+    } catch (caught) {
+      if (requestId !== fetchRequestId.current) return;
+      setPayments([]);
+      setHasOlderPage(false);
+      setConsultantManagedIds(new Set());
+      setLoadError(caught instanceof Error ? caught.message : "Could not load receipts. Please retry.");
+    } finally {
+      if (requestId === fetchRequestId.current) setLoading(false);
+    }
+  }, [rangeFrom, rangeTo, search, exactReference, modeFilter, selectedCampusId, currentCursor]);
 
   useEffect(() => {
     fetchPayments();
@@ -141,7 +185,9 @@ const FeeCollections = ({
       result = result.filter((p: any) =>
         (p.students?.name || "").toLowerCase().includes(q) ||
         (p.students?.admission_no || "").toLowerCase().includes(q) ||
-        (p.receipt_no || "").toLowerCase().includes(q)
+        (p.receipt_no || "").toLowerCase().includes(q) ||
+        (p.transaction_ref || "").toLowerCase().includes(q) ||
+        (p.bank_ref_num || "").toLowerCase().includes(q)
       );
     }
     return result;
@@ -169,6 +215,12 @@ const FeeCollections = ({
   return (
     <>
       <ReceiptDialog data={receipt} onClose={() => setReceipt(null)} />
+      <RepairReceiptLinkDialog
+        payment={repairPayment}
+        open={!!repairPayment}
+        onOpenChange={(open) => { if (!open) setRepairPayment(null); }}
+        onDone={() => { setRepairPayment(null); fetchPayments(); }}
+      />
       {refundLead && (
         <RefundDialog
           leadId={refundLead.id || undefined}
@@ -203,9 +255,9 @@ const FeeCollections = ({
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pastel-green mb-4">
                 <IndianRupee className="h-5 w-5 text-foreground/70" />
               </div>
-              <p className="text-xs font-medium text-muted-foreground">{collectionsLabel}</p>
+              <p className="text-xs font-medium text-muted-foreground">{collectionsLabel} · current page</p>
               <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">{formatCompactINR(todayTotal)}</p>
-              <p className="text-xs font-medium mt-1 text-primary">{collectedRows.length} transactions</p>
+              <p className="text-xs font-medium mt-1 text-primary">{collectedRows.length} transactions on this page</p>
             </CardContent>
           </Card>
           <Card className="border-border/60 shadow-none hover:elevation-mid hover:-translate-y-1 transition-all duration-280 ease-standard">
@@ -233,7 +285,7 @@ const FeeCollections = ({
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
-              type="text" placeholder="Search student, admission no, receipt..."
+              type="text" placeholder="Search student, admission no, receipt or reference..."
               value={search} onChange={(e) => setSearch(e.target.value)}
               className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
             />
@@ -242,7 +294,7 @@ const FeeCollections = ({
             {!embedded && (
               <div className="relative">
                 <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                <FieldShell hideLabel>
+                <FieldShell>
                   <Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="pl-10" />
                 </FieldShell>
               </div>
@@ -258,14 +310,22 @@ const FeeCollections = ({
                 { value: "cheque", label: "Cheque" },
                 { value: "bank_transfer", label: "Bank Transfer" },
               ]}
-              hideLabel
               placeholder="All Modes"
             />
           </div>
         </div>
 
         {/* Table */}
-        {loading ? (
+        {loadError ? (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Could not load receipts</AlertTitle>
+            <AlertDescription className="mt-2 flex flex-col items-start gap-3">
+              <span>{loadError}</span>
+              <Button variant="outline" onClick={fetchPayments}>Retry receipts</Button>
+            </AlertDescription>
+          </Alert>
+        ) : loading ? (
           <div className="flex h-48 items-center justify-center">
             <OrbLoader state="searching" />
           </div>
@@ -289,7 +349,11 @@ const FeeCollections = ({
                   {filtered.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
-                        {isToday
+                        {exactReference
+                          ? "No visible confirmed receipt matches this reference. Check it or ask an administrator to verify access."
+                          : search.trim()
+                            ? "No receipts match this search."
+                            : isToday
                           ? "No collections recorded today yet"
                           : isSingleDay
                             ? "No collections on this date"
@@ -320,7 +384,7 @@ const FeeCollections = ({
                       <td className="px-4 py-3 text-xs text-muted-foreground">{gatewayLabel(p.gateway)}</td>
                       <td className="px-4 py-3 font-mono text-xs text-primary font-semibold">{p.receipt_no || "—"}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
-                        {new Date(p.paid_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
+                        {p.paid_at ? new Date(p.paid_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }) : "—"}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col items-start gap-1">
@@ -352,6 +416,16 @@ const FeeCollections = ({
                             <Undo2 className="h-3 w-3" /> Refund lead
                           </Button>
                         )}
+                        {canCreateFinance && p.source === "lead" && p.lead_id && (!p.student_id || !!exactReference) && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 gap-1 px-2 text-[11px]"
+                            onClick={() => setRepairPayment(p)}
+                          >
+                            {p.student_id ? "Change student link" : "Review student link"}
+                          </Button>
+                        )}
                         </div>
                       </td>
                     </tr>
@@ -360,6 +434,38 @@ const FeeCollections = ({
               </table>
             </CardContent>
           </Card>
+        )}
+        {!loadError && !loading && (
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">
+              Page {currentCursors.length}{hasOlderPage ? " · more receipts available" : " · end of results"}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canGoNewer || loading}
+                onClick={() => setPaging((current) => {
+                  if (current?.filterKey !== filterKey || current.cursors.length <= 1) return current;
+                  return { ...current, cursors: current.cursors.slice(0, -1) };
+                })}
+              >Newer</Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!hasOlderPage || loading || payments.length === 0}
+                onClick={() => {
+                  const last = payments[payments.length - 1];
+                  if (!last) return;
+                  const nextCursor: ReceiptCursor = { paidAt: last.paid_at || null, id: last.id, source: last.source };
+                  setPaging((current) => ({
+                    filterKey,
+                    cursors: [...(current?.filterKey === filterKey ? current.cursors : [null]), nextCursor],
+                  }));
+                }}
+              >Older</Button>
+            </div>
+          </div>
         )}
       </div>
     </>

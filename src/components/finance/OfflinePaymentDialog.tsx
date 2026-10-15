@@ -5,12 +5,14 @@
 // (PAN/AN issuance), and fire notify-event to send WA + finance@ email +
 // receipt PDF.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { combineIndiaDateTimeInput, getCurrentIndiaDateTimeInput } from "@/lib/indiaDateTime";
 import { useCashReceiptGate } from "@/hooks/useCashReceiptGate";
+import { buildReceiptExactReferenceFilter, buildReceiptReviewPath } from "@/lib/financeReceiptSearch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ButtonOrb } from "@/components/ui/thinking-orb";
 import { Button } from "@/components/ui/button";
@@ -18,12 +20,13 @@ import { Input } from "@/components/ui/input";
 import { TextField, SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { FeeHeadAllocationField, type FeeAllocation } from "./FeeHeadAllocationField";
 import { Year1LumpSumInfoBanner } from "./Year1LumpSumBanner";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   allocationsCoverYear1Tuition,
   scaleYear1AllocationsForLumpSum,
   type Year1LumpSumOffer,
 } from "@/lib/year1LumpSumWaiver";
-import { IndianRupee, Upload, X as XIcon, FileText } from "lucide-react";
+import { IndianRupee, Upload, X as XIcon, FileText, AlertTriangle } from "lucide-react";
 
 const PAY_TYPES: { value: string; label: string }[] = [
   { value: "application_fee",     label: "Application Fee" },
@@ -80,12 +83,34 @@ type DuplicatePaymentDetails = {
   course_name?: string | null;
 } | null;
 
+type ConfirmedReferenceQuery = {
+  select(columns: string): ConfirmedReferenceQuery;
+  eq(column: string, value: string): ConfirmedReferenceQuery;
+  or(filter: string): ConfirmedReferenceQuery;
+  limit(count: number): ConfirmedReferenceQuery;
+  maybeSingle(): Promise<{
+    data: {
+      id?: string;
+      receipt_no?: string | null;
+      amount?: number;
+      person_name?: string | null;
+      admission_no?: string | null;
+      source?: string;
+    } | null;
+    error: { message?: string } | null;
+  }>;
+};
+
 async function lookupDuplicatePayment(reference: string): Promise<DuplicatePaymentDetails> {
-  const { data, error } = await (supabase.rpc as any)("lookup_confirmed_payment_reference", {
-    _reference: reference,
-  });
-  if (error || !data) return null;
-  return (Array.isArray(data) ? data[0] : data) || null;
+  try {
+    const { data, error } = await (supabase.rpc as any)("lookup_confirmed_payment_reference", {
+      _reference: reference,
+    });
+    if (error || !data) return null;
+    return (Array.isArray(data) ? data[0] : data) || null;
+  } catch {
+    return null;
+  }
 }
 
 function duplicatePaymentDescription(reference: string, details: DuplicatePaymentDetails): string {
@@ -138,6 +163,7 @@ export function OfflinePaymentDialog({
 }: Props) {
   const { profile, role } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   // Lead-less student receipt: no lead, book against the student directly.
   const isStudent = !leadId && !!studentId;
@@ -154,6 +180,10 @@ export function OfflinePaymentDialog({
   const [remarks,setRemarks]= useState<string>("");
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [checkingReference, setCheckingReference] = useState(false);
+  const referenceCheckRequest = useRef(0);
+  const [referenceCheckError, setReferenceCheckError] = useState<string | null>(null);
+  const [duplicatePayment, setDuplicatePayment] = useState<{ reference: string; details: DuplicatePaymentDetails } | null>(null);
   const [applyYear1LumpSum, setApplyYear1LumpSum] = useState(false);
 
   // Ad-hoc charge heads a super_admin has enabled for this person. Only offered
@@ -235,6 +265,13 @@ export function OfflinePaymentDialog({
   // Day-closer / 9AM–6PM cash window gate (super_admin is always exempt server-side).
   const { blocked: cashBlocked, reason: cashReason } = useCashReceiptGate(open, leadId, mode, studentId);
 
+  useEffect(() => {
+    if (!open) {
+      referenceCheckRequest.current += 1;
+      setCheckingReference(false);
+    }
+  }, [open]);
+
   // Owner decision: offline cash recording is cashier (accountant) + super_admin
   // only — no counsellors, no campus admins, no consultants. office_admin has
   // full accountant-level access (see has_role inheritance).
@@ -249,6 +286,7 @@ export function OfflinePaymentDialog({
     : MODE_OPTIONS;
 
   const reset = () => {
+    referenceCheckRequest.current += 1;
     const now = getCurrentIndiaDateTimeInput();
     setType(defaultType || (isStudent ? "other" : "application_fee"));
     setAmount(defaultAmount ? String(defaultAmount) : "");
@@ -257,6 +295,9 @@ export function OfflinePaymentDialog({
     setTime(now.time);
     setMode("cash");
     setTxnRef("");
+    setCheckingReference(false);
+    setReferenceCheckError(null);
+    setDuplicatePayment(null);
     setBank("");
     setWallet("");
     setRemarks("");
@@ -266,6 +307,62 @@ export function OfflinePaymentDialog({
     setCreditNotes([]);
     setAllocations([]);
     setApplyYear1LumpSum(false);
+  };
+
+  const verifyDuplicateReference = async (reference: string): Promise<"clear" | "duplicate" | "error"> => {
+    const ref = reference.trim();
+    if (!ref) return "clear";
+    const request = ++referenceCheckRequest.current;
+    setCheckingReference(true);
+    setReferenceCheckError(null);
+    try {
+      const referenceFilter = buildReceiptExactReferenceFilter(ref);
+      const result = await (supabase.from("v_all_payments" as never) as unknown as ConfirmedReferenceQuery)
+        .select("id, receipt_no, amount, person_name, admission_no, source")
+        .eq("status", "confirmed")
+        .or(referenceFilter || "")
+        .limit(1)
+        .maybeSingle();
+      if (request !== referenceCheckRequest.current) return "error";
+      if (result.error) {
+        setReferenceCheckError(result.error.message || "Please retry the reference check.");
+        return "error";
+      }
+      const exact = result.data as {
+        id?: string;
+        receipt_no?: string | null;
+        person_name?: string | null;
+        admission_no?: string | null;
+      } | null;
+      if (exact?.id) {
+        setDuplicatePayment({
+          reference: ref,
+          details: {
+            receipt_no: exact.receipt_no,
+            candidate_name: exact.person_name,
+            admission_no: exact.admission_no,
+          },
+        });
+        void lookupDuplicatePayment(ref).then((details) => {
+          if (request === referenceCheckRequest.current && txnRef.trim() === ref) {
+            setDuplicatePayment({ reference: ref, details: details || {
+              receipt_no: exact.receipt_no,
+              candidate_name: exact.person_name,
+              admission_no: exact.admission_no,
+            } });
+          }
+        });
+        return "duplicate";
+      }
+      setDuplicatePayment(null);
+      return "clear";
+    } catch (caught) {
+      if (request !== referenceCheckRequest.current) return "error";
+      setReferenceCheckError(caught instanceof Error ? caught.message : "Please retry the reference check.");
+      return "error";
+    } finally {
+      if (request === referenceCheckRequest.current) setCheckingReference(false);
+    }
   };
 
   const breakupTotal = Math.round(allocations.reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100;
@@ -369,25 +466,9 @@ export function OfflinePaymentDialog({
     // both credit the ledger. Catch it here, where a human can still tell the
     // difference.
     const ref = txnRef.trim();
-    if (leadId) {
-      if (ref) {
-        const { data: exact } = await (supabase.from("lead_payments") as any)
-          .select("id, receipt_no, amount")
-          .eq("status", "confirmed")
-          .or(`transaction_ref.eq.${ref},bank_ref_num.eq.${ref}`)
-          .limit(1)
-          .maybeSingle();
-        if (exact?.id) {
-          const details = await lookupDuplicatePayment(ref) || { receipt_no: exact.receipt_no };
-          toast({
-            title: "Payment reference already recorded",
-            description: duplicatePaymentDescription(ref, details),
-            variant: "destructive",
-          });
-          return;
-        }
-      }
+    if (ref && await verifyDuplicateReference(ref) !== "clear") return;
 
+    if (leadId) {
       const { data: pendingGw } = await (supabase.from("lead_payments") as any)
         .select("id, amount, gateway, created_at")
         .eq("lead_id", leadId)
@@ -465,13 +546,12 @@ export function OfflinePaymentDialog({
     setSubmitting(false);
 
     if (error) {
-      if (error.message.includes("lead_payments_confirmed_gateway_ref_uidx")) {
+      if (error.code === "23505" && (
+        error.message.includes("lead_payments_confirmed_gateway_ref_uidx") ||
+        error.message.includes("lead_payments_confirmed_bank_ref_uidx")
+      )) {
         const details = await lookupDuplicatePayment(txnRef.trim());
-        toast({
-          title: "Payment reference already recorded",
-          description: duplicatePaymentDescription(txnRef.trim(), details),
-          variant: "destructive",
-        });
+        setDuplicatePayment({ reference: txnRef.trim(), details });
         return;
       }
       toast({ title: "Could not record payment", description: error.message, variant: "destructive" });
@@ -517,7 +597,11 @@ export function OfflinePaymentDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
+    <Dialog open={open} onOpenChange={(v) => {
+      if (!v && checkingReference) return;
+      if (!v) reset();
+      onOpenChange(v);
+    }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -527,6 +611,45 @@ export function OfflinePaymentDialog({
         </DialogHeader>
 
         <div className="min-w-0 space-y-3 py-2">
+          {duplicatePayment && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>Payment reference already recorded</AlertTitle>
+              <AlertDescription className="mt-2 space-y-3">
+                <p>{duplicatePaymentDescription(duplicatePayment.reference, duplicatePayment.details)}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    onOpenChange(false);
+                    navigate(buildReceiptReviewPath(duplicatePayment.reference));
+                  }}
+                >
+                  Review existing receipt
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+          {referenceCheckError && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>Could not verify payment reference</AlertTitle>
+              <AlertDescription className="mt-2 space-y-3">
+                <p>{referenceCheckError}. No payment was recorded. Retry the check before continuing.</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={checkingReference || !txnRef.trim()}
+                  onClick={() => void verifyDuplicateReference(txnRef)}
+                >
+                  {checkingReference ? "Checking reference…" : "Retry reference check"}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+          {checkingReference && (
+            <p role="status" className="text-xs text-muted-foreground">Checking for an existing confirmed payment…</p>
+          )}
           {year1LumpSum?.eligible && <Year1LumpSumInfoBanner offer={year1LumpSum} />}
           {year1Covered && year1LumpSum && (
             <label className="flex items-start gap-2 rounded-lg border border-success/30 bg-success/5 px-3 py-2 text-sm">
@@ -606,7 +729,8 @@ export function OfflinePaymentDialog({
 
           <SelectField
             value={mode}
-            onValueChange={value => { setMode(value); setTxnRef(""); setBank(""); setWallet(""); }}
+            disabled={checkingReference}
+            onValueChange={value => { setMode(value); setTxnRef(""); setReferenceCheckError(null); setDuplicatePayment(null); setBank(""); setWallet(""); }}
             options={modeOptions.map(m => ({ value: m.value, label: m.label }))}
             label="Payment Mode"
             allowEmpty={false}
@@ -651,7 +775,8 @@ export function OfflinePaymentDialog({
             <div className="grid grid-cols-2 gap-3">
               <TextField
                 value={txnRef}
-                onValueChange={setTxnRef}
+                onValueChange={(value) => { setTxnRef(value); setReferenceCheckError(null); setDuplicatePayment(null); }}
+                disabled={checkingReference}
                 label="Cheque / DD Number"
                 placeholder="e.g. 123456"
               />
@@ -669,7 +794,8 @@ export function OfflinePaymentDialog({
             <div className="grid grid-cols-2 gap-3">
               <TextField
                 value={txnRef}
-                onValueChange={setTxnRef}
+                onValueChange={(value) => { setTxnRef(value); setReferenceCheckError(null); setDuplicatePayment(null); }}
+                disabled={checkingReference}
                 label="UTR / Reference Number"
                 placeholder="e.g. NEFT123456"
               />
@@ -687,7 +813,8 @@ export function OfflinePaymentDialog({
             <div className="grid grid-cols-2 gap-3">
               <TextField
                 value={txnRef}
-                onValueChange={setTxnRef}
+                onValueChange={(value) => { setTxnRef(value); setReferenceCheckError(null); setDuplicatePayment(null); }}
+                disabled={checkingReference}
                 label="UPI / Txn Reference"
                 placeholder="UPI ref / txn id"
               />
@@ -704,7 +831,8 @@ export function OfflinePaymentDialog({
           {mode === "online" && (
             <TextField
               value={txnRef}
-              onValueChange={setTxnRef}
+              onValueChange={(value) => { setTxnRef(value); setReferenceCheckError(null); setDuplicatePayment(null); }}
+              disabled={checkingReference}
               label="Reference / Receipt Number"
               placeholder="External ref no"
             />
@@ -795,8 +923,8 @@ export function OfflinePaymentDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={submitting || cashBlocked}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting || checkingReference}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={submitting || cashBlocked || checkingReference || !!duplicatePayment || !!referenceCheckError}>
             {submitting ? <ButtonOrb state="connecting" onFilled /> : null}
             {submitting ? "Recording…" : "Mark as Paid"}
           </Button>

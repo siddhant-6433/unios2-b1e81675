@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "0.8.0.0",
+  "version": "0.9.0.0",
   "type": "module",
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
@@ -14,6 +14,7 @@
     "db:migrations:check": "node scripts/check-supabase-migration-health.mjs --mode=validate",
     "db:migrations:apply": "node scripts/check-supabase-migration-health.mjs --mode=apply",
     "db:migrations:clean": "node scripts/check-supabase-migration-health.mjs --mode=clean",
+    "test:e2e": "playwright test",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

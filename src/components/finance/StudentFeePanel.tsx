@@ -36,6 +36,7 @@ import { formatPersonName } from "@/lib/personName";
 import { buildYear1LumpSumOffer } from "@/lib/year1LumpSumWaiver";
 import { Year1LumpSumInfoBanner } from "./Year1LumpSumBanner";
 import { AssignBeaconTransportDialog } from "./AssignBeaconTransportDialog";
+import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 
 interface StudentFeePanelProps {
   student: any;
@@ -102,6 +103,7 @@ function StudentFeePanelForStudent({ student, onRefresh }: StudentFeePanelProps)
   const [credit, setCredit] = useState<{ application_fee_paid: number; general_credit: number } | null>(null);
   const [refundOpen, setRefundOpen] = useState(false);
   const [refunds, setRefunds] = useState<any[]>([]);
+  const [receiptPreview, setReceiptPreview] = useState<ReceiptData | null>(null);
 
   const isSuperAdmin = role === "super_admin";
   const isFinanceRole = ["super_admin", "campus_admin", "principal", "vice_principal", "accountant", "office_admin"].includes(role || "");
@@ -221,18 +223,36 @@ function StudentFeePanelForStudent({ student, onRefresh }: StudentFeePanelProps)
     setPaymentsLoading(true);
     setPaymentsError(null);
     setPayments([]);
-    // Lead-based receipts key on lead_id; a lead-less (school) student's
-    // receipts key on student_id — both live in lead_payments.
+    // Confirmed receipts use the same caller-RLS-scoped view as Finance.
+    // Legacy rows may still have only lead_id, so include those when they do
+    // not already point at a different student. Attempts remain in the base
+    // table because the shared view intentionally contains confirmed rows only.
     try {
-      const q = supabase
-        .from("lead_payments")
-        .select("id, type, amount, payment_mode, transaction_ref, receipt_no, receipt_url, receipt_course_id, status, payment_date, created_at, concession_amount, lead_id, student_id, notes")
-        .order("created_at", { ascending: false });
-      const { data, error } = student.lead_id
-        ? await q.eq("lead_id", student.lead_id)
-        : await q.eq("student_id", student.id);
-      if (error) throw error;
-      if (request === paymentRequest.current) setPayments(data ?? []);
+      const linkFilter = student.lead_id
+        ? `student_id.eq.${student.id},and(lead_id.eq.${student.lead_id},student_id.is.null)`
+        : `student_id.eq.${student.id}`;
+      const [receipts, attempts] = await Promise.all([
+        (supabase.from("v_all_payments" as any) as any)
+          .select("id, source, type, fee_type, amount, payment_mode, transaction_ref, bank_ref_num, receipt_no, receipt_url, receipt_course_id, status, payment_date, paid_at, created_at, lead_id, student_id, notes, person_name, admission_no, campus_id, gateway, fee_head")
+          .eq("status", "confirmed")
+          .or(linkFilter)
+          .order("paid_at", { ascending: false, nullsFirst: false }),
+        (supabase.from("lead_payments") as any)
+          .select("id, type, amount, payment_mode, transaction_ref, receipt_no, status, payment_date, created_at, concession_amount, lead_id, student_id, notes")
+          .neq("status", "confirmed")
+          .or(linkFilter)
+          .order("created_at", { ascending: false }),
+      ]);
+      if (receipts.error) throw receipts.error;
+      if (attempts.error) throw attempts.error;
+      const normalizedReceipts = (receipts.data || []).map((p: any) => ({
+        ...p,
+        type: p.type || p.fee_type,
+        payment_date: p.payment_date || p.paid_at,
+      }));
+      const allPayments = [...normalizedReceipts, ...(attempts.data || [])]
+        .sort((a: any, b: any) => new Date(b.payment_date || b.created_at || 0).getTime() - new Date(a.payment_date || a.created_at || 0).getTime());
+      if (request === paymentRequest.current) setPayments(allPayments);
     } catch (error) {
       if (request === paymentRequest.current) {
         setPaymentsError((error as { message?: string })?.message || "Please try again.");
@@ -622,6 +642,8 @@ function StudentFeePanelForStudent({ student, onRefresh }: StudentFeePanelProps)
   }
 
   return (
+    <>
+    <ReceiptDialog data={receiptPreview} onClose={() => setReceiptPreview(null)} />
     <div className="space-y-4">
       {/* Student profile badges */}
       <div className="flex flex-wrap items-center gap-2">
@@ -1151,8 +1173,31 @@ function StudentFeePanelForStudent({ student, onRefresh }: StudentFeePanelProps)
                             <a href={`${p.receipt_url}${p.receipt_url.includes("?") ? "&" : "?"}v=${encodeURIComponent(p.receipt_course_id || p.id)}`} target="_blank" rel="noopener" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
                               <FileText className="h-3.5 w-3.5" /> Open
                             </a>
+                          ) : p.source === "student" ? (
+                            <Button
+                              type="button"
+                              variant="link"
+                              className="h-auto p-0 text-xs"
+                              onClick={() => setReceiptPreview({
+                                type: "student_fee",
+                                receipt_no: p.receipt_no || undefined,
+                                student_name: student.name || p.person_name || undefined,
+                                admission_no: student.admission_no || p.admission_no || undefined,
+                                roll_no: student.roll_no || undefined,
+                                course_name: student.courses?.name || student.course_name || undefined,
+                                payment_mode: p.payment_mode || undefined,
+                                payment_gateway: p.gateway || null,
+                                fee_description: p.fee_head || p.type || undefined,
+                                amount: Number(p.amount || 0),
+                                payment_ref: p.transaction_ref || p.bank_ref_num || null,
+                                payment_date: p.payment_date || p.paid_at || p.created_at || new Date().toISOString(),
+                                campus_name: student.campuses?.name || undefined,
+                              })}
+                            >
+                              <FileText className="mr-1 h-3.5 w-3.5" /> View receipt
+                            </Button>
                           ) : (
-                            <span className="text-xs text-muted-foreground">Generating…</span>
+                            <span className="text-xs text-muted-foreground">PDF unavailable</span>
                           )}
                         </td>
                         {isSuperAdmin && (
@@ -1365,6 +1410,7 @@ function StudentFeePanelForStudent({ student, onRefresh }: StudentFeePanelProps)
         />
       )}
     </div>
+    </>
   );
 }
 

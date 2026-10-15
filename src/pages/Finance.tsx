@@ -78,11 +78,21 @@ const Finance = () => {
   const [dayClosed, setDayClosed] = useState(false);
   const [afterHoursOpen, setAfterHoursOpen] = useState(false);
   const [afterHoursOn, setAfterHoursOn] = useState(false);
+  const receiptRef = searchParams.get("receipt_ref");
   // Date range scopes the Receipts collection cards (collections are a flow);
-  // Due/Overdue/Concession stay current snapshots. Defaults to today.
-  const [preset, setPreset] = useState<DatePreset>("today");
-  const [fromDate, setFromDate] = useState(getDatePresetRange("today").from);
-  const [toDate, setToDate] = useState(getDatePresetRange("today").to);
+  // Due/Overdue/Concession stay current snapshots. Exact-reference review
+  // links must open all history so older receipts are not hidden by the default.
+  const [preset, setPreset] = useState<DatePreset>(() => searchParams.get("receipt_ref") ? "all" : "today");
+  const [fromDate, setFromDate] = useState(() => getDatePresetRange(searchParams.get("receipt_ref") ? "all" : "today").from);
+  const [toDate, setToDate] = useState(() => getDatePresetRange(searchParams.get("receipt_ref") ? "all" : "today").to);
+
+  useEffect(() => {
+    if (!receiptRef) return;
+    setPreset("all");
+    setFromDate("");
+    setToDate("");
+    setReceiptsView("receipts");
+  }, [receiptRef]);
 
   const tabs = useMemo(() => {
     const all: { id: TabId; label: string; icon: typeof FileText; badge: number; show: boolean }[] = [
