@@ -34,10 +34,12 @@ end $$;
 
 alter table public.school_calendar_events enable row level security;
 
+drop policy if exists school_calendar_events_read on public.school_calendar_events;
 create policy school_calendar_events_read on public.school_calendar_events for select to authenticated using(
  status='published' and exists(select 1 from public.students s join public.courses c on c.id=s.course_id
   where c.institution_id=school_calendar_events.institution_id and s.session_id=school_calendar_events.session_id and public.cbse_family(s.id))
  or public.cbse_manager(institution_id,false));
+drop policy if exists school_calendar_events_write on public.school_calendar_events;
 create policy school_calendar_events_write on public.school_calendar_events for all to authenticated
  using(public.cbse_manager(institution_id,false)) with check(public.cbse_manager(institution_id,false));
 
