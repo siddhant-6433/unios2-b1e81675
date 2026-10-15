@@ -224,23 +224,24 @@ function StudentFeePanelForStudent({ student, onRefresh }: StudentFeePanelProps)
     setPaymentsError(null);
     setPayments([]);
     // Confirmed receipts use the same caller-RLS-scoped view as Finance.
-    // Legacy rows may still have only lead_id, so include those when they do
-    // not already point at a different student. Attempts remain in the base
-    // table because the shared view intentionally contains confirmed rows only.
+    // The view resolves a legacy lead-only receipt only when that lead has one
+    // student; ambiguous receipts stay out of every student's fee history
+    // until Finance verifies and repairs the link. Pending attempts remain in
+    // the base table because the shared view intentionally contains confirmed rows only.
     try {
-      const linkFilter = student.lead_id
+      const attemptLinkFilter = student.lead_id
         ? `student_id.eq.${student.id},and(lead_id.eq.${student.lead_id},student_id.is.null)`
         : `student_id.eq.${student.id}`;
       const [receipts, attempts] = await Promise.all([
         (supabase.from("v_all_payments" as any) as any)
           .select("id, source, type, fee_type, amount, payment_mode, transaction_ref, bank_ref_num, receipt_no, receipt_url, receipt_course_id, status, payment_date, paid_at, created_at, lead_id, student_id, notes, person_name, admission_no, campus_id, gateway, fee_head")
           .eq("status", "confirmed")
-          .or(linkFilter)
+          .eq("student_id", student.id)
           .order("paid_at", { ascending: false, nullsFirst: false }),
         (supabase.from("lead_payments") as any)
           .select("id, type, amount, payment_mode, transaction_ref, receipt_no, status, payment_date, created_at, concession_amount, lead_id, student_id, notes")
           .neq("status", "confirmed")
-          .or(linkFilter)
+          .or(attemptLinkFilter)
           .order("created_at", { ascending: false }),
       ]);
       if (receipts.error) throw receipts.error;

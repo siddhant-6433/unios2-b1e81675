@@ -1,7 +1,7 @@
 -- pgTAP coverage for the audited confirmed-receipt student-link repair.
 -- Run with: supabase test db
 BEGIN;
-SELECT plan(31);
+SELECT plan(32);
 
 CREATE TEMP TABLE _receipt_repair_ids AS
 SELECT
@@ -279,6 +279,11 @@ SELECT is(
   (SELECT count(*)::bigint FROM public.v_all_payments WHERE id = (SELECT dated_payment FROM _receipt_repair_ids) AND source = 'lead'),
   1::bigint,
   'the shared view emits one row per receipt when a lead has multiple linked students'
+);
+SELECT is(
+  (SELECT student_id FROM public.v_all_payments WHERE id = (SELECT dated_payment FROM _receipt_repair_ids) AND source = 'lead'),
+  NULL::uuid,
+  'an unlinked receipt for a multi-student lead remains unassigned instead of being guessed'
 );
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000f002', true);
 SET LOCAL ROLE authenticated;

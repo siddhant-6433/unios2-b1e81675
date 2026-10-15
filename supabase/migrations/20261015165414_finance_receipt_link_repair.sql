@@ -84,8 +84,18 @@ CREATE OR REPLACE VIEW public.v_all_payments WITH (security_invoker = true) AS
       SELECT st.*
         FROM public.students st
        WHERE st.id = lp.student_id
-          OR (lp.student_id IS NULL AND lp.lead_id IS NOT NULL AND st.lead_id = lp.lead_id)
-       ORDER BY (st.id = lp.student_id) DESC, st.created_at DESC
+          OR (
+            lp.student_id IS NULL
+            AND lp.lead_id IS NOT NULL
+            AND st.lead_id = lp.lead_id
+            AND NOT EXISTS (
+              SELECT 1
+                FROM public.students other_student
+               WHERE other_student.lead_id = lp.lead_id
+                 AND other_student.id <> st.id
+            )
+          )
+       ORDER BY (st.id = lp.student_id) DESC NULLS LAST, st.created_at DESC
        LIMIT 1
     ) s ON true
     LEFT JOIN public.fee_codes fc ON fc.id = lp.fee_code_id
@@ -101,6 +111,11 @@ CREATE INDEX IF NOT EXISTS idx_payments_paid_at_id_desc
 CREATE INDEX IF NOT EXISTS idx_lead_payments_confirmed_date_id_desc
   ON public.lead_payments (payment_date DESC NULLS LAST, id DESC)
   WHERE status = 'confirmed';
+
+-- Supports resolving legacy receipts only when a lead has exactly one student.
+CREATE INDEX IF NOT EXISTS idx_students_lead_id
+  ON public.students (lead_id)
+  WHERE lead_id IS NOT NULL;
 
 -- A receipt link repair changes one identity key only. A transaction-local
 -- reason is consumed by the existing append-only lead_payments audit trigger.

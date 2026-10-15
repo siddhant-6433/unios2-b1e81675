@@ -105,9 +105,9 @@ describe("student financial loading", () => {
     expect(screen.queryByText("No confirmed payments yet.")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry receipts" }));
     expect(await screen.findByText("SCHOOL-001")).toBeInTheDocument();
-    expect(mock.filters.filter((f) => f.table === "v_all_payments" && f.column === "$or")).toEqual([
-      { table: "v_all_payments", column: "$or", value: "student_id.eq.s1" },
-      { table: "v_all_payments", column: "$or", value: "student_id.eq.s1" },
+    expect(mock.filters.filter((f) => f.table === "v_all_payments" && f.column === "student_id")).toEqual([
+      { table: "v_all_payments", column: "student_id", value: "s1" },
+      { table: "v_all_payments", column: "student_id", value: "s1" },
     ]);
   });
 
@@ -164,11 +164,11 @@ describe("student financial loading", () => {
     expect(screen.queryByText("Avni tuition")).not.toBeInTheDocument();
   });
 
-  it("reads confirmed direct and lead-only receipts from the shared view and keeps pending attempts", async () => {
+  it("reads confirmed direct and unambiguous lead receipts and keeps pending attempts", async () => {
     mock.responses.set("fee_ledger", [ok([fee])]);
     mock.responses.set("v_all_payments", [ok([
       { id: "direct", source: "student", status: "confirmed", type: "other", receipt_no: "DIRECT-RECEIPT", amount: 100, student_id: "s1", lead_id: "l1", payment_date: "2026-10-14T10:00:00Z" },
-      { id: "legacy", status: "confirmed", type: "other", receipt_no: "LEGACY-RECEIPT", amount: 200, student_id: null, lead_id: "l1", payment_date: "2026-10-13T10:00:00Z" },
+      { id: "legacy", status: "confirmed", type: "other", receipt_no: "LEGACY-RECEIPT", amount: 200, student_id: "s1", lead_id: "l1", payment_date: "2026-10-13T10:00:00Z" },
     ])]);
     mock.responses.set("lead_payments", [ok([
       { id: "pending", status: "pending", type: "other", transaction_ref: "PENDING-REF", amount: 300, student_id: null, lead_id: "l1", created_at: "2026-10-12T10:00:00Z" },
@@ -180,8 +180,9 @@ describe("student financial loading", () => {
     expect(screen.getByText("PENDING-REF")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View receipt" }));
     expect(await screen.findByRole("heading", { name: "Payment Receipt" })).toBeInTheDocument();
+    expect(mock.filters).toContainEqual({ table: "v_all_payments", column: "student_id", value: "s1" });
     expect(mock.filters).toContainEqual({
-      table: "v_all_payments",
+      table: "lead_payments",
       column: "$or",
       value: "student_id.eq.s1,and(lead_id.eq.l1,student_id.is.null)",
     });
