@@ -9,6 +9,8 @@ type ReadQuery = PromiseLike<ReadResponse> & {
   order(): ReadQuery;
   in(): ReadQuery;
   eq(column: string, value: unknown): ReadQuery;
+  neq(column: string, value: unknown): ReadQuery;
+  or(filter: string): ReadQuery;
   maybeSingle(): Promise<ReadResponse>;
 };
 
@@ -23,6 +25,8 @@ vi.mock("@/integrations/supabase/client", () => ({ supabase: {
     const q: ReadQuery = {
       select: () => q, order: () => q, in: () => q,
       eq: (column: string, value: unknown) => { mock.filters.push({ table, column, value }); return q; },
+      neq: (column: string, value: unknown) => { mock.filters.push({ table, column: `not.${column}`, value }); return q; },
+      or: (filter: string) => { mock.filters.push({ table, column: "$or", value: filter }); return q; },
       maybeSingle: () => response,
       then: (resolve, reject) => response.then(resolve, reject),
     };
@@ -93,23 +97,25 @@ describe("student financial loading", () => {
 
   it("shows receipt failures independently and retries a lead-less student's receipts", async () => {
     mock.responses.set("fee_ledger", [ok([fee])]);
-    mock.responses.set("lead_payments", [Promise.resolve({ data: null, error: { message: "Receipts unavailable" } }), ok([{ id: "r1", status: "confirmed", type: "other", receipt_no: "SCHOOL-001", amount: 100 }])]);
+    mock.responses.set("v_all_payments", [Promise.resolve({ data: null, error: { message: "Receipts unavailable" } }), ok([{ id: "r1", status: "confirmed", type: "other", receipt_no: "SCHOOL-001", amount: 100 }])]);
+    mock.responses.set("lead_payments", [ok([]), ok([]), ok([]), ok([])]);
     render(<StudentFeePanel student={student} />);
     expect(await screen.findByText("Could not load receipts")).toBeInTheDocument();
     expect(screen.getByText("Avni tuition")).toBeInTheDocument();
     expect(screen.queryByText("No confirmed payments yet.")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry receipts" }));
     expect(await screen.findByText("SCHOOL-001")).toBeInTheDocument();
-    expect(mock.filters.filter((f) => f.table === "lead_payments")).toEqual([
-      { table: "lead_payments", column: "student_id", value: "s1" },
-      { table: "lead_payments", column: "student_id", value: "s1" },
+    expect(mock.filters.filter((f) => f.table === "v_all_payments" && f.column === "student_id")).toEqual([
+      { table: "v_all_payments", column: "student_id", value: "s1" },
+      { table: "v_all_payments", column: "student_id", value: "s1" },
     ]);
   });
 
   it("does not describe receipts as empty while they are still loading", async () => {
     const pending = deferred();
     mock.responses.set("fee_ledger", [ok([])]);
-    mock.responses.set("lead_payments", [pending.promise]);
+    mock.responses.set("v_all_payments", [pending.promise]);
+    mock.responses.set("lead_payments", [ok([])]);
     render(<StudentFeePanel student={student} />);
     await screen.findByText(/No fee records found/);
     expect(screen.getAllByText("Loading receipts…")).toHaveLength(2);
@@ -132,7 +138,8 @@ describe("student financial loading", () => {
     const oldReceipts = deferred();
     const newLedger = deferred();
     mock.responses.set("fee_ledger", [ok([fee]), newLedger.promise]);
-    mock.responses.set("lead_payments", [oldReceipts.promise, ok([])]);
+    mock.responses.set("v_all_payments", [oldReceipts.promise, ok([])]);
+    mock.responses.set("lead_payments", [ok([]), ok([])]);
     const { rerender } = render(<StudentFeePanel student={student} />);
     await screen.findByText("Avni tuition");
     rerender(<StudentFeePanel student={{ ...student, id: "s2", name: "Next student" }} />);
@@ -155,5 +162,34 @@ describe("student financial loading", () => {
     await screen.findByText(/No fee records found/);
     await act(async () => oldLedger.resolve({ data: [fee], error: null }));
     expect(screen.queryByText("Avni tuition")).not.toBeInTheDocument();
+  });
+
+  it("reads confirmed direct and unambiguous lead receipts and keeps pending attempts", async () => {
+    mock.responses.set("fee_ledger", [ok([fee])]);
+    mock.responses.set("v_all_payments", [ok([
+      { id: "direct", source: "student", status: "confirmed", type: "other", receipt_no: "DIRECT-RECEIPT", amount: 100, student_id: "s1", lead_id: "l1", payment_date: "2026-10-14T10:00:00Z" },
+      { id: "legacy", status: "confirmed", type: "other", receipt_no: "LEGACY-RECEIPT", amount: 200, student_id: "s1", lead_id: "l1", payment_date: "2026-10-13T10:00:00Z" },
+    ])]);
+    mock.responses.set("lead_payments", [ok([
+      { id: "pending", status: "pending", type: "other", transaction_ref: "PENDING-REF", amount: 300, student_id: null, lead_id: "l1", created_at: "2026-10-12T10:00:00Z" },
+    ])]);
+    render(<StudentFeePanel student={{ ...student, lead_id: "l1" }} />);
+
+    expect(await screen.findByText("DIRECT-RECEIPT")).toBeInTheDocument();
+    expect(screen.getByText("LEGACY-RECEIPT")).toBeInTheDocument();
+    expect(screen.getByText("PENDING-REF")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View receipt" }));
+    expect(await screen.findByRole("heading", { name: "Payment Receipt" })).toBeInTheDocument();
+    expect(mock.filters).toContainEqual({ table: "v_all_payments", column: "student_id", value: "s1" });
+    expect(mock.filters).toContainEqual({
+      table: "lead_payments",
+      column: "$or",
+      value: "student_id.eq.s1,and(lead_id.eq.l1,student_id.is.null)",
+    });
+    expect(mock.filters).toContainEqual({
+      table: "lead_payments",
+      column: "not.status",
+      value: "confirmed",
+    });
   });
 });

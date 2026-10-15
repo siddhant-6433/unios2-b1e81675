@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0.0] - 2026-10-15
+
+### Added
+
+- Review and repair a confirmed receipt's student link with identity confirmation and an audit reason.
+- Search the complete confirmed receipt history across lead and student payments, with paginated results and retryable read errors.
+
+### Fixed
+
+- Check payment references across both receipt sources before allowing Finance to record another payment.
+
 ## [0.8.0.0] - 2026-10-15
 
 ### Added
