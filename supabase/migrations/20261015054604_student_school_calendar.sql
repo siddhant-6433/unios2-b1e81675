@@ -27,7 +27,7 @@ returns jsonb language plpgsql stable security definer set search_path=public,pg
 declare v_session uuid; v_institution uuid;
 begin
  if not public.cbse_family(_student_id) then raise exception 'Access denied'; end if;
- select s.session_id,c.institution_id into v_session,v_institution from public.students s join public.courses c on c.id=s.course_id where s.id=_student_id;
+ select s.session_id,d.institution_id into v_session,v_institution from public.students s join public.courses c on c.id=s.course_id join public.departments d on d.id=c.department_id where s.id=_student_id;
  return coalesce((select jsonb_agg(jsonb_build_object('id',e.id,'title',e.title,'event_type',e.event_type,'starts_on',e.starts_on,'ends_on',e.ends_on,'notes',e.notes,'no_school',e.no_school) order by e.starts_on,e.title)
   from public.school_calendar_events e where e.institution_id=v_institution and e.session_id=v_session and e.status='published'),'[]'::jsonb);
 end $$;
@@ -36,8 +36,8 @@ alter table public.school_calendar_events enable row level security;
 
 drop policy if exists school_calendar_events_read on public.school_calendar_events;
 create policy school_calendar_events_read on public.school_calendar_events for select to authenticated using(
- status='published' and exists(select 1 from public.students s join public.courses c on c.id=s.course_id
-  where c.institution_id=school_calendar_events.institution_id and s.session_id=school_calendar_events.session_id and public.cbse_family(s.id))
+ status='published' and exists(select 1 from public.students s join public.courses c on c.id=s.course_id join public.departments d on d.id=c.department_id
+  where d.institution_id=school_calendar_events.institution_id and s.session_id=school_calendar_events.session_id and public.cbse_family(s.id))
  or public.cbse_manager(institution_id,false));
 drop policy if exists school_calendar_events_write on public.school_calendar_events;
 create policy school_calendar_events_write on public.school_calendar_events for all to authenticated
