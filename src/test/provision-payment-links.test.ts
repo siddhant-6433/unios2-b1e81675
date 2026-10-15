@@ -4,36 +4,32 @@ import { readMigration } from "./readMigration";
 
 const edgeFn = readFileSync("supabase/functions/provision-student-fees/index.ts", "utf8");
 const guard = readMigration("duplicate_payment_application_guard");
+const settlementBoundary = readMigration("atomic_fee_settlement_boundary");
 
-describe("edge provisioner writes payment links", () => {
-  it("attributes each credit to the payment that funded it", () => {
-    // The double-credit that inflated two ledgers was invisible because this
-    // path wrote paid_amount with no fee_ledger_payments row behind it.
-    expect(edgeFn).toContain("creditLinks");
-    expect(edgeFn).toContain("const drawFrom = (");
-    expect(edgeFn).toContain('.from("fee_ledger_payments").insert(');
-    // Payment ids are needed for attribution, so the token queue selects id.
-    // (Application fees are booked onto their own head by the SQL
-    // reconcile_application_fee, not by this provisioner.)
-    expect(edgeFn).toMatch(/\.select\("id, amount"\)[\s\S]{0,200}"token_fee"/);
-    expect(edgeFn).not.toMatch(/\.eq\("type", "application_fee"\)/);
+describe("edge provisioner delegates payment allocation", () => {
+  it("does not pre-credit token payments outside the SQL transaction", () => {
+    // SQL's confirmed-payment trigger owns allocation while holding the
+    // per-student lock, so provisioning only creates zero-paid ledger rows.
+    expect(edgeFn).not.toContain("creditLinks");
+    expect(edgeFn).not.toContain('.from("fee_ledger_payments").insert(');
+    expect(edgeFn).not.toMatch(/\.eq\("type", "token_fee"\)/);
+    expect(edgeFn).toContain('.from("fee_ledger").insert(insertRows)');
   });
 
-  it("drains credit already applied on an earlier run before attributing", () => {
-    // Otherwise a partial re-provision would re-attribute the head of the queue
-    // and double-count the same token payment in the links.
-    expect(edgeFn).toContain("let toDrain = Math.min(alreadyCredited, totalToken);");
-  });
-
-  it("never fails provisioning because the link insert failed", () => {
-    expect(edgeFn).toContain("link insert failed");
-  });
-
-  it("still syncs offer waivers when the ledger already exists", () => {
+  it("keeps waiver sync idempotent when the ledger already exists", () => {
     expect(edgeFn).toContain("async function syncLedgerConcessions");
     expect(edgeFn).toContain("if (newRows.length === 0)");
     expect(edgeFn).toContain("await syncLedgerConcessions(db, studentId)");
     expect(edgeFn).not.toMatch(/if \(newRows\.length === 0\) return 0;/);
+  });
+
+  it("uses an atomic SQL settlement boundary for gateway receipts", () => {
+    expect(settlementBoundary).toContain("FUNCTION public.create_and_apply_fee_payment");
+    expect(settlementBoundary).toContain("FUNCTION public.apply_fee_payment_allocations");
+    expect(settlementBoundary).toContain("pg_advisory_xact_lock");
+    expect(settlementBoundary).toContain("FOR UPDATE");
+    expect(settlementBoundary).toContain("INSERT INTO public.fee_ledger_payments");
+    expect(settlementBoundary).toContain("GRANT EXECUTE ON FUNCTION public.create_and_apply_fee_payment");
   });
 });
 

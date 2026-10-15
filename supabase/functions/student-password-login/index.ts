@@ -277,14 +277,17 @@ Deno.serve(async (req) => {
     if (securityCode?.id) {
       const { data: securityRows } = await db
         .from("fee_ledger")
-        .select("id, total_amount")
+        .select("id, total_amount, concession")
         .eq("student_id", studentId)
         .eq("fee_code_id", securityCode.id)
         .eq("paid_amount", 0);
       for (const row of securityRows || []) {
         await db
           .from("fee_ledger")
-          .update({ paid_amount: Number(row.total_amount || 0), status: "paid" })
+          .update({
+            concession: Number(row.total_amount || 0),
+            status: "paid",
+          })
           .eq("id", row.id);
       }
     }

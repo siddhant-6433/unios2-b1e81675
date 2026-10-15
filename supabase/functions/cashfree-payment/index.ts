@@ -13,32 +13,51 @@ async function getAdmin() {
   );
 }
 
-async function markFeeLedgerPaid(admin: any, studentId: string, paidAmount?: number) {
+async function markFeeLedgerPaid(admin: any, studentId: string, paidAmount: number, paymentRef: string) {
   const { data: rows } = await admin
     .from("fee_ledger")
-    .select("id, total_amount, balance")
+    .select("id, balance")
     .eq("student_id", studentId)
     .in("status", ["due", "overdue"]);
 
   if (!rows?.length) return 0;
 
-  // SECURITY: validate paid amount matches outstanding balance (tolerance ₹1)
-  if (paidAmount !== undefined) {
-    const expectedTotal = rows.reduce((s: number, r: any) => s + Number(r.balance ?? r.total_amount), 0);
-    if (Math.abs(paidAmount - expectedTotal) > 1) {
-      console.error("[cashfree] markFeeLedgerPaid: amount mismatch — paid", paidAmount, "expected", expectedTotal, "student", studentId);
-      return -1; // signal mismatch to caller
-    }
+  const expectedTotal = rows.reduce((s: number, r: any) => s + Number(r.balance || 0), 0);
+  if (Math.abs(paidAmount - expectedTotal) > 1) {
+    console.error("[cashfree] markFeeLedgerPaid: amount mismatch — paid", paidAmount, "expected", expectedTotal, "student", studentId);
+    return -1;
   }
 
-  for (const row of rows) {
-    await admin
-      .from("fee_ledger")
-      .update({ paid_amount: row.total_amount, balance: 0, status: "paid" })
-      .eq("id", row.id);
+  const { data: student } = await admin
+    .from("students")
+    .select("lead_id")
+    .eq("id", studentId)
+    .maybeSingle();
+  const { error } = await admin.rpc("create_and_apply_fee_payment", {
+    _payment: {
+      lead_id: student?.lead_id || null,
+      student_id: studentId,
+      type: "other",
+      amount: paidAmount,
+      concession_amount: 0,
+      payment_mode: "gateway",
+      gateway: "cashfree",
+      transaction_ref: paymentRef,
+      notes: "Student fee payment via Cashfree",
+    },
+    _allocations: rows.map((row: any) => ({
+      fee_ledger_id: row.id,
+      amount: Number(row.balance || 0),
+      concession_amount: 0,
+      notes: "Cashfree fee settlement",
+    })),
+  });
+  if (error) {
+    console.error("[cashfree] atomic ledger settlement failed:", error.message);
+    throw new Error(error.message);
   }
 
-  console.log("[cashfree] markFeeLedgerPaid: updated", rows.length, "entries for student", studentId);
+  console.log("[cashfree] markFeeLedgerPaid: atomically applied", rows.length, "entries for student", studentId);
   return rows.length;
 }
 
@@ -235,7 +254,7 @@ Deno.serve(async (req) => {
         if (order_id.startsWith("FEE_")) {
           const sid = data.order_tags?.student_id; // intentionally ignores caller-supplied student_id
           if (sid) {
-            const result = await markFeeLedgerPaid(admin, sid, Number(data.order_amount));
+            const result = await markFeeLedgerPaid(admin, sid, Number(data.order_amount), paymentRef);
             if (result === -1) {
               console.error("[cashfree] verify-payment: amount mismatch for student", sid, "order", order_id);
             } else {
@@ -264,11 +283,12 @@ Deno.serve(async (req) => {
       try {
         const webhook = JSON.parse(rawBody);
         const orderData = webhook?.data?.order;
-        const paymentData = webhook?.data?.payment;
 
         if (orderData && orderData.order_status === "PAID") {
           const orderId = orderData.order_id || "";
-          const paymentRef = paymentData?.cf_payment_id || orderId;
+          // Use the stable order id in verify and webhook paths so one order is
+          // idempotent even when the webhook also supplies a capture id.
+          const paymentRef = orderId;
           const admin = await getAdmin();
 
           // Application fee payment
@@ -289,7 +309,7 @@ Deno.serve(async (req) => {
           if (orderId.startsWith("FEE_")) {
             const studentId = orderData.order_tags?.student_id;
             if (studentId) {
-              const count = await markFeeLedgerPaid(admin, studentId, Number(orderData.order_amount));
+              const count = await markFeeLedgerPaid(admin, studentId, Number(orderData.order_amount), paymentRef);
               if (count === -1) {
                 console.error("[cashfree] webhook FEE: amount mismatch for student", studentId, "order", orderId);
               } else {
@@ -301,7 +321,8 @@ Deno.serve(async (req) => {
           }
         }
       } catch (e) {
-        console.error("[cashfree] webhook parse error:", e);
+        console.error("[cashfree] webhook settlement error:", e);
+        return new Response("settlement failed", { status: 500, headers: corsHeaders });
       }
 
       return new Response("ok", { status: 200, headers: corsHeaders });

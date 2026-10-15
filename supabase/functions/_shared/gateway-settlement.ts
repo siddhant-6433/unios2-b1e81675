@@ -596,21 +596,6 @@ export async function settleStudentFeePayment(
     remainingWaiver = Math.round((remainingWaiver - concessionPart) * 100) / 100;
     remainingCover = Math.round((remainingCover - take) * 100) / 100;
     const paidPart = Math.max(0, Math.round((take - concessionPart) * 100) / 100);
-    const newConcession = Number(row.concession || 0) + concessionPart;
-    const newPaid = Number(row.paid_amount || 0) + paidPart;
-    const fullyPaid = newPaid + newConcession >= Number(row.total_amount) - 0.01;
-
-    const { error: updateErr } = await admin
-      .from("fee_ledger")
-      .update({
-        concession: newConcession,
-        paid_amount: newPaid,
-        ...(fullyPaid ? { status: "paid" } : {}),
-      })
-      .eq("id", row.id)
-      .in("status", ["due", "overdue"]);
-    if (updateErr) return { ok: false, message: updateErr.message };
-
     ledgerSplits.push({ id: row.id, amount: paidPart, concession: concessionPart });
   }
 
@@ -620,61 +605,42 @@ export async function settleStudentFeePayment(
     .eq("id", studentId)
     .maybeSingle();
 
-  let paymentId: string | null = null;
-  if (student?.lead_id) {
-    const { data: inserted, error: lpErr } = await admin
-      .from("lead_payments")
-      .insert({
-        lead_id: student.lead_id,
-        type: "other",
-        amount: paidAmount,
-        concession_amount: waiver,
-        payment_mode: "gateway",
-        gateway,
-        transaction_ref: payId,
-        status: "confirmed",
-        applied_to_ledger: true,
-        notes: waiver > 0 ? "Course-fee payment with Year-1 tuition lump-sum waiver" : "Course-fee instalment via gateway",
-      })
-      .select("id")
-      .maybeSingle();
+  const { data: applied, error: lpErr } = await (admin as any).rpc("create_and_apply_fee_payment", {
+    _payment: {
+      lead_id: student?.lead_id || null,
+      student_id: studentId,
+      type: "other",
+      amount: paidAmount,
+      concession_amount: waiver,
+      payment_mode: "gateway",
+      gateway,
+      transaction_ref: payId,
+      notes: waiver > 0 ? "Course-fee payment with Year-1 tuition lump-sum waiver" : "Course-fee instalment via gateway",
+    },
+    _allocations: ledgerSplits.map((split) => ({
+      fee_ledger_id: split.id,
+      amount: split.amount,
+      concession_amount: split.concession,
+      notes: "Student portal gateway payment",
+    })),
+  });
+  if (lpErr) return { ok: false, message: lpErr.message };
 
-    if (lpErr) {
-      if (lpErr.code === "23505" || /duplicate|unique/i.test(lpErr.message || "")) {
-        return {
-          ok: true,
-          already: true,
-          entity_type: "student",
-          entity_id: studentId,
-          payment_id: payId,
-        };
-      }
-      return { ok: false, message: lpErr.message };
-    }
-    paymentId = inserted?.id || null;
-
-    if (paymentId && ledgerSplits.length) {
-      await admin.from("fee_ledger_payments").insert(
-        ledgerSplits.map((split) => ({
-          fee_ledger_id: split.id,
-          lead_payment_id: paymentId,
-          amount: split.amount,
-          concession_amount: split.concession,
-          notes: "Student portal gateway payment",
-        })),
-      );
+  const paymentId: string | null = applied?.payment_id || null;
+  if (paymentId) {
+    if (student?.lead_id) {
       fetch(`${supabaseUrl}/functions/v1/notify-event`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
         body: JSON.stringify({ event: "payment_received", lead_id: student.lead_id, context: { payment_id: paymentId } }),
       }).catch((e) => console.error("[gateway-settlement] student-fee notify failed:", e));
-      fireReceiptPdf(supabaseUrl, serviceKey, paymentId);
     }
+    fireReceiptPdf(supabaseUrl, serviceKey, paymentId);
   }
 
   return {
     ok: true,
-    already: claim.already || false,
+    already: claim.already || Boolean(applied?.already),
     entity_type: "student",
     entity_id: studentId,
     payment_id: payId,
@@ -852,40 +818,40 @@ export async function settlePaymentLink(
     const studentDirect = {
       id: link.student_id, phone: receiptPhone, name: student?.name ?? null, amount: paidAmount };
 
-    const { data: lp, error } = await admin
-      .from("lead_payments")
-      .insert({
-        lead_id: leadId,
-        student_id: link.student_id,
-        type: "other",
-        amount: paidAmount,
-        payment_mode: "gateway",
-        gateway,
-        transaction_ref: payId,
-        status: "confirmed",
-        // With a breakup, leave unapplied so the provision trigger routes it to
-        // the chosen heads; otherwise apply oldest-due below as before.
-        applied_to_ledger: hasAllocations ? false : true,
-        allocations: hasAllocations ? link.allocations : null,
-        notes: link.note || "Fee payment via payment link",
-      })
-      .select("id")
-      .maybeSingle();
-    if (error) {
-      if (error.code === "23505" || /duplicate|unique/i.test(error.message || "")) {
-        return await healFromExisting();
+    if (hasAllocations) {
+      const { data: lp, error } = await admin
+        .from("lead_payments")
+        .insert({
+          lead_id: leadId,
+          student_id: link.student_id,
+          type: "other",
+          amount: paidAmount,
+          payment_mode: "gateway",
+          gateway,
+          transaction_ref: payId,
+          status: "confirmed",
+          applied_to_ledger: false,
+          allocations: link.allocations,
+          notes: link.note || "Fee payment via payment link",
+        })
+        .select("id")
+        .maybeSingle();
+      if (error) {
+        if (error.code === "23505" || /duplicate|unique/i.test(error.message || "")) {
+          return await healFromExisting();
+        }
+        await releaseClaim();
+        return { ok: false, message: error.message };
       }
-      await releaseClaim();
-      return { ok: false, message: error.message };
-    }
-    if (lp?.id) {
-      if (hasAllocations) {
-        // Breakup routing is handled by provision_student_fees (confirm trigger).
+      if (lp?.id) {
+        // The confirmation trigger allocates this breakup inside the receipt
+        // insert transaction; the provisioner is idempotent for retries.
         await finalizeLink(lp.id);
         notifyPaymentReceived(leadId, lp.id, studentDirect);
         return { ok: true, already: false, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
       }
-      // Apply amount to oldest due ledger rows (same as pay-link).
+    } else {
+      // Apply amount to oldest due ledger rows under row locks in the settlement RPC.
       const { data: rows } = await admin
         .from("fee_ledger")
         .select("id, total_amount, paid_amount, concession, balance, due_date, status")
@@ -900,26 +866,40 @@ export async function settlePaymentLink(
         const balance = Number(row.balance ?? 0);
         const apply = Math.min(balance, remaining);
         remaining = Math.round((remaining - apply) * 100) / 100;
-        const newPaid = Number(row.paid_amount || 0) + apply;
-        const fullyPaid = newPaid + Number(row.concession || 0) >= Number(row.total_amount) - 0.01;
-        await admin
-          .from("fee_ledger")
-          .update({ paid_amount: newPaid, status: fullyPaid ? "paid" : row.status })
-          .eq("id", row.id);
         splits.push({ id: row.id, amount: apply });
       }
-      if (splits.length) {
-        await admin.from("fee_ledger_payments").insert(
-          splits.map((s) => ({
-            fee_ledger_id: s.id,
-            lead_payment_id: lp.id,
-            amount: s.amount,
-            notes: "Payment link settlement",
-          })),
-        );
+      if (remaining > 0.009) {
+        await releaseClaim();
+        return { ok: false, message: "Payment exceeds the available ledger balance" };
       }
-      await finalizeLink(lp.id);
-      notifyPaymentReceived(leadId, lp.id, studentDirect);
+      const { data: settled, error } = await (admin as any).rpc("create_and_apply_fee_payment", {
+        _payment: {
+          lead_id: leadId,
+          student_id: link.student_id,
+          type: "other",
+          amount: paidAmount,
+          concession_amount: 0,
+          payment_mode: "gateway",
+          gateway,
+          transaction_ref: payId,
+          notes: link.note || "Fee payment via payment link",
+        },
+        _allocations: splits.map((s) => ({
+          fee_ledger_id: s.id,
+          amount: s.amount,
+          concession_amount: 0,
+          notes: "Payment link settlement",
+        })),
+      });
+      if (error) {
+        await releaseClaim();
+        return { ok: false, message: error.message };
+      }
+      const paymentId = settled?.payment_id;
+      if (paymentId) {
+        await finalizeLink(paymentId);
+        notifyPaymentReceived(leadId, paymentId, studentDirect);
+      }
     }
     return { ok: true, already: false, entity_type: "payment_link", entity_id: link.id, payment_id: payId };
   }
