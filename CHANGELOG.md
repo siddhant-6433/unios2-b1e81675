@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0.0] - 2026-10-15
+
+### Added
+
+- Create shared, multi-grade assessment date sheets, with per-subject schedules, printable previews, family portal access, and WhatsApp notices.
+- Configure the two-term CBSE report structure, including best-of-unit-test scoring, term totals, and the final average.
+- Manage a student-facing school almanac and prevent exams from being scheduled on published no-school dates.
+
+### Changed
+
+- Remove the UT-90 and UT-98 test assessments and backfill the corrected UT and Half Yearly components.
+
 ## [0.7.0.0] - 2026-10-10
 
 ### Fixed
