@@ -1,3 +1,5 @@
+import { createClient } from "npm:@supabase/supabase-js@2";
+
 /**
  * One-shot: submits the 6 lifecycle WhatsApp templates to Meta
  * Business Manager via the WhatsApp Business Management API.
@@ -6,7 +8,7 @@
  * already exists with the same name. We return all results so the
  * caller can see which made it through.
  *
- * Auth: requires service-role JWT (mirrors check-call-template etc).
+ * Auth: requires a signed-in principal or super admin.
  *
  * Curl:
  *   curl -X POST "$SUPABASE_URL/functions/v1/submit-wa-templates" \
@@ -71,6 +73,16 @@ Help: 7428499849, 9667641872, 9555192192`;
 const DOCUMENT_HEADER_HANDLE_PLACEHOLDER = "__DOCUMENT_HEADER_HANDLE__";
 
 const TEMPLATES = [
+  {
+    name: "school_date_sheet_notice",
+    category: "UTILITY",
+    language: "en",
+    components: [{
+      type: "BODY",
+      text: "Dear Parent, the {{1}} date sheet for session {{2}} is now available in the Student and Parent Portal. Please sign in at {{3}} and open Academic Reports to view your child's exam dates. Best wishes, NIMT School.",
+      example: { body_text: [["Unit Test 3", "2026-27", "https://uni.nimt.ac.in/student"]] },
+    }],
+  },
   {
     name: "dpharma_last_chance_2026_28",
     category: "MARKETING",
@@ -675,6 +687,31 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const authorization = req.headers.get("Authorization");
+    if (!supabaseUrl || !anonKey || !serviceRoleKey || !authorization?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Authenticated administrator access is required" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const authClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authorization } } });
+    const { data: authData, error: authError } = await authClient.auth.getUser();
+    if (authError || !authData.user) {
+      return new Response(JSON.stringify({ error: "Session is invalid or expired" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
+    const { data: roles, error: roleError } = await adminClient.from("user_roles").select("role").eq("user_id", authData.user.id);
+    const isSuperAdmin = roles?.some(row => String(row.role) === "super_admin") ?? false;
+    const isPrincipal = roles?.some(row => String(row.role) === "principal") ?? false;
+    if (roleError || (!isSuperAdmin && !isPrincipal)) {
+      return new Response(JSON.stringify({ error: "Only a school principal or super admin can submit WhatsApp templates" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const wabaId = Deno.env.get("WHATSAPP_WABA_ID");
     const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
     if (!wabaId || !waToken) {
@@ -685,6 +722,11 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const action = body?.action || "submit";
+    if (!isSuperAdmin && !(Array.isArray(body?.names) && body.names.length === 1 && body.names[0] === "school_date_sheet_notice")) {
+      return new Response(JSON.stringify({ error: "Principals may submit only the school date sheet notice template" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const documentHeaderHandle =
       typeof body?.document_header_handle === "string" && body.document_header_handle.trim()
         ? body.document_header_handle.trim()

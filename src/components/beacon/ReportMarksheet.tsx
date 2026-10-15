@@ -9,7 +9,7 @@ const number = (value: number | null | undefined, suffix = "") => (value === nul
  * preview and the printed report match.
  */
 /** Opens a clean, single-purpose print view so "Save as PDF" is named correctly and has no blank pages. */
-export function printMarksheet(filename: string): void {
+export function printMarksheet(filename: string, landscape = false): void {
   const element = document.getElementById("beacon-marksheet");
   if (!element) return;
   const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]')).map(node => node.outerHTML).join("");
@@ -17,7 +17,7 @@ export function printMarksheet(filename: string): void {
   const win = window.open("", "_blank", "width=980,height=1200");
   if (!win) return;
   win.document.open();
-  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>${styles}<style>@page{size:A4;margin:8mm}html,body{margin:0;background:#fff}</style></head><body>${element.outerHTML}<script>addEventListener('load',function(){var el=document.getElementById('beacon-marksheet');if(el){el.style.zoom=Math.min(1,1040/Math.max(1,el.scrollHeight));}setTimeout(function(){focus();print();},250);});<\/script></body></html>`);
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>${styles}<style>@page{size:A4 ${landscape?"landscape":"portrait"};margin:8mm}html,body{margin:0;background:#fff}</style></head><body>${element.outerHTML}<script>addEventListener('load',function(){var el=document.getElementById('beacon-marksheet');if(el){el.style.zoom=Math.min(1,1040/Math.max(1,el.scrollHeight));}setTimeout(function(){focus();print();},250);});<\/script></body></html>`);
   win.document.close();
 }
 
@@ -28,7 +28,7 @@ export function ReportMarksheet({ snapshot }: { snapshot: ReportSnapshot }) {
   const resultLabel = summary.result === "pass" ? "PASS" : summary.result === "fail" ? "FAIL" : summary.result === "absent" ? "ABSENT" : "INCOMPLETE";
   const resultTone = summary.result === "pass" ? "text-emerald-700" : summary.result === "fail" ? "text-rose-700" : "text-amber-700";
   return <div id="beacon-marksheet" className="beacon-marksheet mx-auto max-w-3xl bg-white text-[13px] leading-snug text-slate-800 print:max-w-none">
-    <style>{`@media print{html,body{background:#fff;margin:0;padding:0}#beacon-marksheet{width:100%;max-width:none;padding:6mm 8mm}@page{size:A4;margin:10mm}}`}</style>
+    <style>{`@media print{html,body{background:#fff;margin:0;padding:0}#beacon-marksheet{width:100%;max-width:none;padding:6mm 8mm}@page{size:A4 ${snapshot.category === "annual" ? "landscape" : "portrait"};margin:10mm}}`}</style>
 
     <header className="flex items-start gap-4 border-b-2 border-slate-800 pb-3">
       <img src={logo} alt={`${school.name} logo`} className="h-16 w-16 shrink-0 object-contain" />
@@ -56,7 +56,12 @@ export function ReportMarksheet({ snapshot }: { snapshot: ReportSnapshot }) {
       <p><span className="text-slate-500">Class teacher</span> <span className="font-medium">{snapshot.class_teacher?.name ?? "—"}</span></p>
     </section>
 
-    <table className="mt-4 w-full border-collapse text-[12px]">
+    {snapshot.category === "annual" && subjects.some(subject=>subject.term_breakdown) ? <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px] border-collapse text-[10px]">
+      <thead>
+        <tr className="bg-slate-800 text-center text-white"><th rowSpan={2} className="px-2 py-2 text-left">Subject</th><th colSpan={4} className="border-l border-white/30 px-2 py-2">Term 1</th><th colSpan={4} className="border-l border-white/30 px-2 py-2">Term 2</th><th rowSpan={2} className="border-l border-white/30 bg-amber-500 px-2 py-2 text-right text-slate-950">Final Score</th></tr>
+        <tr className="bg-slate-700 text-white"><th className="border-l border-white/20 px-2 py-1.5 text-right">UT-1</th><th className="px-2 py-1.5 text-right">UT-2</th><th className="px-2 py-1.5 text-right">Half Yearly</th><th className="px-2 py-1.5 text-right">Total / 100</th><th className="border-l border-white/20 px-2 py-1.5 text-right">UT-3</th><th className="px-2 py-1.5 text-right">UT-4</th><th className="px-2 py-1.5 text-right">Annual Exam</th><th className="px-2 py-1.5 text-right">Total / 100</th></tr>
+      </thead><tbody>{subjects.map((subject,index)=>{const terms=subject.term_breakdown;const cell=(score:{score:number|null;max:number}|undefined)=>score?`${number(score.score)}/${number(score.max)}`:"—";return <tr key={subject.subject_id} className={index%2?"bg-slate-50":"bg-white"}><td className="border-b border-slate-200 px-2 py-2 font-medium text-slate-900">{subject.name}{subject.code?` (${subject.code})`:""}</td><td className="border-b border-l border-slate-200 px-2 py-2 text-right tabular-nums">{cell(terms?.term1.ut1)}</td><td className="border-b border-slate-200 px-2 py-2 text-right tabular-nums">{cell(terms?.term1.ut2)}</td><td className="border-b border-slate-200 px-2 py-2 text-right tabular-nums">{cell(terms?.term1.report)}</td><td className="border-b border-slate-200 px-2 py-2 text-right font-semibold tabular-nums">{cell(terms?.term1.total)}</td><td className="border-b border-l border-slate-200 px-2 py-2 text-right tabular-nums">{cell(terms?.term2.ut3)}</td><td className="border-b border-slate-200 px-2 py-2 text-right tabular-nums">{cell(terms?.term2.ut4)}</td><td className="border-b border-slate-200 px-2 py-2 text-right tabular-nums">{cell(terms?.term2.report)}</td><td className="border-b border-slate-200 px-2 py-2 text-right font-semibold tabular-nums">{cell(terms?.term2.total)}</td><td className="border-b border-amber-200 bg-amber-50 px-2 py-2 text-right font-bold tabular-nums text-amber-950">{cell(terms?.final_score)}</td></tr>})}</tbody>
+    </table></div> : <table className="mt-4 w-full border-collapse text-[12px]">
       <thead>
         <tr className="bg-slate-800 text-left text-white">
           <th className="px-3 py-2 font-semibold">Subject</th>
@@ -81,7 +86,7 @@ export function ReportMarksheet({ snapshot }: { snapshot: ReportSnapshot }) {
           <td className="border-b border-slate-200 px-3 py-2 text-right align-top">{subject.status !== "present" ? <span className="capitalize text-slate-500">{subject.status}</span> : subject.passed === false ? <span className="text-rose-600">Below pass</span> : <span className="text-emerald-700">Pass</span>}</td>
         </tr>)}
       </tbody>
-    </table>
+    </table>}
 
     {snapshot.co_scholastic_grades&&<section className="mt-4 grid grid-cols-2 gap-4 text-[12px]"><div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Art</p><p className="mt-0.5 font-semibold text-slate-900">{snapshot.co_scholastic_grades.art??"—"}</p></div><div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Moral Values</p><p className="mt-0.5 font-semibold text-slate-900">{snapshot.co_scholastic_grades.moral_values??"—"}</p></div></section>}
 

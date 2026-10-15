@@ -133,6 +133,7 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   // Body params: name, admission_no. The claim URL is passed as the dynamic suffix
   // for the template's URL button (button_urls=[claim_url]).
   student_portal_invite: { name: "student_portal_invite", params: ["student_name", "admission_no"] },
+  date_sheet_notice: { name: "school_date_sheet_notice", params: ["assessment_name", "session", "portal_url"] },
 
   // Manual apply-portal magic link sent by counsellors from the
   // ApplyMagicLinkButton dialog ("Send via WhatsApp"). URL button takes
@@ -1029,6 +1030,7 @@ Deno.serve(async (req) => {
       staff_welcome: "Welcome to NIMT Educational Institutions, {{1}}!\n\nYou have been added as {{2}} at {{3}}.\n\nPlease check your email for login details.\n\nFor any assistance, contact the admin office.",
       student_welcome: "Congratulations {{1}}!\n\nWelcome to NIMT Educational Institutions.\n\nAdmission No: {{2}}\nCourse: {{3}}\nCampus: {{4}}\n\nYou can access the student portal at https://uni.nimt.ac.in\n\nWe wish you a great academic journey ahead!",
       student_portal_invite: "Welcome {{1}}! Your admission (AN: {{2}}) is confirmed. Tap the button below to access the Student Portal — fees, attendance, notices, and more.",
+      date_sheet_notice: "Dear Parent, the {{1}} date sheet for session {{2}} is now available in the Student and Parent Portal. Please sign in at {{3}} and open Academic Reports to view your child's exam dates. Best wishes, NIMT School.",
       application_submitted: "Hi {{1}}, your application ({{2}}) has been submitted successfully at NIMT Educational Institutions. Your completed application form is attached. Our admissions team is reviewing it and will reach out with the next steps shortly.",
       app_fee_receipt: "Hi {{1}}, we've received your application fee of ₹{{2}}. Application: {{3}}. Receipt PDF is attached. Our admissions team will reach out for the next steps.",
       app_fee_receipt_pdf: "Hi {{1}}, we've received your application fee of ₹{{2}}. Application: {{3}}. Receipt PDF is attached. Our admissions team will reach out for the next steps.",
