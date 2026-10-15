@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Download, FileText, Loader2, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchFamilyCbseReports } from "@/lib/cbseExamsClient";
+import { fetchFamilyCbseDateSheets, fetchFamilyCbseReports, type CbseDateSheet } from "@/lib/cbseExamsClient";
 import type { FamilyReport } from "@/lib/cbseExams";
 import { isBeaconCourseCode } from "@/lib/cbseExams";
 
@@ -15,6 +15,7 @@ const statusCopy: Record<FamilyReport["status"], { label: string; description: s
 };
 
 type LinkedChild = { id: string; name: string; admission_no: string | null };
+type CalendarEvent = { id: string; title: string; event_type: string; starts_on: string; ends_on: string; notes: string | null; no_school: boolean };
 
 /** Child selection only affects academic reports, never the existing fee/payment context. */
 export function FamilyReports({ studentId, studentName = "", selectChild = false }: { studentId: string; studentName?: string; selectChild?: boolean }) {
@@ -22,6 +23,8 @@ export function FamilyReports({ studentId, studentName = "", selectChild = false
   const [children, setChildren] = useState<LinkedChild[]>([]);
   const [selectedId, setSelectedId] = useState(studentId);
   const [reports, setReports] = useState<FamilyReport[]>([]);
+  const [dateSheets, setDateSheets] = useState<CbseDateSheet[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [loadedIdentity, setLoadedIdentity] = useState("");
   const [loading, setLoading] = useState(true);
   const [childrenLoading, setChildrenLoading] = useState(selectChild);
@@ -67,14 +70,16 @@ export function FamilyReports({ studentId, studentName = "", selectChild = false
   useEffect(() => {
     let cancelled = false;
     setReports([]);
+    setDateSheets([]);
+    setCalendarEvents([]);
     setError(null);
     setDownloading(null);
     setLoading(true);
     if (!user?.id || !selectedId) { setLoading(false); return; }
-    void fetchFamilyCbseReports(selectedId).then(({ data, error: queryError }) => {
+    void Promise.all([fetchFamilyCbseReports(selectedId),fetchFamilyCbseDateSheets(selectedId),(supabase as any).rpc("cbse_family_school_calendar",{_student_id:selectedId})]).then(([reportResult,sheetResult,calendarResult]) => {
       if (cancelled) return;
-      if (queryError) setError("Reports could not be loaded. Please retry or contact the school office.");
-      else { setReports(data ?? []); setLoadedIdentity(`${user.id}:${selectedId}`); }
+      if (reportResult.error) setError("Reports could not be loaded. Please retry or contact the school office.");
+      else { setReports(reportResult.data ?? []); setDateSheets(sheetResult.data??[]); setCalendarEvents((calendarResult.data??[]) as CalendarEvent[]); setLoadedIdentity(`${user.id}:${selectedId}`); }
       setLoading(false);
     }).catch(() => {
       if (!cancelled) { setError("Reports could not be loaded. Please retry."); setLoading(false); }
@@ -124,6 +129,8 @@ export function FamilyReports({ studentId, studentName = "", selectChild = false
           {children.map(child => <option value={child.id} key={child.id}>{child.name}{child.admission_no ? ` · ${child.admission_no}` : ""}</option>)}
         </select>
       </div>}
+      {calendarEvents.length>0&&<section aria-label="School calendar" className="rounded-xl border bg-white p-4"><h3 className="font-semibold text-gray-900">School calendar</h3><ul className="mt-2 divide-y text-sm">{calendarEvents.map(event=><li key={event.id} className="flex flex-wrap justify-between gap-2 py-2"><span><span className="font-medium">{event.title}</span><span className="ml-2 text-xs capitalize text-gray-500">{event.event_type.replaceAll("_"," ")}{event.no_school?" · no school":""}</span>{event.notes&&<p className="text-xs text-gray-500">{event.notes}</p>}</span><span className="text-gray-600">{new Date(`${event.starts_on}T00:00:00`).toLocaleDateString("en-IN")}{event.ends_on!==event.starts_on?` – ${new Date(`${event.ends_on}T00:00:00`).toLocaleDateString("en-IN")}`:""}</span></li>)}</ul></section>}
+      {dateSheets.length>0&&<section aria-label="Exam date sheets" className="rounded-xl border bg-white p-4"><h3 className="font-semibold text-gray-900">Exam date sheets</h3><div className="mt-3 space-y-4">{dateSheets.map(sheet=><div key={sheet.id}><h4 className="font-medium">{sheet.title}</h4><p className="text-xs text-gray-500">Reporting closes {sheet.reporting_ends_on}</p>{sheet.classes.map(c=><div key={c.course_id} className="mt-2"><p className="text-sm font-medium">{c.course_name}</p><ul className="divide-y text-sm">{c.papers.map(p=><li key={p.subject_id} className="flex flex-wrap justify-between gap-2 py-2"><span>{p.subject_name}</span><span>{new Date(`${p.exam_on}T00:00:00`).toLocaleDateString("en-IN")}{p.starts_at?` · ${p.starts_at.slice(0,5)}`:""}{p.ends_at?`–${p.ends_at.slice(0,5)}`:""}{p.venue?` · ${p.venue}`:""}</span></li>)}</ul></div>)}</div>)}</div></section>}
       {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
       {loading ? <p role="status" className="flex items-center gap-2 py-8 text-sm text-gray-500"><Loader2 className="h-4 w-4 animate-spin" />Loading reports…</p> : !error && reports.length === 0 ? <div className="rounded-xl border bg-white p-8 text-center"><FileText className="mx-auto mb-3 h-8 w-8 text-gray-400" /><p className="text-sm text-gray-500">No academic reports are available yet.</p></div> : <ul className="space-y-3">
         {(loadedIdentity === requestIdentity ? reports : []).map(report => {

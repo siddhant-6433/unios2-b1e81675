@@ -2,7 +2,7 @@ import {supabase} from '@/integrations/supabase/client';
 import type {Json} from '@/integrations/supabase/types';
 import type {CbseAction,CbseConfiguration,CbseDownloadPayload,CbseReleaseOverview,CbseWorkspace,FamilyReport} from './cbseExams';
 // RPCs are added by the matching migration; typed result contracts avoid an untyped DB facade.
-type RpcName='cbse_configuration'|'cbse_exam_workspace'|'cbse_action'|'cbse_save_co_scholastic_grades'|'cbse_family_reports'|'cbse_download_payload'|'cbse_set_class_teacher'|'cbse_release_overview';
+type RpcName='cbse_configuration'|'cbse_exam_workspace'|'cbse_action'|'cbse_save_co_scholastic_grades'|'cbse_family_reports'|'cbse_download_payload'|'cbse_set_class_teacher'|'cbse_release_overview'|'cbse_datesheet_save'|'cbse_datesheet_update'|'cbse_datesheet_finalize'|'cbse_datesheet_get'|'cbse_datesheet_list'|'cbse_family_datesheets'|'cbse_datesheet_recipients';
 type RpcArgs=Record<string,Json|undefined>;
 type RpcResult={data:Json|null;error:{message:string}|null};
 // Keep the call parenthesised as a member expression (never extracted into a
@@ -22,3 +22,11 @@ export const setCbseClassTeacher=(examId:string,teacherUserId:string,version:num
 export const fetchCbseReleaseOverview=(courseId:string,sessionId:string)=>rpc<CbseReleaseOverview>('cbse_release_overview',{_course_id:courseId,_session_id:sessionId});
 export const fetchFamilyCbseReports=(studentId:string)=>rpc<FamilyReport[]>('cbse_family_reports',{_student_id:studentId});
 export const fetchCbseDownloadPayload=(reportId:string)=>rpc<CbseDownloadPayload>('cbse_download_payload',{_report_id:reportId});
+export type CbseDateSheet={id:string;institution_id:string;session_id:string;title:string;category:'unit_test'|'half_yearly'|'final';sequence:number;reporting_ends_on:string;status:'draft'|'finalized'|'released';created_at:string;released_at:string|null;classes:{course_id:string;course_name:string;course_code:string;section:string|null;exam_id:string|null;papers:{subject_id:string;subject_name:string;exam_on:string;starts_at:string|null;ends_at:string|null;venue:string|null}[]}[]};
+export const saveCbseDateSheet=(payload:object)=>rpc<{id:string}>('cbse_datesheet_save',{_payload:JSON.parse(JSON.stringify(payload)) as Json});
+export const updateCbseDateSheet=(id:string,payload:object)=>rpc<CbseDateSheet>('cbse_datesheet_update',{_datesheet_id:id,_payload:JSON.parse(JSON.stringify(payload)) as Json});
+export const fetchCbseDateSheet=(id:string)=>rpc<CbseDateSheet>('cbse_datesheet_get',{_datesheet_id:id});
+export const listCbseDateSheets=(sessionId:string|null)=>rpc<CbseDateSheet[]>('cbse_datesheet_list',{_session_id:sessionId});
+export const finalizeCbseDateSheet=(id:string,release=false)=>rpc<CbseDateSheet>('cbse_datesheet_finalize',{_datesheet_id:id,_release:release});
+export const fetchFamilyCbseDateSheets=(studentId:string)=>rpc<CbseDateSheet[]>('cbse_family_datesheets',{_student_id:studentId});
+export const fetchCbseDateSheetRecipients=(id:string)=>rpc<{phone:string}[]>('cbse_datesheet_recipients',{_datesheet_id:id});
