@@ -430,7 +430,14 @@ export function OfflinePaymentDialog({
     const { data, error } = await supabase.functions.invoke("generate-payment-receipt", {
       body: { payment_id: paymentId },
     });
-    if (error) throw error;
+    if (error) {
+      const response = (error as { context?: unknown }).context;
+      if (response instanceof Response) {
+        const failure = await response.clone().json().catch(() => null) as { error?: string } | null;
+        if (failure?.error) throw new Error(failure.error);
+      }
+      throw error;
+    }
     if (data?.error) throw new Error(data.error);
     if (data?.ok !== true || !data?.receipt_url) {
       throw new Error("The receipt service did not return a receipt file.");
@@ -580,7 +587,8 @@ export function OfflinePaymentDialog({
       setSubmitting(false);
       if (error.code === "23505" && (
         error.message.includes("lead_payments_confirmed_gateway_ref_uidx") ||
-        error.message.includes("lead_payments_confirmed_bank_ref_uidx")
+        error.message.includes("lead_payments_confirmed_bank_ref_uidx") ||
+        error.message.includes("confirmed_payment_reference_claims_pkey")
       )) {
         const details = await lookupDuplicatePayment(txnRef.trim());
         setDuplicatePayment({ reference: txnRef.trim(), details });

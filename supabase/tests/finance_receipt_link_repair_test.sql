@@ -1,7 +1,7 @@
 -- pgTAP coverage for the audited confirmed-receipt student-link repair.
 -- Run with: supabase test db
 BEGIN;
-SELECT plan(32);
+SELECT plan(38);
 
 CREATE TEMP TABLE _receipt_repair_ids AS
 SELECT
@@ -88,6 +88,49 @@ VALUES
   ((SELECT course_selection_payment FROM _receipt_repair_ids), (SELECT no_course_lead FROM _receipt_repair_ids), 'other', 100, 'upi', 'RPR-REF-003', 'N-RPR-003', 'confirmed', NULL, 'APP-COURSE-TEST'),
   ((SELECT allocated_payment FROM _receipt_repair_ids), (SELECT lead FROM _receipt_repair_ids), 'other', 75, 'upi', 'RPR-REF-004', 'N-RPR-004', 'confirmed', NULL, 'APP-REPAIR-TEST');
 ALTER TABLE public.lead_payments ENABLE TRIGGER USER;
+
+-- Exercise the shared registry while suppressing unrelated notification and
+-- ledger triggers. Keep only the new claim trigger enabled for these inserts.
+ALTER TABLE public.lead_payments DISABLE TRIGGER USER;
+ALTER TABLE public.lead_payments ENABLE TRIGGER zzzz_claim_confirmed_lead_payment_reference;
+SELECT lives_ok(
+  $$INSERT INTO public.lead_payments (id, lead_id, type, amount, payment_mode, transaction_ref, receipt_no, status)
+    VALUES ('00000000-0000-0000-0000-00000000f090', '00000000-0000-0000-0000-00000000f050', 'other', 10, 'upi', 'RPR-CLAIM-LEAD-FIRST', 'N-RPR-CLAIM-LEAD-FIRST', 'confirmed')$$,
+  'a confirmed lead payment claims its reference'
+);
+SELECT throws_ok(
+  $$INSERT INTO public.lead_payments (id, lead_id, type, amount, payment_mode, transaction_ref, receipt_no, status)
+    VALUES ('00000000-0000-0000-0000-00000000f091', '00000000-0000-0000-0000-00000000f050', 'other', 10, 'upi', 'RPR-CLAIM-LEAD-FIRST', 'N-RPR-CLAIM-LEAD-DUP', 'confirmed')$$,
+  '23505', NULL,
+  'a second confirmed lead payment cannot claim the same reference'
+);
+
+ALTER TABLE public.payments DISABLE TRIGGER USER;
+ALTER TABLE public.payments ENABLE TRIGGER zzzz_claim_confirmed_student_payment_reference;
+SELECT throws_ok(
+  $$INSERT INTO public.payments (id, student_id, amount, payment_mode, transaction_ref, receipt_no)
+    VALUES ('00000000-0000-0000-0000-00000000f092', '00000000-0000-0000-0000-00000000f060', 10, 'upi', 'RPR-CLAIM-LEAD-FIRST', 'N-RPR-CLAIM-STUDENT-DUP')$$,
+  '23505', NULL,
+  'a student payment cannot reuse a lead payment reference'
+);
+
+SELECT lives_ok(
+  $$INSERT INTO public.payments (id, student_id, amount, payment_mode, transaction_ref, receipt_no)
+    VALUES ('00000000-0000-0000-0000-00000000f093', '00000000-0000-0000-0000-00000000f060', 10, 'upi', 'RPR-CLAIM-STUDENT-FIRST', 'N-RPR-CLAIM-STUDENT-FIRST')$$,
+  'a student payment claims its reference'
+);
+ALTER TABLE public.payments ENABLE TRIGGER USER;
+SELECT throws_ok(
+  $$INSERT INTO public.lead_payments (id, lead_id, type, amount, payment_mode, transaction_ref, receipt_no, status)
+    VALUES ('00000000-0000-0000-0000-00000000f094', '00000000-0000-0000-0000-00000000f050', 'other', 10, 'upi', 'RPR-CLAIM-STUDENT-FIRST', 'N-RPR-CLAIM-LEAD-DUP-2', 'confirmed')$$,
+  '23505', NULL,
+  'a lead payment cannot reuse a student payment reference'
+);
+ALTER TABLE public.lead_payments ENABLE TRIGGER USER;
+SELECT ok(
+  NOT has_table_privilege('authenticated', 'public.confirmed_payment_reference_claims', 'SELECT'),
+  'authenticated users cannot read the internal reference claim registry'
+);
 
 INSERT INTO public.fee_ledger (id, student_id, fee_code_id, term, total_amount, due_date)
 VALUES ((SELECT fee_ledger FROM _receipt_repair_ids), (SELECT target_student FROM _receipt_repair_ids), (SELECT fee_code FROM _receipt_repair_ids), 'Repair Test', 75, '2026-11-01');

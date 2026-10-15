@@ -541,16 +541,22 @@ Deno.serve(async (req) => {
     const lead: any = lp.leads;
     let stu: any = lp.students;
     // College receipts are keyed on lead_id, so student_id is often null even
-    // after admission. Resolve the live student (current course) off the lead.
+    // after admission. Resolve from the lead only when its identity is unique;
+    // picking the newest student can put another candidate's details on a PDF.
     if (!stu?.id && lead?.id) {
-      const { data: linkedStu } = await admin
+      const { data: linkedStu, error: linkedStuErr } = await admin
         .from("students")
         .select("id, name, phone, email, admission_no, course_id, courses:course_id ( name ), campuses:campus_id ( name )")
         .eq("lead_id", lead.id)
-        .is("archived_at", null)
         .order("created_at", { ascending: false })
-        .limit(1);
-      stu = Array.isArray(linkedStu) ? linkedStu[0] : linkedStu;
+        .limit(2);
+      if (linkedStuErr) throw new Error(`Could not verify the receipt's student link: ${linkedStuErr.message}`);
+      if ((linkedStu || []).length > 1) {
+        return new Response(JSON.stringify({
+          error: "This receipt is attached to a lead with multiple student records. Review the existing receipt and link it to the verified student before generating a PDF.",
+        }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      stu = linkedStu?.[0] || null;
     }
     // Lead-less (post-admission school) receipt: identity + branding come from
     // the student's own record and its course→institution chain, not a lead.
@@ -737,16 +743,28 @@ Deno.serve(async (req) => {
     const receiptUrl = urlData?.publicUrl || path;
 
     const receiptCourseId = stu?.course_id || lead?.course_id || null;
-    await admin.from("lead_payments").update({
+    const { data: savedPayment, error: savePaymentError } = await admin.from("lead_payments").update({
       receipt_url: receiptUrl,
       ...(receiptCourseId ? { receipt_course_id: receiptCourseId } : {}),
-    }).eq("id", lp.id);
+    }).eq("id", lp.id).select("id").maybeSingle();
+    if (savePaymentError || !savedPayment) {
+      console.error("[receipt] could not save receipt URL:", savePaymentError?.message || "payment row was not updated");
+      return new Response(JSON.stringify({
+        error: "The receipt PDF was uploaded, but its payment record could not be updated. Retry receipt generation to finish.",
+      }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     if (isApp && resolvedApplicationId) {
-      await admin
+      const { error: appReceiptError } = await admin
         .from("applications")
         .update({ fee_receipt_url: receiptUrl })
         .eq("application_id", resolvedApplicationId)
         .eq("lead_id", lead?.id);
+      if (appReceiptError) {
+        console.error("[receipt] could not save application receipt URL:", appReceiptError.message);
+        return new Response(JSON.stringify({
+          error: "The receipt PDF was uploaded, but its application record could not be updated. Retry receipt generation to finish.",
+        }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
 
     return new Response(JSON.stringify({
