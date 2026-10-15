@@ -219,7 +219,7 @@ describe("Finance header and receipts collection cards stay aligned", () => {
     expect(offlineDialog).toContain("Review existing receipt");
     expect(offlineDialog).toContain('supabase.from("v_all_payments" as never)');
     expect(offlineDialog).toContain("candidate_name: exact.person_name");
-    expect(offlineDialog).toContain("disabled={submitting || cashBlocked || checkingReference || !!duplicatePayment || !!referenceCheckError}");
+    expect(offlineDialog).toContain("disabled={submitting || cashBlocked || checkingReference || !!duplicatePayment || !!referenceCheckError || !!receiptGenerationIssue}");
     expect(offlineDialog).toContain("Could not verify payment reference");
     expect(offlineDialog).toContain("Retry reference check");
     expect(offlineDialog).toContain("await verifyDuplicateReference(ref) !== \"clear\"");

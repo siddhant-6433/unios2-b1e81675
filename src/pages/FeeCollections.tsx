@@ -423,7 +423,7 @@ const FeeCollections = ({
                             className="h-7 gap-1 px-2 text-[11px]"
                             onClick={() => setRepairPayment(p)}
                           >
-                            {p.student_id ? "Change student link" : "Review student link"}
+                            Review existing receipt
                           </Button>
                         )}
                         </div>

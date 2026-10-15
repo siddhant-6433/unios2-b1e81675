@@ -5,6 +5,7 @@ import { OfflinePaymentDialog } from "@/components/finance/OfflinePaymentDialog"
 type QueryResult = { data: unknown; error: { message: string } | null };
 type Query = PromiseLike<QueryResult> & {
   select(columns?: string): Query;
+  insert(values: unknown): Query;
   eq(column: string, value: unknown): Query;
   or(filter: string): Query;
   limit(): Query;
@@ -18,6 +19,10 @@ const mock = vi.hoisted(() => ({
   referenceFilters: [] as string[],
   tableReads: [] as string[],
   equalityFilters: [] as { table: string; column: string; value: unknown }[],
+  insertResult: Promise<QueryResult>,
+  insertCalls: 0,
+  receiptGenerationResponses: [] as Promise<{ data: unknown; error: { message: string } | null }>[],
+  receiptGenerationCalls: 0,
   navigate: vi.fn(),
   onOpenChange: vi.fn(),
 }));
@@ -29,19 +34,27 @@ vi.mock("@/integrations/supabase/client", () => ({
       const queryResult = table === "v_all_payments"
         ? mock.confirmedResponses.shift() ?? Promise.resolve({ data: null, error: null })
         : Promise.resolve({ data: null, error: null });
+      let isInsert = false;
       const query: Query = {
         select: () => query,
+        insert: () => { isInsert = true; mock.insertCalls += 1; return query; },
         eq: (column: string, value: unknown) => { mock.equalityFilters.push({ table, column, value }); return query; },
         or: (filter: string) => { mock.referenceFilters.push(filter); return query; },
         limit: () => query,
         gte: () => query,
         order: () => query,
-        maybeSingle: () => queryResult,
+        maybeSingle: () => isInsert ? mock.insertResult : queryResult,
         then: (resolve, reject) => queryResult.then(resolve, reject),
       };
       return query;
     },
     rpc: async () => ({ data: null, error: null }),
+    functions: {
+      invoke: () => {
+        mock.receiptGenerationCalls += 1;
+        return mock.receiptGenerationResponses.shift() ?? Promise.resolve({ data: { ok: true, receipt_url: "/receipts/payment.pdf" }, error: null });
+      },
+    },
   },
 }));
 vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ profile: { id: "finance-user" }, role: "accountant" }) }));
@@ -74,12 +87,12 @@ vi.mock("@/components/finance/FeeHeadAllocationField", () => ({ FeeHeadAllocatio
 vi.mock("@/components/finance/Year1LumpSumBanner", () => ({ Year1LumpSumInfoBanner: () => null }));
 vi.mock("@/components/ui/thinking-orb", () => ({ ButtonOrb: () => null }));
 
-function renderDialog({ leadId = "lead-1", studentId }: { leadId?: string; studentId?: string } = {}) {
+function renderDialog({ leadId = "lead-1", studentId, leadLess = false }: { leadId?: string; studentId?: string; leadLess?: boolean } = {}) {
   return render(
     <OfflinePaymentDialog
       open
       onOpenChange={mock.onOpenChange}
-      leadId={leadId}
+      leadId={leadLess ? undefined : leadId}
       studentId={studentId}
       defaultType="other"
       defaultAmount={100}
@@ -97,6 +110,10 @@ beforeEach(() => {
   mock.referenceFilters.length = 0;
   mock.tableReads.length = 0;
   mock.equalityFilters.length = 0;
+  mock.insertResult = Promise.resolve({ data: { id: "saved-payment-1" }, error: null });
+  mock.insertCalls = 0;
+  mock.receiptGenerationResponses = [];
+  mock.receiptGenerationCalls = 0;
   mock.navigate.mockReset();
   mock.onOpenChange.mockReset();
 });
@@ -165,5 +182,26 @@ describe("offline payment duplicate reference guard", () => {
     expect(screen.getByText(/Receipt: N600/)).toBeInTheDocument();
     expect(mock.tableReads).toContain("v_all_payments");
     expect(mock.tableReads).not.toContain("lead_payments");
+  });
+
+  it("surfaces receipt generation failure and retries without inserting the payment again", async () => {
+    mock.receiptGenerationResponses = [
+      Promise.resolve({ data: { error: "Storage unavailable" }, error: null }),
+      Promise.resolve({ data: { ok: true, receipt_url: "/receipts/payment.pdf" }, error: null }),
+    ];
+    renderDialog({ leadLess: true, studentId: "student-1" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as Paid" }));
+
+    expect(await screen.findByText("Payment recorded; receipt not generated")).toBeInTheDocument();
+    expect(screen.getByText(/The payment is already saved; retry receipt generation without recording it again/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mark as Paid" })).toBeDisabled();
+    expect(mock.insertCalls).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry receipt generation" }));
+
+    await waitFor(() => expect(mock.onOpenChange).toHaveBeenCalledWith(false));
+    expect(mock.receiptGenerationCalls).toBe(2);
+    expect(mock.insertCalls).toBe(1);
   });
 });

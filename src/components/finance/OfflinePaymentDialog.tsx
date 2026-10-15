@@ -184,6 +184,7 @@ export function OfflinePaymentDialog({
   const referenceCheckRequest = useRef(0);
   const [referenceCheckError, setReferenceCheckError] = useState<string | null>(null);
   const [duplicatePayment, setDuplicatePayment] = useState<{ reference: string; details: DuplicatePaymentDetails } | null>(null);
+  const [receiptGenerationIssue, setReceiptGenerationIssue] = useState<{ paymentId: string; message: string } | null>(null);
   const [applyYear1LumpSum, setApplyYear1LumpSum] = useState(false);
 
   // Ad-hoc charge heads a super_admin has enabled for this person. Only offered
@@ -298,6 +299,7 @@ export function OfflinePaymentDialog({
     setCheckingReference(false);
     setReferenceCheckError(null);
     setDuplicatePayment(null);
+    setReceiptGenerationIssue(null);
     setBank("");
     setWallet("");
     setRemarks("");
@@ -424,7 +426,38 @@ export function OfflinePaymentDialog({
     onRecorded?.();
   };
 
+  const generateStudentReceipt = async (paymentId: string) => {
+    const { data, error } = await supabase.functions.invoke("generate-payment-receipt", {
+      body: { payment_id: paymentId },
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    if (data?.ok !== true || !data?.receipt_url) {
+      throw new Error("The receipt service did not return a receipt file.");
+    }
+  };
+
+  const retryStudentReceipt = async () => {
+    if (!receiptGenerationIssue || submitting) return;
+    const paymentId = receiptGenerationIssue.paymentId;
+    setSubmitting(true);
+    try {
+      await generateStudentReceipt(paymentId);
+      setReceiptGenerationIssue(null);
+      toast({ title: "Receipt generated", description: "The payment was already recorded." });
+      reset();
+      onOpenChange(false);
+      onRecorded?.();
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Please retry receipt generation.";
+      setReceiptGenerationIssue({ paymentId, message });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleSubmit = async () => {
+    if (receiptGenerationIssue) return;
     const listAmt = parseFloat(amount);
     const applyingLump = year1Covered && applyYear1LumpSum && !!year1LumpSum;
     const amt = applyingLump && year1LumpSum
@@ -543,9 +576,8 @@ export function OfflinePaymentDialog({
       application_id:  !isStudent && type === "application_fee" ? applicationId || null : null,
       allocations:     submitAllocations.length ? submitAllocations : null,
     }).select("id").maybeSingle();
-    setSubmitting(false);
-
     if (error) {
+      setSubmitting(false);
       if (error.code === "23505" && (
         error.message.includes("lead_payments_confirmed_gateway_ref_uidx") ||
         error.message.includes("lead_payments_confirmed_bank_ref_uidx")
@@ -574,11 +606,24 @@ export function OfflinePaymentDialog({
         });
       }
       if (isStudent) {
-        // No lead to notify (WhatsApp/email flow is lead-centric); just mint the
+        // No lead to notify (WhatsApp/email flow is lead-centric); mint the
         // receipt PDF + receipt_url straight from generate-payment-receipt.
-        supabase.functions.invoke("generate-payment-receipt", {
-          body: { payment_id: paymentId },
-        }).catch(e => console.error("[OfflinePaymentDialog] generate-payment-receipt failed:", e));
+        // Keep this dialog open with a retry path if that follow-up fails. The
+        // payment row is already saved, so retry never inserts another payment.
+        try {
+          await generateStudentReceipt(paymentId);
+        } catch (caught) {
+          const message = caught instanceof Error ? caught.message : "Please retry receipt generation.";
+          setReceiptGenerationIssue({ paymentId, message });
+          setSubmitting(false);
+          onRecorded?.();
+          toast({
+            title: "Payment recorded; receipt not generated",
+            description: "The payment is saved. Retry receipt generation without recording it again.",
+            variant: "destructive",
+          });
+          return;
+        }
       } else {
         const event = type === "application_fee" ? "app_fee_paid" : "payment_received";
         supabase.functions.invoke("notify-event", {
@@ -587,6 +632,7 @@ export function OfflinePaymentDialog({
       }
     }
 
+    setSubmitting(false);
     toast({
       title: "Payment recorded",
       description: `${PAY_TYPES.find(p => p.value === type)?.label} of ₹${amt.toLocaleString("en-IN")} marked as confirmed.`,
@@ -643,6 +689,18 @@ export function OfflinePaymentDialog({
                   onClick={() => void verifyDuplicateReference(txnRef)}
                 >
                   {checkingReference ? "Checking reference…" : "Retry reference check"}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+          {receiptGenerationIssue && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>Payment recorded; receipt not generated</AlertTitle>
+              <AlertDescription className="mt-2 space-y-3">
+                <p>{receiptGenerationIssue.message}. The payment is already saved; retry receipt generation without recording it again.</p>
+                <Button type="button" variant="outline" disabled={submitting} onClick={() => void retryStudentReceipt()}>
+                  {submitting ? "Generating receipt…" : "Retry receipt generation"}
                 </Button>
               </AlertDescription>
             </Alert>
@@ -924,7 +982,7 @@ export function OfflinePaymentDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting || checkingReference}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={submitting || cashBlocked || checkingReference || !!duplicatePayment || !!referenceCheckError}>
+          <Button onClick={handleSubmit} disabled={submitting || cashBlocked || checkingReference || !!duplicatePayment || !!referenceCheckError || !!receiptGenerationIssue}>
             {submitting ? <ButtonOrb state="connecting" onFilled /> : null}
             {submitting ? "Recording…" : "Mark as Paid"}
           </Button>

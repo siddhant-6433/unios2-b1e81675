@@ -17,6 +17,7 @@ type Query = PromiseLike<Response> & {
 const mock = vi.hoisted(() => ({
   receiptResponses: [] as Promise<Response>[],
   receiptQueries: 0,
+  canCreateFinance: false,
 }));
 
 vi.mock("@/integrations/supabase/client", () => ({
@@ -41,7 +42,7 @@ vi.mock("@/integrations/supabase/client", () => ({
   },
 }));
 vi.mock("@/contexts/CampusContext", () => ({ useCampus: () => ({ selectedCampusId: "all" }) }));
-vi.mock("@/contexts/PermissionContext", () => ({ usePermissions: () => ({ can: () => false }) }));
+vi.mock("@/contexts/PermissionContext", () => ({ usePermissions: () => ({ can: () => mock.canCreateFinance }) }));
 vi.mock("@/components/ui/thinking-orb", () => ({ OrbLoader: () => <div>Loading receipts…</div> }));
 vi.mock("@/components/ui/state-fields", () => ({ FieldShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>, SelectField: () => null }));
 vi.mock("@/components/receipts/ReceiptDialog", () => ({ ReceiptDialog: () => null }));
@@ -57,6 +58,7 @@ function renderPage() {
 beforeEach(() => {
   mock.receiptResponses = [];
   mock.receiptQueries = 0;
+  mock.canCreateFinance = false;
 });
 afterEach(cleanup);
 
@@ -107,5 +109,31 @@ describe("Finance receipts read state", () => {
     expect(await screen.findByText(
       "No visible confirmed receipt matches this reference. Check it or ask an administrator to verify access.",
     )).toBeInTheDocument();
+  });
+
+  it("offers to review an existing lead receipt", async () => {
+    mock.canCreateFinance = true;
+    mock.receiptResponses = [ok([{
+      id: "lead-payment-1",
+      source: "lead",
+      lead_id: "lead-1",
+      student_id: null,
+      amount: 500,
+      payment_mode: "upi",
+      receipt_no: "N565",
+      transaction_ref: "05049789698",
+      paid_at: null,
+      person_name: "Prashasti",
+      fee_head: "Application Fee",
+      status: "confirmed",
+    }])];
+
+    render(
+      <MemoryRouter initialEntries={["/finance?tab=receipts&receipt_ref=05049789698"]}>
+        <FeeCollections embedded fromDate="" toDate="" />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("button", { name: "Review existing receipt" })).toBeInTheDocument();
   });
 });

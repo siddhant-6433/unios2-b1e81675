@@ -31,7 +31,7 @@ test("finance repairs an existing receipt link and the student panel shows that 
 
   const existingReceiptRow = page.getByRole("row").filter({ hasText: fixture.receiptNo! });
   await expect(existingReceiptRow).toBeVisible();
-  await existingReceiptRow.getByRole("button", { name: "Review student link" }).click();
+  await existingReceiptRow.getByRole("button", { name: "Review existing receipt" }).click();
   await expect(page.getByRole("heading", { name: "Review existing receipt" })).toBeVisible();
   await page.getByRole("textbox", { name: "Find target student" }).fill(fixture.studentSearch!);
   const targetStudent = page.getByRole("button").filter({ hasText: fixture.studentAdmissionNo! }).first();
