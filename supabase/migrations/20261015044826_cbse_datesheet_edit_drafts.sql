@@ -1,4 +1,5 @@
 -- cbse datesheet edit drafts
+-- keep-migration-version: restored production migration 20261015044826; preserve its applied version.
 
 create function public.cbse_datesheet_update(_datesheet_id uuid,_payload jsonb) returns jsonb
 language plpgsql security definer set search_path=public,pg_temp as $$

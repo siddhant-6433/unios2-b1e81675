@@ -1,4 +1,5 @@
 -- cbse two term reports and remove test assessments
+-- keep-migration-version: restored production migration 20261014175459; preserve its applied version.
 
 -- Two term assessment scheme: Term 1 and Term 2 each contribute 50% to the
 -- Final Report. Each term report remains a 100 mark total.

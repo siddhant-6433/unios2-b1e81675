@@ -1,4 +1,5 @@
 -- cbse shared datesheets
+-- keep-migration-version: restored production migration 20261014181258; preserve its applied version.
 
 create table public.cbse_datesheets (
  id uuid primary key default gen_random_uuid(),
@@ -16,9 +17,6 @@ create table public.cbse_datesheets (
  updated_at timestamptz not null default now(),
  check((category='unit_test' and sequence between 1 and 4) or (category<>'unit_test' and sequence=1))
 );
-create unique index cbse_datesheets_one_final_per_assessment
- on public.cbse_datesheets(institution_id,session_id,category,sequence)
- where status in ('finalized','released');
 create table public.cbse_datesheet_classes (
  id uuid primary key default gen_random_uuid(),
  datesheet_id uuid not null references public.cbse_datesheets(id) on delete cascade,

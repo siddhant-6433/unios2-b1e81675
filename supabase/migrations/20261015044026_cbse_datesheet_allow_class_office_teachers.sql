@@ -1,4 +1,5 @@
 -- Keep the two-term source validation while allowing the assigned class teacher
+-- keep-migration-version: restored production migration 20261015044026; preserve its applied version.
 -- or school office staff to own a paper when a subject allocation is absent.
 create or replace function public.cbse_configure(_exam uuid,_payload jsonb)
 returns void language plpgsql security definer set search_path=public,pg_temp as $$
