@@ -3,6 +3,7 @@
 -- One canonical, caller-RLS-scoped confirmed-payment read model for Finance
 -- and student panels. Append columns so existing PostgREST clients retain the
 -- current v_all_payments column order.
+-- lint-allow: security_invoker is intentional; Finance and student rows must obey caller-specific RLS.
 CREATE OR REPLACE VIEW public.v_all_payments WITH (security_invoker = true) AS
   SELECT
     'student'::text                      AS source,
