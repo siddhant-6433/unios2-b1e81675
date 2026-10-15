@@ -293,21 +293,6 @@ async function settleStudentFeePayment(
     remainingWaiver = Math.round((remainingWaiver - concessionPart) * 100) / 100;
     remainingCover = Math.round((remainingCover - take) * 100) / 100;
     const paidPart = Math.max(0, Math.round((take - concessionPart) * 100) / 100);
-    const newConcession = Number(row.concession || 0) + concessionPart;
-    const newPaid = Number(row.paid_amount || 0) + paidPart;
-    const fullyPaid = newPaid + newConcession >= Number(row.total_amount) - 0.01;
-
-    const { error } = await admin
-      .from("fee_ledger")
-      .update({
-        concession: newConcession,
-        paid_amount: newPaid,
-        ...(fullyPaid ? { status: "paid" } : {}),
-      })
-      .eq("id", row.id)
-      .in("status", ["due", "overdue"]); // claim only unpaid rows
-    if (error) return { ok: false, message: error.message };
-
     ledgerSplits.push({ id: row.id, amount: paidPart, concession: concessionPart });
   }
 
@@ -317,58 +302,37 @@ async function settleStudentFeePayment(
     .eq("id", studentId)
     .maybeSingle();
 
-  let paymentId: string | null = null;
-  if (student?.lead_id) {
-    const { data: inserted, error } = await admin
-      .from("lead_payments")
-      .insert({
-        lead_id: student.lead_id,
-        type: "other",
-        amount: paidAmount,
-        concession_amount: waiver,
-        payment_mode: "gateway",
-        gateway: "razorpay",
-        transaction_ref: paymentRef,
-        status: "confirmed",
-        applied_to_ledger: true,
-        notes: waiver > 0 ? "Course-fee payment with Year-1 tuition lump-sum waiver" : "Course-fee instalment via Razorpay",
-      })
-      .select("id")
-      .maybeSingle();
+  const { data: applied, error } = await (admin as any).rpc("create_and_apply_fee_payment", {
+    _payment: {
+      lead_id: student?.lead_id || null,
+      student_id: studentId,
+      type: "other",
+      amount: paidAmount,
+      concession_amount: waiver,
+      payment_mode: "gateway",
+      gateway: "razorpay",
+      transaction_ref: paymentRef,
+      notes: waiver > 0 ? "Course-fee payment with Year-1 tuition lump-sum waiver" : "Course-fee instalment via Razorpay",
+    },
+    _allocations: ledgerSplits.map((split) => ({
+      fee_ledger_id: split.id,
+      amount: split.amount,
+      concession_amount: split.concession,
+      notes: "Student portal Razorpay payment",
+    })),
+  });
+  if (error) return { ok: false, message: error.message };
 
-    if (error) {
-      if (error.code === "23505" || /duplicate|unique/i.test(error.message || "")) {
-        const { data: again } = await admin
-          .from("lead_payments")
-          .select("id")
-          .eq("transaction_ref", paymentRef)
-          .maybeSingle();
-        return { ok: true, already: true, leadPaymentId: again?.id || null };
-      }
-      return { ok: false, message: error.message };
-    }
-    paymentId = inserted?.id || null;
-
-    if (paymentId && ledgerSplits.length) {
-      // Ignore insert errors on link rows if a concurrent path already linked.
-      await admin.from("fee_ledger_payments").insert(
-        ledgerSplits.map((split) => ({
-          fee_ledger_id: split.id,
-          lead_payment_id: paymentId,
-          amount: split.amount,
-          concession_amount: split.concession,
-          notes: "Student portal Razorpay payment",
-        })),
-      );
-      fetch(`${supabaseUrl}/functions/v1/notify-event`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-        body: JSON.stringify({ event: "payment_received", lead_id: student.lead_id, context: { payment_id: paymentId } }),
-      }).catch((error) => console.error("[razorpay] notify-event invoke failed:", error));
-    }
+  let paymentId: string | null = applied?.payment_id || null;
+  if (paymentId && student?.lead_id) {
+    fetch(`${supabaseUrl}/functions/v1/notify-event`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+      body: JSON.stringify({ event: "payment_received", lead_id: student.lead_id, context: { payment_id: paymentId } }),
+    }).catch((error) => console.error("[razorpay] notify-event invoke failed:", error));
   }
 
-  return { ok: true, already: false, leadPaymentId: paymentId };
+  return { ok: true, already: Boolean(applied?.already), leadPaymentId: paymentId };
 }
 
 async function settleApplicationFee(

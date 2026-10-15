@@ -91,7 +91,7 @@ describe("pay-link edge function", () => {
     // fee_due / custom links sweep the student's oldest-due ledger rows.
     expect(settlementFn).toContain('.from("fee_ledger")');
     expect(settlementFn).toContain('.in("status", ["due", "overdue"])');
-    expect(settlementFn).toContain('from("fee_ledger_payments")');
+    expect(settlementFn).toContain('rpc("create_and_apply_fee_payment"');
     // pay-link itself only routes; it must not re-implement settlement.
     expect(payLinkFn).toContain('import { settlePaymentLink } from "../_shared/gateway-settlement.ts";');
   });
