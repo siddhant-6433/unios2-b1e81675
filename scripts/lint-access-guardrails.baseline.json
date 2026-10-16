@@ -8,6 +8,7 @@
     "supabase/migrations/20260422110000_fix_security_linter_issues.sql:34:B:invoker-view-on-rls-table",
     "supabase/migrations/20260422110000_fix_security_linter_issues.sql:38:B:invoker-view-on-rls-table",
     "supabase/migrations/20260422110000_fix_security_linter_issues.sql:40:B:invoker-view-on-rls-table",
+    "supabase/migrations/20260422110000_fix_security_linter_issues.sql:43:B:invoker-view-on-rls-table",
     "supabase/migrations/20260422110000_fix_security_linter_issues.sql:44:B:invoker-view-on-rls-table",
     "supabase/migrations/20260422110000_fix_security_linter_issues.sql:46:B:invoker-view-on-rls-table",
     "supabase/migrations/20260422110000_fix_security_linter_issues.sql:47:B:invoker-view-on-rls-table",

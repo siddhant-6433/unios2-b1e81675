@@ -8,6 +8,7 @@ import {
   buildReceiptReviewPath,
   buildReceiptSearchFilter,
 } from "@/lib/financeReceiptSearch";
+import { classifyReceiptRepairError } from "@/lib/financeReceiptRepairErrors";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -21,8 +22,20 @@ const readMigration = (suffix: string) => {
 const financePage = read("src/pages/Finance.tsx");
 const feeCollections = read("src/pages/FeeCollections.tsx");
 const summaryMigration = readMigration("finance_summary_match_receipts");
+const identityMigration = readMigration("finance_receipt_link_identity_evidence");
 
 describe("Finance header and receipts collection cards stay aligned", () => {
+  it("offers repair retry only for transient failures and reloads stale reviews", () => {
+    expect(classifyReceiptRepairError({ code: "42501", message: "Finance permission required" }).action).toBeNull();
+    expect(classifyReceiptRepairError({ code: "22023", message: "Receipt and target student courses do not match" }).action).toBeNull();
+    expect(classifyReceiptRepairError({ code: "22023", message: "Application identity matches multiple students" }).action).toBeNull();
+    expect(classifyReceiptRepairError({ code: "22023", message: "Receipt lead is linked to multiple active students" }).action).toBeNull();
+    expect(classifyReceiptRepairError({ code: "40001", message: "serialization conflict" }).action).toBe("reload");
+    expect(classifyReceiptRepairError({ code: "40001", message: "Receipt link changed; reload and review it again" }).action).toBe("reload");
+    expect(classifyReceiptRepairError({ code: "40P01", message: "deadlock detected" }).action).toBe("retry");
+    expect(classifyReceiptRepairError(new Error("Failed to fetch")).action).toBe("retry");
+  });
+
   it("searches partial receipt numbers, names, and admission numbers", () => {
     expect(buildReceiptSearchFilter(" N269 ", "all")).toBe(
       'person_name.ilike."%N269%",admission_no.ilike."%N269%",receipt_no.ilike."%N269%",transaction_ref.ilike."%N269%",bank_ref_num.ilike."%N269%"',
@@ -225,9 +238,31 @@ describe("Finance header and receipts collection cards stay aligned", () => {
     expect(offlineDialog).toContain("await verifyDuplicateReference(ref) !== \"clear\"");
     expect(offlineDialog).toContain("lead_payments_confirmed_bank_ref_uidx");
     expect(repairDialog).toContain("Identity mismatch");
-    expect(repairDialog).toContain("I verified the receipt reference and the student identity above.");
+    expect(repairDialog).toContain("I verified the receipt reference and the student identity details above.");
     expect(repairDialog).toContain('label="Reason for correction"');
+    expect(repairDialog).toContain('aria-label="Reason for correction"');
     expect(repairDialog).toContain('setStudentSearchRetryKey((value) => value + 1)');
+    expect(repairDialog).toContain("identityEvidence.applicationProfileMatch");
+    expect(repairDialog).toContain("not directly linked to this receipt lead");
+    expect(repairDialog).toContain("father_name:father->>name");
+    expect(repairDialog).toContain("conflictingIdentityDetails");
+    expect(repairDialog).toContain("_identity_confirmed: verified");
+    expect(repairDialog).toContain("Reload receipt");
+    expect(repairDialog).toContain('repairRetryAction === "reload"');
+    expect(repairDialog).toContain("classifyReceiptRepairError");
+    expect(identityMigration).toContain("_identity_confirmed IS DISTINCT FROM true");
+    expect(identityMigration).toContain("This receipt review screen is out of date");
+    expect(identityMigration).toContain("v_application.dob IS NOT NULL");
+    expect(identityMigration).toContain("v_student_mother_name = v_application_mother_name");
+    expect(identityMigration).toContain("v_profile_candidate_count <> 1");
+    expect(identityMigration).toContain("v_application.father->>'name'");
+    expect(identityMigration).toContain("pg_advisory_xact_lock");
+    expect(identityMigration).toContain("candidate.name = v_application_name");
+    expect(identityMigration).toContain("v_direct_lead_candidate_count <> 1");
+    expect(identityMigration).toContain("Available application identity details conflict with the target student");
+    expect(identityMigration).toContain("UPDATE OF status, amount, lead_id, type, payment_date");
+    expect(identityMigration).toContain("UPDATE OF status, amount, lead_id ON public.lead_payments");
+    expect(identityMigration).toContain("Payment link changed while allocation was starting; retry the allocation");
   });
 
   it("provides the same confirmed receipt columns to Finance and the student panel", () => {

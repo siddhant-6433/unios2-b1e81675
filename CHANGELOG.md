@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1.0] - 2026-10-16
+
+### Fixed
+
+- Verify existing receipts when application and student names differ by surname or use legacy parent-name fields, while blocking ambiguous and conflicting identities.
+- Prevent receipt relinks from conflicting with an active lead-to-student link, and stop fee allocation if a payment link or status changes while waiting for its lock.
+- Give Finance clear reload or retry actions for receipt repair conflicts and transient failures.
+
 ## [0.9.0.0] - 2026-10-15
 
 ### Added

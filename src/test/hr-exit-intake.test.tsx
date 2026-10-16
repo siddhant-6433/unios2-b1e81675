@@ -132,6 +132,7 @@ describe("HR exit intake", () => {
     mocks.insertError = { message: "permission denied" };
     const dialog = await openExitDialog();
     fireEvent.change(dialog.getByLabelText("Employee"), { target: { value: "emp-1" } });
+    fireEvent.change(dialog.getByLabelText("Resignation / notice date"), { target: { value: "2026-10-01" } });
     fireEvent.change(dialog.getByLabelText("Last working day"), { target: { value: "2026-10-15" } });
     fireEvent.click(dialog.getByRole("button", { name: "Record exit" }));
 

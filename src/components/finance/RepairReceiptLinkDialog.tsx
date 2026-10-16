@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { FieldShell } from "@/components/ui/state-fields";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertTriangle, CheckCircle, Search, ShieldCheck } from "lucide-react";
+import { classifyReceiptRepairError, type ReceiptRepairRetryAction } from "@/lib/financeReceiptRepairErrors";
 
 type StudentOption = {
   id: string;
@@ -16,6 +17,9 @@ type StudentOption = {
   lead_id: string | null;
   course_id: string | null;
   campus_id: string | null;
+  dob: string | null;
+  father_name: string | null;
+  mother_name: string | null;
   courses?: { name?: string } | null;
   campuses?: { name?: string } | null;
 };
@@ -44,13 +48,20 @@ type RepairIdentity = {
     application_id: string;
     full_name: string;
     lead_id: string | null;
+    dob: string | null;
+    father_name: string | null;
+    father_first_name: string | null;
+    father_last_name: string | null;
+    mother_name: string | null;
+    mother_first_name: string | null;
+    mother_last_name: string | null;
     course_selections?: { course_id?: string | null; course_name?: string | null }[] | null;
   } | null;
   applicationId: string | null;
   currentStudent: StudentOption | null;
 };
 
-type DbResult<T> = { data: T; error: { message?: string } | null };
+type DbResult<T> = { data: T; error: { message?: string; code?: string } | null };
 type LooseQuery = PromiseLike<DbResult<unknown>> & {
   select(columns: string): LooseQuery;
   eq(column: string, value: unknown): LooseQuery;
@@ -67,6 +78,14 @@ const receiptDb = supabase as unknown as {
 
 function normalizeName(value: string | null | undefined) {
   return (value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+function joinedName(first: string | null | undefined, last: string | null | undefined) {
+  return normalizeName([first, last].filter(Boolean).join(" "));
+}
+
+function applicationParentName(name: string | null | undefined, first: string | null | undefined, last: string | null | undefined) {
+  return normalizeName(name) || joinedName(first, last);
 }
 
 function messageFromError(error: unknown) {
@@ -100,6 +119,7 @@ export function RepairReceiptLinkDialog({
   const [verified, setVerified] = useState(false);
   const [saving, setSaving] = useState(false);
   const [repairError, setRepairError] = useState<string | null>(null);
+  const [repairRetryAction, setRepairRetryAction] = useState<ReceiptRepairRetryAction>(null);
   const identityRequest = useRef(0);
   const searchRequest = useRef(0);
 
@@ -109,6 +129,8 @@ export function RepairReceiptLinkDialog({
     setIdentityLoading(true);
     setIdentityError(null);
     setRepairError(null);
+    setRepairRetryAction(null);
+    setVerified(false);
     setIdentity(null);
     try {
     const { data: paymentData, error: paymentError } = await receiptDb
@@ -142,7 +164,7 @@ export function RepairReceiptLinkDialog({
     if (applicationId) {
       const appResult = await receiptDb
         .from("applications")
-        .select("application_id, full_name, lead_id, course_selections")
+        .select("application_id, full_name, lead_id, course_selections, dob, father_name:father->>name, father_first_name:father->>first_name, father_last_name:father->>last_name, mother_name:mother->>name, mother_first_name:mother->>first_name, mother_last_name:mother->>last_name")
         .eq("application_id", applicationId)
         .maybeSingle();
       if (request !== identityRequest.current) return;
@@ -156,7 +178,7 @@ export function RepairReceiptLinkDialog({
     if (payment.student_id) {
       const studentResult = await receiptDb
         .from("students")
-        .select("id, name, admission_no, pre_admission_no, lead_id, course_id, campus_id, courses:course_id(name), campuses:campus_id(name)")
+        .select("id, name, admission_no, pre_admission_no, lead_id, course_id, campus_id, dob, father_name, mother_name, courses:course_id(name), campuses:campus_id(name)")
         .eq("id", payment.student_id)
         .maybeSingle();
       if (request !== identityRequest.current) return;
@@ -194,6 +216,7 @@ export function RepairReceiptLinkDialog({
     setReason("");
     setVerified(false);
     setRepairError(null);
+    setRepairRetryAction(null);
     void loadIdentity();
   }, [open, paymentSummary?.id, paymentSummary?.person_name, loadIdentity]);
 
@@ -212,7 +235,7 @@ export function RepairReceiptLinkDialog({
       try {
         const { data, error } = await receiptDb
           .from("students")
-          .select("id, name, admission_no, pre_admission_no, lead_id, course_id, campus_id, courses:course_id(name), campuses:campus_id(name)")
+          .select("id, name, admission_no, pre_admission_no, lead_id, course_id, campus_id, dob, father_name, mother_name, courses:course_id(name), campuses:campus_id(name)")
           .or(`name.ilike."%${value}%",admission_no.ilike."%${value}%",pre_admission_no.ilike."%${value}%"`)
           .order("name")
           .limit(10);
@@ -238,6 +261,37 @@ export function RepairReceiptLinkDialog({
     };
   }, [open, identity, studentSearch, studentSearchRetryKey]);
 
+  const identityEvidence = useMemo(() => {
+    if (!identity || !selectedStudent) return null;
+    const applicationName = normalizeName(identity.application?.full_name);
+    const studentName = normalizeName(selectedStudent.name);
+    const directLeadMatch = selectedStudent.lead_id === identity.lead.id;
+    const applicationNamePrefixMatch = !!applicationName && studentName.startsWith(`${applicationName} `);
+    const applicationFatherName = applicationParentName(identity.application?.father_name, identity.application?.father_first_name, identity.application?.father_last_name);
+    const applicationMotherName = applicationParentName(identity.application?.mother_name, identity.application?.mother_first_name, identity.application?.mother_last_name);
+    const studentFatherName = normalizeName(selectedStudent.father_name);
+    const studentMotherName = normalizeName(selectedStudent.mother_name);
+    const dateOfBirthMatch = !!identity.application?.dob && !!selectedStudent.dob && identity.application.dob === selectedStudent.dob;
+    const fatherNameMatch = !!applicationFatherName && applicationFatherName === studentFatherName;
+    const motherNameMatch = !!applicationMotherName && applicationMotherName === studentMotherName;
+    const parentNameMatch = fatherNameMatch || motherNameMatch;
+    const conflictingIdentityDetails = (!!applicationName && studentName !== applicationName && !applicationNamePrefixMatch)
+      || (!!identity.application?.dob && !!selectedStudent.dob && identity.application.dob !== selectedStudent.dob)
+      || (!!applicationFatherName && !!studentFatherName && applicationFatherName !== studentFatherName)
+      || (!!applicationMotherName && !!studentMotherName && applicationMotherName !== studentMotherName);
+    const exactApplicationNameMatch = !!applicationName && studentName === applicationName && !conflictingIdentityDetails;
+    const applicationProfileMatch = applicationNamePrefixMatch && dateOfBirthMatch && parentNameMatch && !conflictingIdentityDetails;
+    return {
+      directLeadMatch,
+      exactApplicationNameMatch,
+      applicationProfileMatch,
+      dateOfBirthMatch,
+      fatherNameMatch,
+      motherNameMatch,
+      conflictingIdentityDetails,
+    };
+  }, [identity, selectedStudent]);
+
   const mismatchReasons = useMemo(() => {
     if (!identity || !selectedStudent) return ["Select a student to compare the identities."];
     const reasons: string[] = [];
@@ -258,20 +312,25 @@ export function RepairReceiptLinkDialog({
     if (!identity.lead.course_id && applicationCourseIds.length > 0 && !applicationCourseIds.includes(selectedStudent.course_id?.toLowerCase() || "")) {
       reasons.push("The target student course does not match a course selected on the application.");
     }
-    const linkedToLead = selectedStudent.lead_id === identity.lead.id;
-    const applicationName = normalizeName(identity.application?.full_name);
-    const studentName = normalizeName(selectedStudent.name);
-    const matchesApplicationName = !!applicationName && !!studentName && applicationName === studentName;
-    if (!linkedToLead && (selectedStudent.lead_id || !matchesApplicationName)) {
-      reasons.push("The student is not linked to the receipt lead or does not match its application name.");
+    if (identityEvidence?.conflictingIdentityDetails) {
+      reasons.push("Available date of birth or parent details conflict with the application.");
+    }
+    const identityLinked = !!identityEvidence && (
+      identityEvidence.directLeadMatch
+      || identityEvidence.exactApplicationNameMatch
+      || identityEvidence.applicationProfileMatch
+    );
+    if (!identityLinked) {
+      reasons.push("The student is not linked to the receipt lead and the application name, date of birth, and parent name do not provide a complete identity match.");
     }
     return reasons;
-  }, [identity, selectedStudent]);
+  }, [identity, selectedStudent, identityEvidence]);
 
   const handleRepair = async () => {
     if (!identity || !selectedStudent || mismatchReasons.length || !verified || reason.trim().length < 8) return;
     setSaving(true);
     setRepairError(null);
+    setRepairRetryAction(null);
     try {
       const { error } = await receiptDb.rpc("repair_confirmed_lead_payment_student_link", {
         _payment_id: identity.payment.id,
@@ -279,12 +338,12 @@ export function RepairReceiptLinkDialog({
         _expected_student_id: identity.payment.student_id,
         _application_id: identity.applicationId,
         _reason: reason.trim(),
+        _identity_confirmed: verified,
       });
       if (error) {
-        const message = messageFromError(error);
-        setRepairError(message.toLowerCase().includes("changed")
-          ? "The receipt link changed while this review was open. Reload the receipt and verify the student again."
-          : message);
+        const failure = classifyReceiptRepairError(error);
+        setRepairError(failure.message);
+        setRepairRetryAction(failure.action);
         return;
       }
       toast({
@@ -294,7 +353,9 @@ export function RepairReceiptLinkDialog({
       onOpenChange(false);
       onDone();
     } catch (caught) {
-      setRepairError(messageFromError(caught));
+      const failure = classifyReceiptRepairError(caught);
+      setRepairError(failure.message);
+      setRepairRetryAction(failure.action);
     } finally {
       setSaving(false);
     }
@@ -347,6 +408,9 @@ export function RepairReceiptLinkDialog({
                 <div><dt className="text-xs text-muted-foreground">Campus</dt><dd>{identity.lead.campuses?.name || "—"}</dd></div>
                 <div><dt className="text-xs text-muted-foreground">Lead course</dt><dd>{identity.lead.courses?.name || "—"}</dd></div>
                 <div><dt className="text-xs text-muted-foreground">Application name</dt><dd>{identity.application?.full_name || "—"}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">Application date of birth</dt><dd>{identity.application?.dob || "—"}</dd></div>
+                {(identity.application?.father_name || identity.application?.father_first_name || identity.application?.father_last_name) && <div><dt className="text-xs text-muted-foreground">Application father</dt><dd>{identity.application.father_name || [identity.application.father_first_name, identity.application.father_last_name].filter(Boolean).join(" ")}</dd></div>}
+                {(identity.application?.mother_name || identity.application?.mother_first_name || identity.application?.mother_last_name) && <div><dt className="text-xs text-muted-foreground">Application mother</dt><dd>{identity.application.mother_name || [identity.application.mother_first_name, identity.application.mother_last_name].filter(Boolean).join(" ")}</dd></div>}
                 <div className="col-span-2"><dt className="text-xs text-muted-foreground">Application course(s)</dt><dd>{identity.application?.course_selections?.map((selection) => selection.course_name || selection.course_id).filter(Boolean).join(", ") || "—"}</dd></div>
               </dl>
             </section>
@@ -356,7 +420,7 @@ export function RepairReceiptLinkDialog({
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={studentSearch}
-                  onChange={(event) => { setStudentSearch(event.target.value); setSelectedStudent(null); setVerified(false); }}
+                  onChange={(event) => { setStudentSearch(event.target.value); setSelectedStudent(null); setVerified(false); setRepairError(null); setRepairRetryAction(null); }}
                   placeholder="Search name or admission number"
                   className="pl-9"
                   aria-label="Find target student"
@@ -381,7 +445,7 @@ export function RepairReceiptLinkDialog({
                     key={student.id}
                     type="button"
                     className="flex w-full items-start justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-muted"
-                    onClick={() => { setSelectedStudent(student); setStudentSearch(student.name); setVerified(false); }}
+                    onClick={() => { setSelectedStudent(student); setStudentSearch(student.name); setVerified(false); setRepairError(null); setRepairRetryAction(null); }}
                   >
                     <span><span className="block font-medium">{student.name}</span><span className="text-xs text-muted-foreground">{student.admission_no || student.pre_admission_no || "No admission number"}</span></span>
                     <span className="text-right text-xs text-muted-foreground">{student.courses?.name || "No course"}<br />{student.campuses?.name || "No campus"}</span>
@@ -401,6 +465,9 @@ export function RepairReceiptLinkDialog({
                   <div><dt className="text-xs text-muted-foreground">Admission No.</dt><dd>{selectedStudent.admission_no || selectedStudent.pre_admission_no || "—"}</dd></div>
                   <div><dt className="text-xs text-muted-foreground">Course</dt><dd>{selectedStudent.courses?.name || "—"}</dd></div>
                   <div><dt className="text-xs text-muted-foreground">Campus</dt><dd>{selectedStudent.campuses?.name || "—"}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Date of birth</dt><dd>{selectedStudent.dob || "—"}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Father</dt><dd>{selectedStudent.father_name || "—"}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Mother</dt><dd>{selectedStudent.mother_name || "—"}</dd></div>
                 </dl>
               </section>
             )}
@@ -414,8 +481,12 @@ export function RepairReceiptLinkDialog({
             ) : selectedStudent && (identityMatches ? (
               <Alert variant="success">
                 <CheckCircle className="h-4 w-4" />
-                <AlertTitle>Identity matches</AlertTitle>
-                <AlertDescription>The lead, application, course, and campus support linking this existing receipt to the selected student.</AlertDescription>
+                <AlertTitle>{identityEvidence?.applicationProfileMatch ? "Application identity details match" : "Identity matches"}</AlertTitle>
+                <AlertDescription>
+                  {identityEvidence?.applicationProfileMatch
+                    ? `The application name is a prefix of the student name, date of birth matches, and ${identityEvidence.motherNameMatch ? "mother's" : "father's"} name matches. ${identityEvidence.directLeadMatch ? "The target student is also directly linked to this receipt lead." : "The target student is not directly linked to this receipt lead; this match comes from application identity."} The database will check that only one student matches these details before linking.`
+                    : "The lead, application, course, and campus support linking this existing receipt to the selected student."}
+                </AlertDescription>
               </Alert>
             ) : (
               <Alert variant="destructive">
@@ -426,11 +497,11 @@ export function RepairReceiptLinkDialog({
             ))}
 
             <FieldShell label="Reason for correction">
-              <Input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Explain why this receipt should link to this student" />
+              <Input aria-label="Reason for correction" value={reason} onChange={(event) => { setReason(event.target.value); setRepairError(null); setRepairRetryAction(null); }} placeholder="Explain why this receipt should link to this student" />
             </FieldShell>
             <label className="flex items-start gap-2 text-sm">
               <input type="checkbox" className="mt-1" checked={verified} onChange={(event) => setVerified(event.target.checked)} disabled={!identityMatches} />
-              <span>I verified the receipt reference and the student identity above.</span>
+              <span>I verified the receipt reference and the student identity details above.</span>
             </label>
             {repairError && (
               <Alert variant="destructive">
@@ -438,9 +509,16 @@ export function RepairReceiptLinkDialog({
                 <AlertTitle>Could not link receipt</AlertTitle>
                 <AlertDescription className="mt-2 space-y-3">
                   <p>{repairError}</p>
-                  <Button type="button" variant="outline" onClick={() => void handleRepair()} disabled={!readyToRepair}>
-                    Retry link
-                  </Button>
+                  {repairRetryAction && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void (repairRetryAction === "reload" ? loadIdentity() : handleRepair())}
+                      disabled={repairRetryAction === "reload" ? identityLoading : !readyToRepair}
+                    >
+                      {repairRetryAction === "reload" ? "Reload receipt" : "Retry link"}
+                    </Button>
+                  )}
                 </AlertDescription>
               </Alert>
             )}
