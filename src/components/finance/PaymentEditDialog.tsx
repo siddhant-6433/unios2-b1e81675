@@ -184,6 +184,16 @@ export function PaymentEditDialog({
     [assignTo],
   );
 
+  // Most this head may still take: its own due, capped by what the receipt
+  // has left after the amounts already entered on the other heads.
+  const remainingForHead = (headId: string, headDue: number, current: Record<string, string>) => {
+    const othersSum = Object.entries(current).reduce(
+      (sum, [id, value]) => (id === headId ? sum : sum + (Number(value) || 0)),
+      0,
+    );
+    return Math.max(0, Math.min(headDue, Math.round((receiptAmt - othersSum) * 100) / 100));
+  };
+
   const inputCls = "w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20";
 
   const requireReason = () => {
@@ -476,7 +486,7 @@ export function PaymentEditDialog({
               <p className="text-xs font-medium text-foreground">Reassign to fee heads</p>
               <p className="text-[11px] text-muted-foreground">
                 Optional. Tick the heads this {money(receiptAmt || Number(payment.amount))} should settle.
-                Leftover stays as unallocated credit.
+                Leftover stays as unallocated credit. Amounts cap at what is left after the other heads.
               </p>
               <div className="max-h-40 overflow-y-auto divide-y divide-border rounded-md border border-border/60">
                 {assignable.filter((h) => h.due > 0.009).map((h) => {
@@ -489,7 +499,7 @@ export function PaymentEditDialog({
                         onChange={(e) => {
                           setAssignTo((prev) => {
                             const next = { ...prev };
-                            if (e.target.checked) next[h.id] = String(Math.min(h.due, receiptAmt || h.due));
+                            if (e.target.checked) next[h.id] = String(remainingForHead(h.id, h.due, prev));
                             else delete next[h.id];
                             return next;
                           });
@@ -501,7 +511,15 @@ export function PaymentEditDialog({
                           className="w-20 rounded border border-input bg-background px-1.5 py-0.5 text-xs tabular-nums"
                           type="number" min="1" step="1"
                           value={assignTo[h.id]}
-                          onChange={(e) => setAssignTo((prev) => ({ ...prev, [h.id]: e.target.value }))}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            setAssignTo((prev) => {
+                              if (raw === "") return { ...prev, [h.id]: "" };
+                              const num = Number(raw);
+                              if (!Number.isFinite(num)) return prev;
+                              return { ...prev, [h.id]: String(Math.max(0, Math.min(num, remainingForHead(h.id, h.due, prev)))) };
+                            });
+                          }}
                         />
                       ) : (
                         <span className="text-[10px] text-muted-foreground tabular-nums">due {money(h.due)}</span>

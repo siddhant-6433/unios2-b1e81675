@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1.1] - 2026-10-16
+
+### Fixed
+
+- Cap receipt reassignment amounts at the balance left after other selected heads, so the dialog cannot be driven into an over-assigned state.
+
 ## [0.9.1.0] - 2026-10-16
 
 ### Fixed
