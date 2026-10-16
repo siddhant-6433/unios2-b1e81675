@@ -78,3 +78,21 @@ describe("receipt edit UI lock", () => {
     expect(studentPanel).toContain("lead_id, student_id, notes");
   });
 });
+
+describe("receipt reassignment caps at the remaining balance", () => {
+  it("ticking a head fills only what the receipt has left after other heads", () => {
+    expect(dialog).toContain("const remainingForHead =");
+    expect(dialog).toContain("Math.min(headDue, Math.round((receiptAmt - othersSum) * 100) / 100)");
+    expect(dialog).toContain("next[h.id] = String(remainingForHead(h.id, h.due, prev))");
+  });
+
+  it("typing an amount clamps to the remaining balance instead of overshooting", () => {
+    expect(dialog).toContain("Math.max(0, Math.min(num, remainingForHead(h.id, h.due, prev)))");
+    expect(dialog).toContain("Amounts cap at what is left after the other heads.");
+  });
+
+  it("still blocks an over-assigned receipt at save time as a backstop", () => {
+    expect(dialog).toContain("Assignment exceeds the receipt");
+    expect(dialog).toContain("assignSum > amt + 0.009");
+  });
+});
