@@ -1,7 +1,7 @@
 -- pgTAP coverage for the audited confirmed-receipt student-link repair.
 -- Run with: supabase test db
 BEGIN;
-SELECT plan(38);
+SELECT plan(53);
 
 CREATE TEMP TABLE _receipt_repair_ids AS
 SELECT
@@ -23,14 +23,24 @@ SELECT
   '00000000-0000-0000-0000-00000000f064'::uuid AS wrong_identity_student,
   '00000000-0000-0000-0000-00000000f065'::uuid AS other_lead_student,
   '00000000-0000-0000-0000-00000000f066'::uuid AS second_lead_student,
+  '00000000-0000-0000-0000-00000000f067'::uuid AS partial_identity_student,
+  '00000000-0000-0000-0000-00000000f068'::uuid AS ambiguous_identity_student,
+  '00000000-0000-0000-0000-00000000f076'::uuid AS exact_name_lead,
+  '00000000-0000-0000-0000-00000000f077'::uuid AS exact_name_student_one,
+  '00000000-0000-0000-0000-00000000f078'::uuid AS exact_name_student_two,
+  '00000000-0000-0000-0000-00000000f079'::uuid AS exact_name_conflict_student,
+  '00000000-0000-0000-0000-00000000f07b'::uuid AS direct_conflict_student,
   '00000000-0000-0000-0000-00000000f070'::uuid AS payment,
   '00000000-0000-0000-0000-00000000f071'::uuid AS dated_payment,
   '00000000-0000-0000-0000-00000000f072'::uuid AS course_selection_payment,
   '00000000-0000-0000-0000-00000000f073'::uuid AS allocated_payment,
+  '00000000-0000-0000-0000-00000000f07a'::uuid AS exact_name_payment,
   '00000000-0000-0000-0000-00000000f074'::uuid AS other_lead,
   '00000000-0000-0000-0000-00000000f075'::uuid AS no_course_lead,
   '00000000-0000-0000-0000-00000000f080'::uuid AS fee_code,
-  '00000000-0000-0000-0000-00000000f081'::uuid AS fee_ledger;
+  '00000000-0000-0000-0000-00000000f081'::uuid AS fee_ledger,
+  '00000000-0000-0000-0000-00000000f082'::uuid AS consultant,
+  '00000000-0000-0000-0000-00000000f083'::uuid AS consultant_payout;
 
 INSERT INTO auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 VALUES
@@ -49,6 +59,8 @@ INSERT INTO public.departments (id, institution_id, name, code) VALUES
 INSERT INTO public.courses (id, department_id, name, code) VALUES
   ((SELECT course FROM _receipt_repair_ids), (SELECT department FROM _receipt_repair_ids), 'Repair Course', 'RPC'),
   ((SELECT other_course FROM _receipt_repair_ids), (SELECT department FROM _receipt_repair_ids), 'Other Course', 'ROC');
+INSERT INTO public.consultants (id, name, commission_type, commission_value, payout_model)
+VALUES ((SELECT consultant FROM _receipt_repair_ids), 'Receipt Repair Consultant', 'fixed', 100, 'commission_fixed');
 INSERT INTO public.fee_codes (id, code, name, category, is_recurring) VALUES
   ((SELECT fee_code FROM _receipt_repair_ids), 'RPR-TEST-CODE', 'Repair Test Fee', 'other', false);
 
@@ -66,10 +78,15 @@ ON CONFLICT DO NOTHING;
 INSERT INTO public.leads (id, name, phone, stage, course_id, campus_id, application_id) VALUES
   ((SELECT lead FROM _receipt_repair_ids), 'Repair Student', '9999900001', 'admitted', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids), 'APP-REPAIR-TEST'),
   ((SELECT other_lead FROM _receipt_repair_ids), 'Repair Student', '9999900002', 'admitted', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids), NULL),
-  ((SELECT no_course_lead FROM _receipt_repair_ids), 'Repair Student', '9999900003', 'admitted', NULL, (SELECT campus FROM _receipt_repair_ids), 'APP-COURSE-TEST');
-INSERT INTO public.applications (application_id, lead_id, full_name, phone, course_selections) VALUES
-  ('APP-REPAIR-TEST', (SELECT lead FROM _receipt_repair_ids), 'Repair Student', '9999900001', '[]'::jsonb),
-  ('APP-COURSE-TEST', (SELECT no_course_lead FROM _receipt_repair_ids), 'Repair Student', '9999900003', jsonb_build_array(jsonb_build_object('course_id', (SELECT course FROM _receipt_repair_ids)::text, 'course_name', 'Repair Course')));
+  ((SELECT no_course_lead FROM _receipt_repair_ids), 'Repair Student', '9999900003', 'admitted', NULL, (SELECT campus FROM _receipt_repair_ids), 'APP-COURSE-TEST'),
+  ((SELECT exact_name_lead FROM _receipt_repair_ids), 'Exact Candidate', '9999900004', 'admitted', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids), 'APP-EXACT-TEST');
+UPDATE public.leads
+   SET consultant_id = (SELECT consultant FROM _receipt_repair_ids)
+ WHERE id = (SELECT lead FROM _receipt_repair_ids);
+INSERT INTO public.applications (application_id, lead_id, full_name, phone, course_selections, dob, mother) VALUES
+  ('APP-REPAIR-TEST', (SELECT lead FROM _receipt_repair_ids), 'Repair Student', '9999900001', '[]'::jsonb, '2014-05-06', '{"name":"Mira Bharanagar"}'::jsonb),
+  ('APP-COURSE-TEST', (SELECT no_course_lead FROM _receipt_repair_ids), 'Repair', '9999900003', jsonb_build_array(jsonb_build_object('course_id', (SELECT course FROM _receipt_repair_ids)::text, 'course_name', 'Repair Course')), '2014-05-06', '{"name":"Mira Bharanagar"}'::jsonb),
+  ('APP-EXACT-TEST', (SELECT exact_name_lead FROM _receipt_repair_ids), 'Exact Candidate', '9999900004', '[]'::jsonb, '2014-05-06', '{"name":"Mira Bharanagar"}'::jsonb);
 INSERT INTO public.students (id, lead_id, name, admission_no, course_id, campus_id) VALUES
   ((SELECT target_student FROM _receipt_repair_ids), (SELECT lead FROM _receipt_repair_ids), 'Repair Student', 'RPR-001', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids)),
   ((SELECT wrong_course_student FROM _receipt_repair_ids), NULL, 'Repair Student', 'RPR-002', (SELECT other_course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids)),
@@ -77,17 +94,48 @@ INSERT INTO public.students (id, lead_id, name, admission_no, course_id, campus_
   ((SELECT corrected_student FROM _receipt_repair_ids), NULL, 'Repair Student', 'RPR-003', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids)),
   ((SELECT wrong_identity_student FROM _receipt_repair_ids), NULL, 'Unrelated Student', 'RPR-004', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids)),
   ((SELECT other_lead_student FROM _receipt_repair_ids), (SELECT other_lead FROM _receipt_repair_ids), 'Repair Student', 'RPR-005', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids)),
-  ((SELECT second_lead_student FROM _receipt_repair_ids), (SELECT lead FROM _receipt_repair_ids), 'Repair Student', 'RPR-006', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids));
+  ((SELECT second_lead_student FROM _receipt_repair_ids), (SELECT other_lead FROM _receipt_repair_ids), 'Repair Student', 'RPR-006', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids));
+INSERT INTO public.students (id, lead_id, name, admission_no, course_id, campus_id, dob, mother_name) VALUES
+  ((SELECT direct_conflict_student FROM _receipt_repair_ids), (SELECT no_course_lead FROM _receipt_repair_ids), 'Repair Candidate Student', 'RPR-012', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids), '2015-05-06', 'Different Parent'),
+  ((SELECT partial_identity_student FROM _receipt_repair_ids), NULL, 'Repair Candidate Student', 'RPR-007', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids), '2014-05-06', 'Mira Bharanagar'),
+  ((SELECT ambiguous_identity_student FROM _receipt_repair_ids), NULL, 'Repair Candidate Student Two', 'RPR-008', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids), '2014-05-06', 'Mira Bharanagar'),
+  ((SELECT exact_name_student_one FROM _receipt_repair_ids), NULL, 'Exact Candidate', 'RPR-009', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids), '2014-05-06', 'Mira Bharanagar'),
+  ((SELECT exact_name_student_two FROM _receipt_repair_ids), NULL, 'Exact Candidate', 'RPR-010', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids), '2014-05-06', 'Mira Bharanagar'),
+  ((SELECT exact_name_conflict_student FROM _receipt_repair_ids), NULL, 'Exact Candidate', 'RPR-011', (SELECT course FROM _receipt_repair_ids), (SELECT campus FROM _receipt_repair_ids), '2015-05-06', 'Different Parent');
+UPDATE public.students
+   SET dob = '2014-05-06', mother_name = 'Mira Bharanagar'
+ WHERE id IN (
+   (SELECT target_student FROM _receipt_repair_ids),
+   (SELECT corrected_student FROM _receipt_repair_ids)
+ );
+UPDATE public.students
+   SET dob = '2015-05-06', mother_name = 'Different Parent'
+ WHERE id IN (
+   (SELECT other_lead_student FROM _receipt_repair_ids),
+   (SELECT second_lead_student FROM _receipt_repair_ids)
+ );
 
 -- Keep the fixture insert from emitting local notification or ledger side effects.
 ALTER TABLE public.lead_payments DISABLE TRIGGER USER;
 INSERT INTO public.lead_payments (id, lead_id, type, amount, payment_mode, transaction_ref, receipt_no, status, payment_date, application_id)
 VALUES
   ((SELECT payment FROM _receipt_repair_ids), (SELECT lead FROM _receipt_repair_ids), 'other', 500, 'upi', 'RPR-REF-001', 'N-RPR-001', 'confirmed', NULL, 'APP-REPAIR-TEST'),
-  ((SELECT dated_payment FROM _receipt_repair_ids), (SELECT lead FROM _receipt_repair_ids), 'other', 250, 'upi', 'RPR-REF-002', 'N-RPR-002', 'confirmed', '2026-10-14T10:00:00Z', 'APP-REPAIR-TEST'),
+  ((SELECT dated_payment FROM _receipt_repair_ids), (SELECT other_lead FROM _receipt_repair_ids), 'other', 250, 'upi', 'RPR-REF-002', 'N-RPR-002', 'confirmed', '2026-10-14T10:00:00Z', NULL),
   ((SELECT course_selection_payment FROM _receipt_repair_ids), (SELECT no_course_lead FROM _receipt_repair_ids), 'other', 100, 'upi', 'RPR-REF-003', 'N-RPR-003', 'confirmed', NULL, 'APP-COURSE-TEST'),
-  ((SELECT allocated_payment FROM _receipt_repair_ids), (SELECT lead FROM _receipt_repair_ids), 'other', 75, 'upi', 'RPR-REF-004', 'N-RPR-004', 'confirmed', NULL, 'APP-REPAIR-TEST');
+  ((SELECT allocated_payment FROM _receipt_repair_ids), (SELECT lead FROM _receipt_repair_ids), 'other', 75, 'upi', 'RPR-REF-004', 'N-RPR-004', 'confirmed', NULL, 'APP-REPAIR-TEST'),
+  ((SELECT exact_name_payment FROM _receipt_repair_ids), (SELECT exact_name_lead FROM _receipt_repair_ids), 'other', 120, 'upi', 'RPR-REF-005', 'N-RPR-005', 'confirmed', NULL, 'APP-EXACT-TEST');
 ALTER TABLE public.lead_payments ENABLE TRIGGER USER;
+
+INSERT INTO public.consultant_payouts (
+  id, consultant_id, lead_id, course_id, commission_type, commission_value,
+  student_fee_paid, annual_fee, fee_paid_pct, payout_amount, status
+) VALUES (
+  (SELECT consultant_payout FROM _receipt_repair_ids),
+  (SELECT consultant FROM _receipt_repair_ids),
+  (SELECT lead FROM _receipt_repair_ids),
+  (SELECT course FROM _receipt_repair_ids),
+  'fixed', 7, 10, 20, 50, 3, 'pending'
+);
 
 -- Exercise the shared registry while suppressing unrelated notification and
 -- ledger triggers. Keep only the new claim trigger enabled for these inserts.
@@ -142,16 +190,52 @@ CREATE TEMP TABLE _before_payment AS
     FROM public.lead_payments lp
    WHERE lp.id = (SELECT payment FROM _receipt_repair_ids);
 CREATE TEMP TABLE _before_allocations AS
-  SELECT count(*)::bigint AS allocation_count FROM public.fee_ledger_payments;
+  SELECT COALESCE(jsonb_agg(to_jsonb(flp) ORDER BY flp.fee_ledger_id, flp.lead_payment_id), '[]'::jsonb) AS allocation_rows
+    FROM public.fee_ledger_payments flp;
+CREATE TEMP TABLE _before_fee_ledgers AS
+  SELECT COALESCE(jsonb_agg(to_jsonb(fl) ORDER BY fl.id), '[]'::jsonb) AS ledger_rows
+    FROM public.fee_ledger fl;
 CREATE TEMP TABLE _before_operational_side_effects AS
 SELECT
-  (SELECT count(*)::bigint FROM public.notifications WHERE lead_id = (SELECT lead FROM _receipt_repair_ids)) AS notifications,
-  (SELECT count(*)::bigint FROM public.consultant_payouts WHERE lead_id = (SELECT lead FROM _receipt_repair_ids)) AS payouts,
-  (SELECT count(*)::bigint FROM public.incentive_ledger WHERE lead_id = (SELECT lead FROM _receipt_repair_ids)) AS incentives;
+  (SELECT COALESCE(jsonb_agg(to_jsonb(n) ORDER BY n.id), '[]'::jsonb) FROM public.notifications n WHERE n.lead_id = (SELECT lead FROM _receipt_repair_ids)) AS notifications,
+  (SELECT COALESCE(jsonb_agg(to_jsonb(cp) ORDER BY cp.id), '[]'::jsonb) FROM public.consultant_payouts cp WHERE cp.lead_id = (SELECT lead FROM _receipt_repair_ids)) AS payouts,
+  (SELECT COALESCE(jsonb_agg(to_jsonb(il) ORDER BY il.id), '[]'::jsonb) FROM public.incentive_ledger il WHERE il.lead_id = (SELECT lead FROM _receipt_repair_ids)) AS incentives;
 
 SELECT ok(
   NOT has_table_privilege('authenticated', 'public.lead_payments', 'UPDATE'),
   'authenticated browser sessions cannot directly update lead_payments'
+);
+SELECT ok(
+  EXISTS (
+    SELECT 1
+      FROM pg_trigger t
+     WHERE t.tgname = 'trg_incentive_on_payment'
+       AND NOT t.tgisinternal
+       AND pg_get_triggerdef(t.oid) ILIKE '%UPDATE OF%'
+       AND pg_get_triggerdef(t.oid) NOT ILIKE '%student_id%'
+  ),
+  'student-link-only repairs do not run payment incentive recalculation'
+);
+SELECT ok(
+  EXISTS (
+    SELECT 1
+      FROM pg_trigger t
+     WHERE t.tgname = 'lead_payments_consultant_payout'
+       AND NOT t.tgisinternal
+       AND pg_get_triggerdef(t.oid) ILIKE '%UPDATE OF%'
+       AND pg_get_triggerdef(t.oid) NOT ILIKE '%student_id%'
+  ),
+  'student-link-only repairs do not run consultant payout recalculation'
+);
+SELECT ok(
+  pg_get_functiondef('public.apply_fee_payment_allocations(uuid,jsonb)'::regprocedure)
+    LIKE '%Payment link changed while allocation was starting%',
+  'fee allocation rejects a payment whose student or lead link changed while waiting for its student lock'
+);
+SELECT ok(
+  pg_get_functiondef('public.apply_fee_payment_allocations(uuid,jsonb)'::regprocedure)
+    LIKE '%Payment status changed while allocation was starting%',
+  'fee allocation rejects a payment refunded while waiting for its student lock'
 );
 
 SET LOCAL ROLE authenticated;
@@ -170,53 +254,94 @@ SELECT throws_ok(
   'a caller cannot bypass the audited repair RPC by setting the reason GUC'
 );
 SELECT throws_ok(
-  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f060', NULL, 'APP-OTHER', 'Verified bank record')$$,
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f060', NULL, 'APP-OTHER', 'Verified bank record', true)$$,
   '40001', NULL,
   'application identity is rechecked against the payment before repair'
 );
 SELECT throws_ok(
-  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f061', NULL, 'APP-REPAIR-TEST', 'Verified bank record')$$,
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f061', NULL, 'APP-REPAIR-TEST', 'Verified bank record', true)$$,
   '22023', NULL,
   'a target with a different course is rejected'
 );
 SELECT throws_ok(
-  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f065', NULL, 'APP-REPAIR-TEST', 'Verified bank record')$$,
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f065', NULL, 'APP-REPAIR-TEST', 'Verified bank record', true)$$,
   '22023', NULL,
   'a same-name target linked to another lead is rejected'
 );
 SELECT throws_ok(
-  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f072', '00000000-0000-0000-0000-00000000f061', NULL, 'APP-COURSE-TEST', 'Verified bank record')$$,
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f072', '00000000-0000-0000-0000-00000000f061', NULL, 'APP-COURSE-TEST', 'Verified bank record', true)$$,
   '22023', NULL,
   'a null-course lead still enforces application-selected course ids'
 );
 SELECT throws_ok(
-  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f073', '00000000-0000-0000-0000-00000000f063', NULL, 'APP-REPAIR-TEST', 'Verified bank record')$$,
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f073', '00000000-0000-0000-0000-00000000f063', NULL, 'APP-REPAIR-TEST', 'Verified bank record', true)$$,
   '22023', NULL,
   'a receipt allocated to another student ledger cannot be relinked'
 );
 SELECT throws_ok(
-  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f064', NULL, 'APP-REPAIR-TEST', 'Verified bank record')$$,
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f064', NULL, 'APP-REPAIR-TEST', 'Verified bank record', true)$$,
   '22023', NULL,
   'an unlinked student whose name does not match the application is rejected'
 );
 SELECT throws_ok(
-  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f062', NULL, 'APP-REPAIR-TEST', 'Verified bank record')$$,
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f062', NULL, 'APP-REPAIR-TEST', 'Verified bank record', true)$$,
   '42501', NULL,
   'a target outside the actor assigned campuses is rejected'
 );
 SELECT throws_ok(
-  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f060', NULL, 'APP-REPAIR-TEST', 'short')$$,
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f071', '00000000-0000-0000-0000-00000000f065', NULL, NULL, 'Verified bank record', true)$$,
+  '22023', NULL,
+  'a direct lead match is rejected when that lead has multiple active student profiles'
+);
+SELECT throws_ok(
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f072', '00000000-0000-0000-0000-00000000f07b', NULL, 'APP-COURSE-TEST', 'Verified bank record', true)$$,
+  '22023', NULL,
+  'a direct lead match is rejected when available application name, date, or parent details conflict'
+);
+SELECT throws_ok(
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f072', '00000000-0000-0000-0000-00000000f067', NULL, 'APP-COURSE-TEST', 'Verified bank record', true)$$,
+  '22023', NULL,
+  'an identity-matched target is rejected while its receipt lead is linked to a different active student'
+);
+SELECT throws_ok(
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f060', NULL, 'APP-REPAIR-TEST', 'short', true)$$,
   '22023', NULL,
   'repair requires a meaningful reason'
 );
+SELECT throws_ok(
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f060', NULL, 'APP-REPAIR-TEST', 'Verified bank record', false)$$,
+  '22023', NULL,
+  'the database requires explicit identity confirmation'
+);
+SELECT throws_ok(
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f060', NULL, 'APP-REPAIR-TEST', 'Verified bank record')$$,
+  '40001', NULL,
+  'an older Finance screen receives an actionable refresh error instead of bypassing identity confirmation'
+);
+SELECT throws_ok(
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f072', '00000000-0000-0000-0000-00000000f067', NULL, 'APP-COURSE-TEST', 'Verified student profile', true)$$,
+  '22023', NULL,
+  'partial-name identity evidence is rejected when multiple students match the application profile'
+);
+SELECT throws_ok(
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f07a', '00000000-0000-0000-0000-00000000f077', NULL, 'APP-EXACT-TEST', 'Verified duplicate exact name', true)$$,
+  '22023', NULL,
+  'exact-name identity evidence is rejected when multiple students match the application profile'
+);
+SELECT throws_ok(
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f07a', '00000000-0000-0000-0000-00000000f079', NULL, 'APP-EXACT-TEST', 'Verified conflicting profile', true)$$,
+  '22023', NULL,
+  'an exact-name student with conflicting available date-of-birth and parent details is rejected'
+);
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000f002', true);
 SELECT throws_ok(
-  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f060', NULL, 'APP-REPAIR-TEST', 'Verified original bank transaction')$$,
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f060', NULL, 'APP-REPAIR-TEST', 'Verified original bank transaction', true)$$,
   '42501', NULL,
   'staff without finance:create cannot repair a receipt'
 );
 
 RESET ROLE;
+DELETE FROM public.students WHERE id = (SELECT ambiguous_identity_student FROM _receipt_repair_ids);
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000f001', true);
 SET LOCAL ROLE authenticated;
 SELECT is(
@@ -225,13 +350,14 @@ SELECT is(
     '00000000-0000-0000-0000-00000000f060',
     NULL,
     'APP-REPAIR-TEST',
-    'Verified original bank transaction'
+    'Verified original bank transaction',
+    true
   )->>'receipt_no',
   'N-RPR-001',
   'repair atomically links the existing confirmed receipt'
 );
 SELECT throws_ok(
-  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f060', NULL, 'APP-REPAIR-TEST', 'Retry stale repair')$$,
+  $$SELECT public.repair_confirmed_lead_payment_student_link('00000000-0000-0000-0000-00000000f070', '00000000-0000-0000-0000-00000000f060', NULL, 'APP-REPAIR-TEST', 'Retry stale repair', true)$$,
   '40001', NULL,
   'a second stale repair receives an optimistic conflict'
 );
@@ -240,16 +366,38 @@ SELECT is(
   1::bigint,
   'Finance can read the repaired receipt through the caller-scoped view'
 );
+RESET ROLE;
+UPDATE public.students
+   SET dob = '2015-05-06', mother_name = 'Different Parent'
+ WHERE id = (SELECT target_student FROM _receipt_repair_ids);
+SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000f001', true);
+SET LOCAL ROLE authenticated;
 SELECT is(
   public.repair_confirmed_lead_payment_student_link(
     '00000000-0000-0000-0000-00000000f070',
     '00000000-0000-0000-0000-00000000f063',
     '00000000-0000-0000-0000-00000000f060',
     'APP-REPAIR-TEST',
-    'Corrected the verified student link'
+    'Corrected the verified student link',
+    true
   )->>'receipt_no',
   'N-RPR-001',
   'Finance can correct a prior link with another audited repair'
+);
+UPDATE public.students
+   SET lead_id = NULL
+ WHERE id = '00000000-0000-0000-0000-00000000f07b';
+SELECT is(
+  public.repair_confirmed_lead_payment_student_link(
+    '00000000-0000-0000-0000-00000000f072',
+    '00000000-0000-0000-0000-00000000f067',
+    NULL,
+    'APP-COURSE-TEST',
+    'Verified applicant date and mother identity',
+    true
+  )->>'receipt_no',
+  'N-RPR-003',
+  'a unique partial-name candidate with matching date of birth and parent name can be linked after Finance confirmation'
 );
 RESET ROLE;
 
@@ -269,6 +417,11 @@ SELECT is(
   'the correction audit row records its own reason'
 );
 SELECT is(
+  (SELECT reason FROM public.lead_payments_audit WHERE lead_payment_id = (SELECT course_selection_payment FROM _receipt_repair_ids) AND action = 'UPDATE'),
+  'Verified applicant date and mother identity',
+  'the partial-name identity repair keeps its Finance reason in the audit log'
+);
+SELECT is(
   (SELECT count(*)::bigint FROM public.lead_payments_audit WHERE lead_payment_id = (SELECT payment FROM _receipt_repair_ids) AND action = 'UPDATE'),
   2::bigint,
   'each student-link repair appends its own audit row'
@@ -284,9 +437,14 @@ SELECT is(
   'receipt number, status, amount, date, reference, lead, and other payment facts remain unchanged'
 );
 SELECT is(
-  (SELECT count(*)::bigint FROM public.fee_ledger_payments),
-  (SELECT allocation_count FROM _before_allocations),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(flp) ORDER BY flp.fee_ledger_id, flp.lead_payment_id), '[]'::jsonb) FROM public.fee_ledger_payments flp),
+  (SELECT allocation_rows FROM _before_allocations),
   'repair does not apply or remove fee allocations'
+);
+SELECT is(
+  (SELECT COALESCE(jsonb_agg(to_jsonb(fl) ORDER BY fl.id), '[]'::jsonb) FROM public.fee_ledger fl),
+  (SELECT ledger_rows FROM _before_fee_ledgers),
+  'repair does not recalculate fee-ledger balances or status'
 );
 SELECT is(
   (SELECT count(*)::bigint FROM public.lead_payments WHERE transaction_ref = 'RPR-REF-001'),
@@ -294,17 +452,17 @@ SELECT is(
   'repair does not create a second payment row'
 );
 SELECT is(
-  (SELECT count(*)::bigint FROM public.notifications WHERE lead_id = (SELECT lead FROM _receipt_repair_ids)),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(n) ORDER BY n.id), '[]'::jsonb) FROM public.notifications n WHERE n.lead_id = (SELECT lead FROM _receipt_repair_ids)),
   (SELECT notifications FROM _before_operational_side_effects),
   'repair does not create a payment notification'
 );
 SELECT is(
-  (SELECT count(*)::bigint FROM public.consultant_payouts WHERE lead_id = (SELECT lead FROM _receipt_repair_ids)),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(cp) ORDER BY cp.id), '[]'::jsonb) FROM public.consultant_payouts cp WHERE cp.lead_id = (SELECT lead FROM _receipt_repair_ids)),
   (SELECT payouts FROM _before_operational_side_effects),
   'repair does not create or recalculate consultant payouts'
 );
 SELECT is(
-  (SELECT count(*)::bigint FROM public.incentive_ledger WHERE lead_id = (SELECT lead FROM _receipt_repair_ids)),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(il) ORDER BY il.id), '[]'::jsonb) FROM public.incentive_ledger il WHERE il.lead_id = (SELECT lead FROM _receipt_repair_ids)),
   (SELECT incentives FROM _before_operational_side_effects),
   'repair does not accrue or reverse staff incentives'
 );
@@ -314,7 +472,7 @@ SELECT is(
   'the shared confirmed-payment view resolves the same receipt to its student'
 );
 SELECT is(
-  (SELECT id FROM public.v_all_payments WHERE lead_id = (SELECT lead FROM _receipt_repair_ids) AND source = 'lead' ORDER BY paid_at DESC NULLS LAST, id DESC LIMIT 1),
+  (SELECT id FROM public.v_all_payments WHERE lead_id = (SELECT other_lead FROM _receipt_repair_ids) AND source = 'lead' ORDER BY paid_at DESC NULLS LAST, id DESC LIMIT 1),
   (SELECT dated_payment FROM _receipt_repair_ids),
   'dated receipts remain ahead of null-date receipts in descending view order'
 );
