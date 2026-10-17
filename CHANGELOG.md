@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.3.0] - 2026-10-17
+
+### Added
+
+- Super admins can charge a custom fee to one or many batches at once from Finance → Setup → Bulk Custom Fee: pick batches, untick individual students, set installments with due dates, dry-run the student count, and optionally add the fee to the batches' fee structures so future admissions get it.
+
+### Fixed
+
+- The ABVMU Enrollment & Roll No Fee (₹1,000, due 19 Oct) is now part of the BPT, BMRIT and B.Sc Nursing fee structures, and the two students the one-off load missed now have it.
+
 ## [0.9.2.0] - 2026-10-17
 
 ### Added
