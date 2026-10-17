@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.2.0] - 2026-10-17
+
+### Added
+
+- Teachers can request that a locked marks paper (UT1, UT2, Half Yearly and so on) be unlocked, giving a reason.
+- Super admins see pending unlock requests at the top of Assessments and can approve (paper reopens for marks entry) or reject them, with remarks. Every request and decision is written to the assessment audit log.
+
 ## [0.9.1.1] - 2026-10-16
 
 ### Fixed

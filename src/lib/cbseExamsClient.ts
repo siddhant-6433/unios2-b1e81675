@@ -2,7 +2,7 @@ import {supabase} from '@/integrations/supabase/client';
 import type {Json} from '@/integrations/supabase/types';
 import type {CbseAction,CbseConfiguration,CbseDownloadPayload,CbseReleaseOverview,CbseWorkspace,FamilyReport} from './cbseExams';
 // RPCs are added by the matching migration; typed result contracts avoid an untyped DB facade.
-type RpcName='cbse_configuration'|'cbse_exam_workspace'|'cbse_action'|'cbse_save_co_scholastic_grades'|'cbse_family_reports'|'cbse_download_payload'|'cbse_set_class_teacher'|'cbse_release_overview'|'cbse_datesheet_save'|'cbse_datesheet_update'|'cbse_datesheet_finalize'|'cbse_datesheet_get'|'cbse_datesheet_list'|'cbse_family_datesheets'|'cbse_datesheet_recipients';
+type RpcName='cbse_configuration'|'cbse_exam_workspace'|'cbse_action'|'cbse_save_co_scholastic_grades'|'cbse_family_reports'|'cbse_download_payload'|'cbse_set_class_teacher'|'cbse_release_overview'|'cbse_datesheet_save'|'cbse_datesheet_update'|'cbse_datesheet_finalize'|'cbse_datesheet_get'|'cbse_datesheet_list'|'cbse_family_datesheets'|'cbse_datesheet_recipients'|'cbse_request_paper_unlock'|'cbse_unlock_requests_pending'|'cbse_review_paper_unlock';
 type RpcArgs=Record<string,Json|undefined>;
 type RpcResult={data:Json|null;error:{message:string}|null};
 // Keep the call parenthesised as a member expression (never extracted into a
@@ -30,3 +30,7 @@ export const listCbseDateSheets=(sessionId:string|null)=>rpc<CbseDateSheet[]>('c
 export const finalizeCbseDateSheet=(id:string,release=false)=>rpc<CbseDateSheet>('cbse_datesheet_finalize',{_datesheet_id:id,_release:release});
 export const fetchFamilyCbseDateSheets=(studentId:string)=>rpc<CbseDateSheet[]>('cbse_family_datesheets',{_student_id:studentId});
 export const fetchCbseDateSheetRecipients=(id:string)=>rpc<{phone:string}[]>('cbse_datesheet_recipients',{_datesheet_id:id});
+export type CbseUnlockRequest={id:string;exam_id:string;exam_name:string;paper_name:string;class_name:string;section:string|null;teacher:string;reason:string;requested_at:string};
+export const requestCbsePaperUnlock=(paperId:string,reason:string)=>rpc<string>('cbse_request_paper_unlock',{_paper_id:paperId,_reason:reason});
+export const fetchCbseUnlockRequests=()=>rpc<CbseUnlockRequest[]>('cbse_unlock_requests_pending');
+export const reviewCbsePaperUnlock=(requestId:string,decision:'approved'|'rejected',remarks:string)=>rpc<null>('cbse_review_paper_unlock',{_request_id:requestId,_decision:decision,_remarks:remarks});
