@@ -24,6 +24,7 @@ import { DayCloserDialog } from "@/components/finance/DayCloserDialog";
 import { AfterHoursCashDialog } from "@/components/finance/AfterHoursCashDialog";
 import FeeCollections from "./FeeCollections";
 import { CashierConsole } from "@/components/finance/CashierConsole";
+import { BulkCustomFeePanel } from "@/components/finance/BulkCustomFeePanel";
 import { CustomFeeHeadsPanel } from "@/components/finance/CustomFeeHeadsPanel";
 import { feeTermLabel } from "@/lib/feeTermLabels";
 import { useFeeStructureMetaByCourse } from "@/hooks/useFeeStructureMeta";
@@ -64,7 +65,7 @@ const Finance = () => {
   const [pendingWaiverCount, setPendingWaiverCount] = useState(0);
   const [pendingConcessionCount, setPendingConcessionCount] = useState(0);
   const [receiptsView, setReceiptsView] = useState<"receipts" | "online">("receipts");
-  const [setupView, setSetupView] = useState<"structures" | "late-fees" | "heads">("structures");
+  const [setupView, setSetupView] = useState<"structures" | "late-fees" | "heads" | "bulk">("structures");
   const [reportsView, setReportsView] = useState<"overview" | "dues" | "collection" | "audit">("collection");
   const { selectedCampusId } = useCampus();
   const { can } = usePermissions();
@@ -426,16 +427,18 @@ const Finance = () => {
         <>
           <SubTabs
             value={setupView}
-            onChange={(v) => setSetupView(v as "structures" | "late-fees" | "heads")}
+            onChange={(v) => setSetupView(v as "structures" | "late-fees" | "heads" | "bulk")}
             options={[
               { value: "structures", label: "Fee Structures" },
               { value: "late-fees", label: "Late Fees" },
               { value: "heads", label: "Custom Heads" },
+              ...(isSuperAdmin ? [{ value: "bulk", label: "Bulk Custom Fee" }] : []),
             ]}
           />
           {setupView === "structures" && <FeeStructureViewer showFilter />}
           {setupView === "late-fees" && <LateFeeConfigPanel />}
           {setupView === "heads" && <CustomFeeHeadsPanel />}
+          {setupView === "bulk" && isSuperAdmin && <BulkCustomFeePanel />}
         </>
       )}
 
