@@ -5,13 +5,14 @@
  *   - outbound: Initiate an AI outbound call to a lead via Plivo
  *   - status:   Check call status
  *
- * Env vars: PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, PLIVO_AI_PHONE_NUMBER, PLIVO_AI_BACKUP_PHONE_NUMBER,
+ * Env vars: PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, PLIVO_AI_BACKUP_PHONE_NUMBER,
  *           VOICE_AGENT_URL (public URL of voice-agent server),
  *           SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { isServiceCaller } from "../_shared/service-auth.ts";
+import { MIRAI_PLIVO_CALLER_ID, plivoCallerIdForLead } from "../_shared/mirai-brand.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -64,9 +65,6 @@ Deno.serve(async (req) => {
   try {
     const PLIVO_AUTH_ID = Deno.env.get("PLIVO_AUTH_ID");
     const PLIVO_AUTH_TOKEN = Deno.env.get("PLIVO_AUTH_TOKEN");
-    // AI outbound number (primary) — dedicated to this function so the cloud
-    // dialer's caller-id stays separate.
-    const PLIVO_AI_PHONE_NUMBER = Deno.env.get("PLIVO_AI_PHONE_NUMBER");
     // Backup HA number — used if the primary fails (Plivo non-2xx or fetch error).
     // Optional: when unset, no failover is attempted.
     const PLIVO_AI_BACKUP_PHONE_NUMBER = Deno.env.get("PLIVO_AI_BACKUP_PHONE_NUMBER");
@@ -74,8 +72,8 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !PLIVO_AI_PHONE_NUMBER || !VOICE_AGENT_URL) {
-      return json({ error: "Voice calling not configured. Set PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, PLIVO_AI_PHONE_NUMBER, VOICE_AGENT_URL." }, 503);
+    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !VOICE_AGENT_URL) {
+      return json({ error: "Voice calling not configured. Set PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, VOICE_AGENT_URL." }, 503);
     }
 
     // Auth: accept a service caller (cron/queue via x-cron-secret or service
@@ -239,11 +237,14 @@ Deno.serve(async (req) => {
         return { ok: res.ok, status: res.status, body: json };
       };
 
-      let attempt = await tryPlace(PLIVO_AI_PHONE_NUMBER!).catch((e) => ({ ok: false, status: 0, body: { error: String(e) } }));
-      let usedFromNumber = PLIVO_AI_PHONE_NUMBER!;
+      // Caller-id by brand: Mirai leads get the Mirai number, everyone else NIMT's.
+      const primaryFrom = await plivoCallerIdForLead(db, lead_id);
+      let attempt = await tryPlace(primaryFrom).catch((e) => ({ ok: false, status: 0, body: { error: String(e) } }));
+      let usedFromNumber = primaryFrom;
 
-      if (!attempt.ok && PLIVO_AI_BACKUP_PHONE_NUMBER && PLIVO_AI_BACKUP_PHONE_NUMBER !== PLIVO_AI_PHONE_NUMBER) {
-        console.warn(`Primary Plivo number ${PLIVO_AI_PHONE_NUMBER!.slice(-4)} failed (status=${attempt.status}); failing over to backup`);
+      // Never fail a Mirai call over to a NIMT number.
+      if (!attempt.ok && primaryFrom !== MIRAI_PLIVO_CALLER_ID && PLIVO_AI_BACKUP_PHONE_NUMBER && PLIVO_AI_BACKUP_PHONE_NUMBER !== primaryFrom) {
+        console.warn(`Primary Plivo number ${primaryFrom.slice(-4)} failed (status=${attempt.status}); failing over to backup`);
         attempt = await tryPlace(PLIVO_AI_BACKUP_PHONE_NUMBER).catch((e) => ({ ok: false, status: 0, body: { error: String(e) } }));
         usedFromNumber = PLIVO_AI_BACKUP_PHONE_NUMBER;
       }

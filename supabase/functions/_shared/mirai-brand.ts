@@ -66,3 +66,19 @@ export async function resolveStoredPortal(db: any, owner: {
   }
   return resolveApplyPortal(lead, applications, { isMiraiInstitution });
 }
+
+// Plivo caller IDs: Mirai calls go out from its own number; NIMT college and
+// NIMT school (Beacon) share the NIMT number.
+export const MIRAI_PLIVO_CALLER_ID = "918065538511";
+export const NIMT_PLIVO_CALLER_ID = "918065535001";
+
+/** Caller ID for an outbound Plivo call. Unresolvable or lead-less → NIMT. */
+export async function plivoCallerIdForLead(db: any, leadId: string | null | undefined): Promise<string> {
+  if (!leadId) return NIMT_PLIVO_CALLER_ID;
+  try {
+    return (await resolveStoredPortal(db, { leadId })) === "mirai" ? MIRAI_PLIVO_CALLER_ID : NIMT_PLIVO_CALLER_ID;
+  } catch (err) {
+    console.warn("plivoCallerIdForLead: brand unresolved, using NIMT number", err);
+    return NIMT_PLIVO_CALLER_ID;
+  }
+}

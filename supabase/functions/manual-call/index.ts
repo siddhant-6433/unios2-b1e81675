@@ -16,6 +16,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { maskPhoneForLog, normalizePlivoVoiceNumber } from "../_shared/phone.ts";
+import { plivoCallerIdForLead } from "../_shared/mirai-brand.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -36,23 +37,13 @@ Deno.serve(async (req) => {
   try {
     const PLIVO_AUTH_ID = Deno.env.get("PLIVO_AUTH_ID");
     const PLIVO_AUTH_TOKEN = Deno.env.get("PLIVO_AUTH_TOKEN");
-    // Cloud-dialer caller-id — dedicated number for counsellor-initiated calls,
-    // separate from the AI agent's number so leads can tell who's calling.
-    // ponytail: single number, no rotation — add pool back if spam-flagging returns
-    const PLIVO_DIALER_PHONE_NUMBER = Deno.env.get("PLIVO_DIALER_PHONE_NUMBER");
     const VOICE_AGENT_URL = Deno.env.get("VOICE_AGENT_URL");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !PLIVO_DIALER_PHONE_NUMBER || !VOICE_AGENT_URL) {
+    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !VOICE_AGENT_URL) {
       return json({ error: "Calling not configured. Contact admin." }, 503);
-    }
-
-    const dialerFrom = normalizePlivoVoiceNumber(PLIVO_DIALER_PHONE_NUMBER);
-    if (!dialerFrom) {
-      console.error("Invalid PLIVO_DIALER_PHONE_NUMBER:", maskPhoneForLog(PLIVO_DIALER_PHONE_NUMBER));
-      return json({ error: "Calling number is not configured correctly. Contact admin." }, 503);
     }
 
     // Auth: accept anon key (manual button) or service role (internal).
@@ -182,6 +173,9 @@ Deno.serve(async (req) => {
     if (!counsellorPhone) {
       return json({ error: "Your profile phone number is not valid for calling. Use a 10-digit Indian mobile number with country code +91." }, 400);
     }
+
+    // Caller-id by brand: Mirai leads see the Mirai number, everyone else NIMT's.
+    const dialerFrom = await plivoCallerIdForLead(db, leadId);
 
     const callId = crypto.randomUUID();
     const displayName = leadName || "Lead";
