@@ -1,3 +1,4 @@
+-- keep-migration-version: already recorded on production schema_migrations
 -- Super-admin bulk custom fee: one or many batches (course+session), optionally
 -- narrowed to / excluding specific students, with per-installment due dates.
 -- p_dry_run returns the matched students without writing.

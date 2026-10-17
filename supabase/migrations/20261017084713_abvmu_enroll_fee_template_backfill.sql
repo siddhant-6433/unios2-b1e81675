@@ -1,3 +1,4 @@
+-- keep-migration-version: already recorded on production schema_migrations
 -- ABVMU Enrollment & Roll No Fee was seeded as 130 orphan ledger rows (no
 -- fee_structure_item). Make it a real template item on the BPT / BMRIT / B.Sc
 -- Nursing structures, link the existing rows, and give the students it missed.
