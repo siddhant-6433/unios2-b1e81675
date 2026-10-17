@@ -5,13 +5,14 @@ import { AcademicError, AcademicField, AcademicPanel, academicInput, readableAca
 import { PolicyEditor, type AcademicAction } from "@/components/beacon/PolicyEditor";
 import { DateSheetManager } from "@/components/beacon/DateSheetManager";
 import { SchoolCalendarManager } from "@/components/beacon/SchoolCalendarManager";
+import { UnlockRequestsPanel } from "@/components/beacon/UnlockRequestsPanel";
 import { ExamWorkspace } from "@/components/beacon/ExamWorkspace";
 import { BEACON_ACADEMICS_ENABLED } from "@/lib/beaconAcademicsFeature";
 import { CBSE_CATEGORY_LABELS, CBSE_EXAM_STATUS_LABELS, type CbseConfiguration, type CbseExam, type CbseReleaseOverview, type CbseReleaseRow, type CbseWorkspace } from "@/lib/cbseExams";
 import { fetchCbseConfiguration, fetchCbseReleaseOverview, fetchCbseWorkspace, performCbseAction, setCbseClassTeacher } from "@/lib/cbseExamsClient";
 
 export default function BeaconAcademics() {
-  const {isImpersonating,user}=useAuth();
+  const {isImpersonating,user,realRole}=useAuth();
   const [configuration,setConfiguration]=useState<CbseConfiguration|null>(null);
   const [workspace,setWorkspace]=useState<CbseWorkspace|null>(null);
   const [examId,setExamId]=useState("");
@@ -55,7 +56,7 @@ export default function BeaconAcademics() {
   const disabled=busy||isImpersonating;
   return <main className="p-4 sm:p-6 max-w-7xl mx-auto space-y-5"><header className="flex flex-wrap justify-between gap-3"><div><h1 className="text-2xl font-semibold">Assessments - CBSE</h1><p className="text-sm text-muted-foreground mt-1">School performance reports · Avantika and Arthala · Classes I–XII</p></div><Button variant="outline" disabled={busy||loading} onClick={()=>setRefresh(n=>n+1)}>Refresh</Button></header>
     {isImpersonating&&<div role="status" className="border rounded-lg p-3 text-sm">Academic changes are disabled while impersonating. Return to your own account to edit.</div>}
-    <AcademicError message={error}/>{busy&&<p role="status" className="text-sm">Saving changes…</p>}
+    <AcademicError message={error}/>{realRole==="super_admin"&&!isImpersonating&&<UnlockRequestsPanel disabled={busy} onReviewed={()=>setRefresh(n=>n+1)}/>}{busy&&<p role="status" className="text-sm">Saving changes…</p>}
     {configuration&&<><nav aria-label="Academic reporting" className="flex flex-wrap gap-2"><Button variant={tab==="exams"?"default":"outline"} disabled={busy} onClick={()=>setTab("exams")}>Exams and reports</Button>{configuration.capabilities.manage&&<><Button variant={tab==="create"?"default":"outline"} disabled={busy} onClick={()=>setTab("create")}>Date sheets</Button><Button variant={tab==="calendar"?"default":"outline"} disabled={busy} onClick={()=>setTab("calendar")}>School calendar / almanac</Button><Button variant={tab==="policies"?"default":"outline"} disabled={busy} onClick={()=>setTab("policies")}>Assessment policies</Button></>}{configuration.capabilities.review&&<Button variant={tab==="release"?"default":"outline"} disabled={busy} onClick={()=>setTab("release")}>Release reports</Button>}</nav>
     {tab==="policies"&&<PolicyEditor configuration={configuration} disabled={disabled} canApprove={configuration.capabilities.review} onAction={act}/>}
     {tab==="create"&&<DateSheetManager configuration={configuration} disabled={disabled} onCreated={id=>{setExamId(id);setTab("exams");setRefresh(n=>n+1)}}/>}

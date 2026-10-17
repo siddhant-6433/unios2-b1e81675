@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import { requestCbsePaperUnlock } from "@/lib/cbseExamsClient";
 import { CBSE_CATEGORY_LABELS, CBSE_EXAM_STATUS_LABELS, evaluatePolicyPaper, type CbseConfiguration, type CbseExamStatus, type CbseMark, type CbsePaper, type CbseWorkspace } from "@/lib/cbseExams";
 
 const WORKFLOW_STAGES: { key: CbseExamStatus; label: string; who: string; hint: string }[] = [
@@ -30,6 +31,9 @@ function PaperEntry({ paper, workspace, disabled, onAction }: { paper: CbsePaper
   const [page, setPage] = useState(0);
   const [reason, setReason] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [requested, setRequested] = useState(false);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const requestUnlock = async () => { const r = await requestCbsePaperUnlock(paper.id, reason); setRequestError(r.error); if (!r.error) setRequested(true); };
   const readOnly = disabled || !paper.can_enter || !!paper.locked_at || workspace.exam.status !== "open";
   const setRow = (id: string, row: Partial<CbseMark>) => { setDirty(true); setRows(current => ({ ...current, [id]: { ...current[id], ...row } })); };
   const save = async () => { if (await onAction("save_marks", { paper_id: paper.id, rows: students.map(s => ({student_id:s.id,...rows[s.id]})) })) setDirty(false); };
@@ -40,6 +44,7 @@ function PaperEntry({ paper, workspace, disabled, onAction }: { paper: CbsePaper
     <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left border-b"><th className="p-2">Student</th><th className="p-2">Status</th>{paper.components.map(c => <th key={c.key} className="p-2">{c.label} / {c.max}</th>)}<th className="p-2">Subject remarks</th></tr></thead><tbody>{students.slice(page * pageSize, (page + 1) * pageSize).map(s => <tr key={s.id} className="border-b"><td className="p-2 min-w-40">{s.name}<span className="block text-xs text-muted-foreground">{s.admission_no}</span></td><td className="p-2"><select aria-label={`${s.name} status`} className={`${academicInput} min-w-28`} disabled={readOnly} value={rows[s.id].status} onChange={e => setRow(s.id, { status: e.target.value as CbseMark["status"], scores: {} })}><option value="present">Present</option><option value="absent">Absent</option><option value="exempt">Exempt</option></select></td>{paper.components.map(c => <td key={c.key} className="p-2"><input aria-label={`${s.name} ${c.label}`} type="number" min="0" max={c.max} step="0.01" disabled={readOnly || rows[s.id].status !== "present"} className={`${academicInput} min-w-24`} value={rows[s.id].scores[c.key] ?? ""} onChange={e => setRow(s.id, { scores: { ...rows[s.id].scores, [c.key]: markFromInput(e.target.value) } })} /></td>)}<td className="p-2"><input aria-label={`${s.name} subject remarks`} className={`${academicInput} min-w-40`} disabled={readOnly} value={rows[s.id].remarks || ""} onChange={e => setRow(s.id, {remarks:e.target.value})} /></td></tr>)}</tbody></table></div>
     <Pager page={page} count={students.length} setPage={setPage} />
     {paper.can_enter && !paper.locked_at && workspace.exam.status === "open" && <div className="flex flex-wrap items-center gap-3"><Button disabled={disabled || !dirty} onClick={save}>Save marks</Button><Button variant="outline" disabled={disabled || dirty || complete !== students.length || !students.length} onClick={() => onAction("lock_paper", {paper_id:paper.id})}>Lock paper</Button>{dirty && <span className="text-xs text-muted-foreground">Save changes before locking.</span>}</div>}
+    {paper.locked_at && !workspace.capabilities.class_teacher && !workspace.capabilities.review && paper.can_enter && ["open","class_review","principal_review"].includes(workspace.exam.status) && <div className="flex gap-3 flex-wrap items-end"><AcademicField label={`${paper.name} unlock reason`}><input className={academicInput} disabled={disabled || requested} value={reason} onChange={e => setReason(e.target.value)} /></AcademicField><Button variant="outline" disabled={disabled || requested || !reason.trim()} onClick={requestUnlock}>Request unlock</Button>{requested && <span className="text-xs text-muted-foreground">Request sent to a super admin.</span>}{requestError && <span role="alert" className="text-xs text-destructive">{requestError}</span>}</div>}
     {paper.locked_at && (workspace.capabilities.class_teacher || workspace.capabilities.review) && ["open","class_review","principal_review"].includes(workspace.exam.status) && <div className="flex gap-3 flex-wrap items-end"><AcademicField label={`${paper.name} return reason`}><input className={academicInput} disabled={disabled} value={reason} onChange={e => setReason(e.target.value)} /></AcademicField><Button variant="outline" disabled={disabled || !reason.trim()} onClick={() => onAction("return_paper", {paper_id:paper.id,remarks:reason})}>Return paper for correction</Button></div>}
   </AcademicPanel>;
 }
