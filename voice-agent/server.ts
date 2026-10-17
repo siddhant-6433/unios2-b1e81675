@@ -84,6 +84,39 @@ function firstPlivoCallerIdFromEnv(): string {
   return "";
 }
 
+// Cloud-dialer caller IDs (must match _shared/mirai-brand.ts). A lead calling
+// one of these back reaches the counsellor who dialled them — never Navya.
+const DIALER_CALLBACK_NUMBERS = new Set(["918065538511", "918065535001"]);
+
+function isDialerCallbackNumber(to: string | null | undefined): boolean {
+  return DIALER_CALLBACK_NUMBERS.has(normalizePlivoCallerId(to) || "");
+}
+
+// WhatsApp the sticky agent about a missed dialer callback. Reuses the
+// approved UTILITY template lead_queue_item (tap-to-call + "Open Lead"
+// button). No lead_id on purpose: it must not land in the lead's WA thread.
+function sendMissedCallbackWhatsApp(callId: string, leadId: string, meta: any, leadName?: string, courseName?: string) {
+  if (!SUPABASE_URL || !meta?.counsellorPhone || !leadId) return;
+  const callerPhone = normalizePlivoCallerId(meta.callerPhone);
+  fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+    body: JSON.stringify({
+      template_key: "counsellor_call_lead",
+      phone: meta.counsellorPhone,
+      params: [
+        String(meta.counsellorName || "Counsellor").split(" ")[0],
+        `${leadName || "A lead"} (missed callback, call back now)`,
+        callerPhone ? `+${callerPhone}` : "number in CRM",
+        courseName || "Not specified",
+      ],
+      button_urls: [leadId],
+    }),
+  }).then(async (r) => {
+    if (!r.ok) console.error(`[${callId}] Missed-callback WhatsApp failed (${r.status}): ${(await r.text()).slice(0, 200)}`);
+  }).catch((e) => console.error(`[${callId}] Missed-callback WhatsApp error:`, e.message));
+}
+
 // In-memory store for active call contexts (call_id → context)
 interface ActiveCall extends CallContext {
   leadId?: string;
@@ -2521,6 +2554,44 @@ Deno.serve({ port: PORT }, async (req) => {
       console.error(`[${callId}] Lead lookup failed:`, e);
     }
 
+    // Sticky agent: a callback on a cloud-dialer number rings the counsellor who
+    // last dialled this lead (or the cold-list contact it was promoted from),
+    // ahead of the assigned counsellor.
+    const isDialerCallback = isDialerCallbackNumber(params.To as string);
+    if (isDialerCallback && leadId && SUPABASE_URL) {
+      try {
+        const cRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/marketing_contacts?promoted_lead_id=eq.${leadId}&select=id&limit=20`,
+          { headers: dbHeaders },
+        );
+        const contactIds = ((await cRes.json().catch(() => [])) as any[]).map((c) => c.id).filter(Boolean);
+        const owner = contactIds.length
+          ? `or=(lead_id.eq.${leadId},contact_id.in.(${contactIds.join(",")}))`
+          : `lead_id=eq.${leadId}`;
+        const lastRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/ai_call_records?${owner}&call_type=eq.manual&caller_user_id=not.is.null&order=created_at.desc&limit=1&select=caller_user_id`,
+          { headers: dbHeaders },
+        );
+        const stickyUserId = (await lastRes.json().catch(() => []))?.[0]?.caller_user_id;
+        if (stickyUserId) {
+          const profRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/profiles?user_id=eq.${stickyUserId}&select=phone,display_name,user_id`,
+            { headers: dbHeaders },
+          );
+          const prof = (await profRes.json().catch(() => []))?.[0];
+          const stickyPhone = normalizePlivoCallerId(prof?.phone);
+          if (stickyPhone) {
+            counsellorPhone = stickyPhone;
+            counsellorName = prof.display_name || "Counsellor";
+            counsellorUserId = prof.user_id || "";
+            console.log(`[${callId}] Dialer callback → sticky agent ${counsellorName}`);
+          }
+        }
+      } catch (e) {
+        console.error(`[${callId}] Sticky agent lookup failed:`, (e as Error).message);
+      }
+    }
+
     // Intake round-robin: a lead with no assigned counsellor (fresh inbound, or
     // an old lead nobody owns) is distributed across the admin-maintained intake
     // pool (preferring counsellors who are currently online). The DB function
@@ -2575,7 +2646,7 @@ Deno.serve({ port: PORT }, async (req) => {
       // redirect-call REST API. Without this set, the transfer tool
       // silently fails with "No active Plivo call UUID".
       plivoCallUuid: plivoCallUUID || undefined,
-      toolCallsMade: [{ name: "inbound_meta", args: { counsellorUserId, counsellorName, counsellorPhone, plivoCallUUID }, result: null }],
+      toolCallsMade: [{ name: "inbound_meta", args: { counsellorUserId, counsellorName, counsellorPhone, plivoCallUUID, callerPhone }, result: null }],
     });
 
     // Routing pre-compute: do this BEFORE the ai_call_records insert so the
@@ -2601,7 +2672,7 @@ Deno.serve({ port: PORT }, async (req) => {
     // a counsellor phone exists we always forward first (during AND outside
     // business hours) and the AI is the no-answer fallback. `offHours` is still
     // tracked below purely to flag the call for next-day follow-up.
-    const aiHandlesFromStart = !counsellorPhone || !leadId;
+    const aiHandlesFromStart = !isDialerCallback && (!counsellorPhone || !leadId);
 
     // Create ai_call_records entry for real-time tracking (LiveCallBar, timeline)
     if (leadId && SUPABASE_URL) {
@@ -2644,7 +2715,7 @@ Deno.serve({ port: PORT }, async (req) => {
     const inBusinessHours = (istHour >= 9 && istHour < 20) && istDay !== "Sun";
 
     if (counsellorPhone) {
-      const aiUrl = `https://${host}/answer/inbound-ai/${callId}`;
+      const aiUrl = `https://${host}/answer/inbound-ai/${callId}${isDialerCallback ? "?noai=1" : ""}`;
       const holdMsg = inBusinessHours
         ? "Connecting you to your counsellor. Please hold."
         : "Connecting your call. Please hold.";
@@ -2661,6 +2732,25 @@ Deno.serve({ port: PORT }, async (req) => {
 </Response>`;
 
       return new Response(xml, { headers: { "Content-Type": "application/xml" } });
+    }
+
+    if (isDialerCallback) {
+      console.log(`[${callId}] Dialer callback from ${callerPhone} with no counsellor reachable → hangup (no AI)`);
+      if (leadId && SUPABASE_URL) {
+        await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+          method: "PATCH", headers: { ...dbHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            status: "completed", disposition: "missed", completed_at: new Date().toISOString(),
+            summary: `Inbound callback from ${leadName || callerPhone} — no counsellor reachable`,
+            needs_followup: true,
+          }),
+        }).catch(() => {});
+      }
+      activeCallContexts.delete(callId);
+      return new Response(
+        `<?xml version="1.0" encoding="UTF-8"?><Response><Speak voice="Polly.Kajal" language="en-IN">Our counsellors are unavailable right now. We will call you back shortly.</Speak><Hangup/></Response>`,
+        { headers: { "Content-Type": "application/xml" } },
+      );
     }
 
     // No counsellor reachable (no intake pool configured, or nobody on file) →
@@ -2690,6 +2780,8 @@ Deno.serve({ port: PORT }, async (req) => {
     const callCtx = activeCallContexts.get(callId);
     const leadId = callCtx?.leadId || "";
     const counsellorName = callCtx?.toolCallsMade?.[0]?.args?.counsellorName || "Counsellor";
+    const noAi = url.searchParams.get("noai") === "1";
+    const missedRoute = noAi ? "Call back urgently." : "Routed to AI.";
 
     console.log(`[${callId}] Inbound-AI fallback: dialStatus=${dialStatus}, lead=${callCtx?.leadName || "unknown"}`);
 
@@ -2791,6 +2883,7 @@ Deno.serve({ port: PORT }, async (req) => {
           }).catch(() => {});
         }
 
+        if (noAi) sendMissedCallbackWhatsApp(callId, leadId, callCtx?.toolCallsMade?.[0]?.args, callCtx?.leadName, callCtx?.courseName);
         console.log(`[${callId}] Inbound caller hung up before counsellor answered (DialStatus=cancel)`);
       }
 
@@ -2807,7 +2900,7 @@ Deno.serve({ port: PORT }, async (req) => {
       // Hand the active ai_call_records row over to "AI handling" so the
       // LiveCallBar header updates from the counsellor's name to "AI Agent"
       // on the next 5-second poll. caller_user_id=null is the bar's signal.
-      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+      if (!noAi) await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
         method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
         body: JSON.stringify({
           caller_user_id: null,
@@ -2820,7 +2913,7 @@ Deno.serve({ port: PORT }, async (req) => {
         method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
         body: JSON.stringify({
           lead_id: leadId, direction: "inbound", disposition: "missed",
-          notes: `Inbound call from ${callCtx?.leadName || "student"} — ${counsellorName} did not answer. Routed to AI.`,
+          notes: `Inbound call from ${callCtx?.leadName || "student"} — ${counsellorName} did not answer. ${missedRoute}`,
           user_id: callCtx?.toolCallsMade?.[0]?.args?.counsellorUserId || null,
           called_at: new Date().toISOString(),
         }),
@@ -2831,7 +2924,7 @@ Deno.serve({ port: PORT }, async (req) => {
         method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
         body: JSON.stringify({
           lead_id: leadId, type: "call",
-          description: `Missed inbound call — ${callCtx?.leadName || "student"} called back, ${counsellorName} did not answer. Routed to AI.`,
+          description: `Missed inbound call — ${callCtx?.leadName || "student"} called back, ${counsellorName} did not answer. ${missedRoute}`,
         }),
       }).catch(() => {});
 
@@ -2852,8 +2945,9 @@ Deno.serve({ port: PORT }, async (req) => {
       await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
         method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
         body: JSON.stringify({
-          summary: `Inbound call — ${counsellorName} missed, routed to AI`,
+          summary: `Inbound call — ${counsellorName} missed${noAi ? "" : ", routed to AI"}`,
           disposition: "missed",
+          ...(noAi ? { status: "completed", completed_at: new Date().toISOString() } : {}),
         }),
       }).catch(() => {});
 
@@ -2872,7 +2966,17 @@ Deno.serve({ port: PORT }, async (req) => {
         }).catch(() => {});
       }
 
+      if (noAi) sendMissedCallbackWhatsApp(callId, leadId, callCtx?.toolCallsMade?.[0]?.args, callCtx?.leadName, callCtx?.courseName);
       console.log(`[${callId}] Missed inbound call logged + followup created for ${counsellorName}`);
+    }
+
+    // Dialer callbacks stay with the sticky agent — no AI takeover.
+    if (noAi) {
+      activeCallContexts.delete(callId);
+      return new Response(
+        `<?xml version="1.0" encoding="UTF-8"?><Response><Speak voice="Polly.Kajal" language="en-IN">Your counsellor is busy right now and will call you back shortly.</Speak><Hangup/></Response>`,
+        { headers: { "Content-Type": "application/xml" } },
+      );
     }
 
     // Fall through to AI voice agent

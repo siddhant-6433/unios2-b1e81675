@@ -11,17 +11,10 @@ describe("manual-call lifecycle ordering", () => {
     );
   });
 
-  it("dials from the dedicated cloud-dialer number, separate from the AI number", () => {
-    // #471 removed the rotation pool on purpose: counsellor calls now come from
-    // one dedicated caller ID so leads can tell a human from Navya.
-    expect(manualCallSource).toContain('Deno.env.get("PLIVO_DIALER_PHONE_NUMBER")');
-    expect(manualCallSource).not.toContain('Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS")');
-    expect(manualCallSource).not.toContain("chooseNextDialerNumber");
+  it("dials from the brand caller ID: Mirai number for Mirai leads, NIMT otherwise", () => {
+    expect(manualCallSource).toContain("const dialerFrom = await plivoCallerIdForLead(db, leadId)");
+    expect(manualCallSource).not.toContain("PLIVO_DIALER_PHONE_NUMBER");
     expect(manualCallSource).not.toContain("PLIVO_AI_PHONE_NUMBER");
-    expect(manualCallSource).toContain("normalizePlivoVoiceNumber(PLIVO_DIALER_PHONE_NUMBER)");
-    // A malformed secret must fail loudly rather than dial from a bad caller ID.
-    expect(manualCallSource).toContain("if (!dialerFrom)");
-    expect(manualCallSource).toContain("maskPhoneForLog(PLIVO_DIALER_PHONE_NUMBER)");
     expect(manualCallSource).toContain("from_number: dialerFrom");
   });
 
